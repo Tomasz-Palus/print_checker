@@ -1,0 +1,18 @@
+# Na GitHub idzie TYLKO to, co jest wymienione niżej. Reszta folderu print_checker to pliki
+# klientów (przykladowe projekty), kopie zapasowe, spakowane wersje i pliki robocze.
+/*
+!/.gitignore
+!/.github/
+!/README.md
+!/app/
+!/documentation/
+!/packaging/
+
+# w programie — bez plików roboczych i tego, co program sam pobiera
+/app/work/
+/app/data/guidelines/
+/app/data/fonts/
+/app/data/products_cache.json
+/app/data/*.tmp
+__pycache__/
+*.pyc

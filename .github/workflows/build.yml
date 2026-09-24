@@ -1,0 +1,127 @@
+# Budowanie instalatorów adCheckera — Windows (.exe) i macOS (.dmg, Apple Silicon).
+# Rusza przy każdym wypchnięciu zmian w programie. Numer wersji bierze z app/version.py
+# i wrzuca instalatory do wydania „v<wersja>" (to samo wydanie się nadpisuje, nowy numer = nowe
+# wydanie). Ghostscript: Windows — oficjalny instalator Artifexu, Mac — zbudowany ze źródeł.
+name: Instalatory
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", "packaging/**", ".github/workflows/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GS_VERSION: "10.07.1"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Wersja
+        id: ver
+        shell: bash
+        run: echo "v=$(python -c "import re;print(re.search(r'VERSION\s*=\s*\"([^\"]+)\"',open('app/version.py',encoding='utf-8').read()).group(1))")" >> "$GITHUB_OUTPUT"
+      - name: Ghostscript
+        shell: pwsh
+        run: |
+          $tag = "gs" + ($env:GS_VERSION -replace '\.', '')
+          $exe = "$tag" + "w64.exe"
+          Invoke-WebRequest -Uri "https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/$tag/$exe" -OutFile gs_setup.exe
+          Start-Process -Wait -FilePath .\gs_setup.exe -ArgumentList "/S /D=C:\gsinst"
+          Get-ChildItem C:\gsinst
+          New-Item -ItemType Directory -Force build\gs\bin | Out-Null
+          Copy-Item C:\gsinst\bin\gswin64c.exe, C:\gsinst\bin\gsdll64.dll build\gs\bin\
+          foreach ($d in "lib", "Resource", "iccprofiles") {
+            if (Test-Path "C:\gsinst\$d") { Copy-Item -Recurse "C:\gsinst\$d" "build\gs\$d" }
+          }
+          if (-not (Test-Path build\gs\iccprofiles\default_cmyk.icc)) { throw "Brak iccprofiles w Ghostscripcie" }
+          & build\gs\bin\gswin64c.exe --version
+      - name: Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r packaging/requirements-build.txt
+      - name: PyInstaller
+        run: pyinstaller --noconfirm --distpath dist --workpath build/pyi packaging/adchecker.spec
+      - name: Test uruchomienia
+        shell: pwsh
+        run: |
+          $env:ADCHECK_SELFTEST = "1"
+          $p = Start-Process -PassThru -Wait -FilePath dist\adChecker\adChecker.exe
+          Get-Content "$env:LOCALAPPDATA\adChecker\adchecker.log" -Tail 40
+          if ($p.ExitCode -ne 0) { throw "Test uruchomienia nie przeszedł (kod $($p.ExitCode))" }
+      - name: Instalator (Inno Setup)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+            if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.v }}" packaging\windows\adchecker.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup: błąd" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/adChecker-*-Windows-instalator.exe
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Wersja
+        id: ver
+        run: echo "v=$(python3 -c "import re;print(re.search(r'VERSION\s*=\s*\"([^\"]+)\"',open('app/version.py',encoding='utf-8').read()).group(1))")" >> "$GITHUB_OUTPUT"
+      - name: Ghostscript (ze źródeł)
+        run: bash packaging/build_gs_mac.sh "$GS_VERSION"
+      - name: Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r packaging/requirements-build.txt
+      - name: PyInstaller
+        run: pyinstaller --noconfirm --distpath dist --workpath build/pyi packaging/adchecker.spec
+      - name: Podpis (ad-hoc) i test uruchomienia
+        run: |
+          codesign --force --deep --sign - dist/adChecker.app
+          codesign --verify --deep --strict dist/adChecker.app
+          ADCHECK_SELFTEST=1 dist/adChecker.app/Contents/MacOS/adChecker
+          tail -40 "$HOME/Library/Application Support/adChecker/adchecker.log"
+      - name: DMG
+        run: |
+          mkdir -p build/dmg
+          cp -R dist/adChecker.app build/dmg/
+          ln -s /Applications build/dmg/Applications
+          hdiutil create -volname "adChecker" -srcfolder build/dmg -ov -format UDZO \
+            "dist/adChecker-${{ steps.ver.outputs.v }}-macOS.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/adChecker-*-macOS.dmg
+
+  wydanie:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - name: Wydanie na GitHubie
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          V=$(python3 -c "import re;print(re.search(r'VERSION\s*=\s*\"([^\"]+)\"',open('app/version.py',encoding='utf-8').read()).group(1))")
+          gh release view "v$V" >/dev/null 2>&1 || \
+            gh release create "v$V" --title "adChecker $V" --target "$GITHUB_SHA" --notes-file packaging/INSTRUKCJA.md
+          gh release upload "v$V" out/windows/*.exe out/macos/*.dmg --clobber

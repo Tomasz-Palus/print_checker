@@ -1,0 +1,10 @@
+# Wersje sprawdzone przy budowaniu 0.3 (przypięte — instalator ma być powtarzalny)
+flask==3.1.3
+pymupdf==1.28.2
+pillow==12.3.0
+pikepdf==10.13.0.post1
+numpy==2.4.6
+fonttools==4.66.0
+waitress==3.0.2
+pywebview==6.2.1
+pyinstaller==6.22.3

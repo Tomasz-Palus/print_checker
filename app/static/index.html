@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>adChecker — plik do druku</title>
+<link rel="icon" type="image/svg+xml" href="/static/adchecker.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="top">
+  <img class="logo" src="/static/adchecker.svg" alt="">
+  <div class="brand">adChecker <small>przygotowanie pliku do druku</small></div>
+  <span class="ver" id="ver" title="Wersja programu"></span>
+  <a class="upd" id="upd" href="#" target="_blank" rel="noopener" hidden></a>
+  <span class="spacer"></span>
+  <button class="btn small" id="btnTour" type="button" title="Samouczek — pokażę krok po kroku, jak przygotować plik">🎓 Samouczek</button>
+  <button class="btn small" id="btnSettings" type="button">⚙ Ustawienia</button>
+</header>
+
+<main class="layout">
+  <!-- ======================= ROZDZIAŁY ======================= -->
+  <aside class="side" id="side">
+
+    <section class="ch" id="ch-file" data-st="open">
+      <header class="ch-h"><span class="ch-ico">1</span><h2>Plik</h2><span class="ch-sum"></span>
+        <button class="ch-q" type="button">?</button></header>
+      <div class="ch-help" hidden></div>
+      <div class="ch-b">
+        <div class="drop" id="drop" tabindex="0">
+          <input type="file" id="fileInput" hidden
+                 accept=".pdf,.ai,.eps,.svg,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.gif,.webp,.cdr,.indd,.idml,.psd">
+          <div id="dropIdle">Przeciągnij plik tutaj albo <b>kliknij, żeby wybrać</b></div>
+          <div id="dropFile" hidden><b id="fileName"></b><div class="muted" id="fileMeta"></div></div>
+          <div class="bar" id="upBar" hidden><i></i></div>
+        </div>
+        <div class="box bad" id="fileErr" hidden></div>
+      </div>
+    </section>
+
+    <section class="ch" id="ch-page" data-st="locked" hidden>
+      <header class="ch-h"><span class="ch-ico">4</span><h2>Strona</h2><span class="ch-sum"></span>
+        <button class="ch-q" type="button">?</button></header>
+      <div class="ch-help" hidden></div>
+      <div class="ch-b">
+        <p class="say">Plik ma kilka stron, a do druku idzie jedna. Którą bierzemy?</p>
+        <select class="sel" id="pgSelect"></select>
+        <div class="row"><button class="btn primary" id="pgConfirm" type="button">Wybierz tę stronę</button></div>
+      </div>
+    </section>
+
+    <section class="ch" id="ch-product" data-st="locked">
+      <header class="ch-h"><span class="ch-ico">2</span><h2>Produkt</h2><span class="ch-sum"></span>
+        <button class="ch-q" type="button">?</button></header>
+      <div class="ch-help" hidden></div>
+      <div class="ch-b">
+        <div class="pcard" id="pCand" hidden>
+          <div class="muted" id="pCandLabel"></div>
+          <div class="name" id="pCandName"></div>
+          <div class="code" id="pCandCode"></div>
+          <div class="box warn" id="pCandWarn" hidden></div>
+          <div class="row"><button class="btn primary" id="pConfirm" type="button">✓ Potwierdź</button>
+            <button class="btn" id="pOther" type="button">Inny produkt</button></div>
+        </div>
+        <div id="pPick" hidden>
+          <div class="sugs" id="pSugs"></div>
+          <div class="combo">
+            <input type="text" id="pSearch" placeholder="Szukaj produktu po nazwie lub kodzie…" autocomplete="off" spellcheck="false">
+            <div class="combo-list" id="pList" hidden></div>
+          </div>
+          <div class="note" id="pStatus"></div>
+          <div class="row"><button class="link" id="pCustom" type="button">Produktu nie ma na liście — podam wymiar</button></div>
+        </div>
+        <div id="pCustomBox" hidden>
+          <div class="muted">Wydruk spoza listy — podaj wymiar wydruku w mm:</div>
+          <div class="dims">
+            <label>szerokość [mm]<input type="number" id="cW" min="1" step="0.1" placeholder="np. 1000"></label>
+            <label>wysokość [mm]<input type="number" id="cH" min="1" step="0.1" placeholder="np. 2000"></label>
+          </div>
+          <div class="row"><button class="btn primary" id="cConfirm" type="button" disabled>✓ Potwierdź</button>
+            <button class="link" id="cBack" type="button">wróć do listy</button></div>
+        </div>
+        <div id="pDone" hidden>
+          <div class="name" id="pDoneName"></div><div class="code" id="pDoneCode"></div>
+          <div class="row"><button class="btn small" id="pChange" type="button">Zmień produkt</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="ch" id="ch-role" data-st="locked" hidden>
+      <header class="ch-h"><span class="ch-ico">3</span><h2>Rola pliku</h2><span class="ch-sum"></span>
+        <button class="ch-q" type="button">?</button></header>
+      <div class="ch-help" hidden></div>
+      <div class="ch-b">
+        <p class="say" id="rSay"></p>
+        <div id="rBody" hidden>
+          <select class="sel" id="rSelect"></select>
+          <div id="rDims" hidden>
+            <div class="note">Ten produkt ma zmienny wymiar — podaj wymiar wydruku w mm:</div>
+            <div class="dims">
+              <label>szerokość [mm]<input type="number" id="rW" min="1" step="0.1"></label>
+              <label>wysokość [mm]<input type="number" id="rH" min="1" step="0.1"></label>
+            </div>
+          </div>
+          <div class="note" id="rInfo"></div>
+          <div class="row"><button class="btn primary" id="rConfirm" type="button">Zatwierdź</button>
+            <a class="btn" id="rPdf" href="#" target="_blank" rel="noopener">PDF wytycznych ↗</a></div>
+        </div>
+        <div class="box warn" id="rStale" hidden></div>
+        <div class="box bad" id="rErr" hidden></div>
+      </div>
+    </section>
+
+    <section class="ch" id="ch-frames" data-st="locked" hidden>
+      <header class="ch-h"><span class="ch-ico">5</span><h2>Szablon z wytycznych</h2><span class="ch-sum"></span>
+        <button class="ch-q" type="button">?</button></header>
+      <div class="ch-help" hidden></div>
+      <div class="ch-b">
+        <p class="say" id="frSay"></p>
+        <div class="note" id="frNote"></div>
+        <div class="box bad" id="frErr" hidden></div>
+        <div class="row">
+          <button class="btn primary" id="frDo" type="button">Usuń szablon</button>
+          <button class="btn" id="frUndo" type="button">Cofnij</button>
+          <button class="btn" id="frSkip" type="button"></button>
+        </div>
+        <div class="mini" id="frMini" hidden><span>przed</span><input type="range" min="0" max="100" value="100" data-step="frames"><span>po</span></div>
+      </div>
+    </section>
+
+    <section class="ch" id="ch-trim" data-st="locked" hidden>
+      <header class="ch-h"><span class="ch-ico">6</span><h2>Spady</h2><span class="ch-sum"></span>
+        <button class="ch-q" type="button">?</button></header>
+      <div class="ch-help" hidden></div>
+      <div class="ch-b">
+        <p class="say" id="trSay"></p>
+        <div class="note" id="trNote"></div>
+        <div class="box bad" id="trErr" hidden></div>
+        <div class="row">
+          <button class="btn primary" id="trDo" type="button">Przytnij spady</button>
+          <button class="btn" id="trUndo" type="button">Cofnij</button>
+          <button class="btn" id="trSkip" type="button">zostaw spady</button>
+        </div>
+        <div class="mini" id="trMini" hidden><span>przed</span><input type="range" min="0" max="100" value="100" data-step="trim"><span>po</span></div>
+      </div>
+    </section>
+
+    <section class="ch" id="ch-size" data-st="locked" hidden>
+      <header class="ch-h"><span class="ch-ico">7</span><h2>Wymiar wydruku</h2><span class="ch-sum"></span>
+        <button class="ch-q" type="button">?</button></header>
+      <div class="ch-help" hidden></div>
+      <div class="ch-b">
+        <p class="say" id="szSay"></p>
+        <div class="box warn" id="szWarn" hidden></div>
+        <div id="szCtl" hidden>
+          <div class="sl-lbl">Wielkość projektu <span><input type="number" id="szPct" min="5" max="1000" step="0.1"> %</span></div>
+          <input type="range" class="sl" id="szRange" min="10" max="500" value="100" step="1">
+          <div class="row tight">
+            <button class="btn small" id="szOrig" type="button">rozmiar pliku</button>
+            <button class="btn small" id="szFill" type="button">wypełnij format</button>
+            <button class="btn small" id="szWhole" type="button">cały projekt</button>
+          </div>
+          <details class="more" id="szRatioBox"><summary>Skala projektu: <b id="szRatioVal">1:1</b></summary>
+            <input type="range" class="sl" id="szRatio" min="0" max="28" value="14" step="1">
+            <div class="row tight">
+              <button class="btn small" id="szD10" type="button">1:10</button>
+              <button class="btn small" id="szR11" type="button">1:1</button>
+              <button class="btn small" id="szX10" type="button">10:1</button>
+            </div>
+            <div class="box warn" id="szHint" hidden></div>
+          </details>
+          <div class="sl-lbl" id="szXLbl">Przesuń w poziomie <span id="szXVal"></span></div>
+          <input type="range" class="sl" id="szX" min="-1000" max="1000" value="0" step="1" title="Dwuklik = na środek">
+          <div class="sl-lbl" id="szYLbl">Przesuń w pionie <span id="szYVal"></span></div>
+          <input type="range" class="sl" id="szY" min="-1000" max="1000" value="0" step="1" title="Dwuklik = na środek">
+          <div id="szFillBox">
+            <div class="sl-lbl">Puste marginesy</div>
+            <div class="seg" id="szFillSeg">
+              <button type="button" data-v="none">puste</button>
+              <button type="button" data-v="stretch" title="Ostatni rząd pikseli projektu powielony na margines">tło z krawędzi</button>
+              <button type="button" data-v="mirror" title="Projekt odbity lustrzanie na margines">odbicie lustrzane</button>
+            </div>
+          </div>
+          <div class="note" id="szDesc"></div>
+        </div>
+        <div class="box bad" id="szErr" hidden></div>
+        <div class="row">
+          <button class="btn primary" id="szDo" type="button">Dopasuj wymiar</button>
+          <button class="btn" id="szUndo" type="button">Cofnij</button>
+          <button class="link" id="szEditBtn" type="button">popraw kadr</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="ch" id="ch-color" data-st="locked" hidden>
+      <header class="ch-h"><span class="ch-ico">…</span><h2>Kolory</h2><span class="ch-sum"></span>
+        <button class="ch-q" type="button">?</button></header>
+      <div class="ch-help" hidden></div>
+      <div class="ch-b">
+        <p class="say" id="coSay"></p>
+        <div class="note" id="coNote"></div>
+        <div class="box bad" id="coErr" hidden></div>
+        <!-- wybór w rzędach (Tomasz 24.09): w każdym rzędzie jeden przycisk, wybrany = niebieski -->
+        <div class="seg rowsel" id="coAct">
+          <button type="button" data-v="convert">Zamień na CMYK</button>
+          <button type="button" data-v="keep">Zostaw jak jest</button>
+        </div>
+        <div class="seg rowsel" id="coProf" hidden>
+          <button type="button" data-v="fogra39" title="Coated FOGRA39 (ISO 12647-2:2004) — standard druku">FOGRA39 (zalecany)</button>
+          <button type="button" data-v="keep">Z pliku</button>
+          <button type="button" data-v="none" title="Kolory CMYK bez deklaracji profilu">Bez profilu</button>
+        </div>
+        <div class="seg rowsel" id="coSeen" hidden><button type="button">Pokaż, jak wydrukuje</button></div>
+        <div class="mini sim" id="coSimBar" data-sim="proof" hidden><span>ekran</span><input type="range" min="0" max="100" value="100"><span>druk</span></div>
+        <div class="mini" id="coMini" hidden><span>ekran</span><input type="range" min="0" max="100" value="100" data-step="cmyk"><span>druk</span></div>
+      </div>
+    </section>
+
+    <section class="ch" id="ch-op" data-st="locked" hidden>
+      <header class="ch-h"><span class="ch-ico">…</span><h2>Overprint</h2><span class="ch-sum"></span>
+        <button class="ch-q" type="button">?</button></header>
+      <div class="ch-help" hidden></div>
+      <div class="ch-b">
+        <p class="say" id="opSay"></p>
+        <div class="note" id="opNote"></div>
+        <div class="box bad" id="opErr" hidden></div>
+        <div class="seg rowsel" id="opAct">
+          <button type="button" data-v="fix">Wyłącz overprint</button>
+          <button type="button" data-v="keep">Zostaw jak jest</button>
+        </div>
+        <div class="seg rowsel" id="opSeen" hidden><button type="button">Pokaż, jak wydrukuje</button></div>
+        <div class="mini sim" id="opSimBar" data-sim="op" hidden><span>bez overprintu</span><input type="range" min="0" max="100" value="100"><span>z overprintem</span></div>
+        <div class="mini" id="opMini" hidden><span>z overprintem</span><input type="range" min="0" max="100" value="100" data-step="overprint"><span>bez</span></div>
+      </div>
+    </section>
+
+    <section class="ch" id="ch-fonts" data-st="locked" hidden>
+      <header class="ch-h"><span class="ch-ico">…</span><h2>Fonty</h2><span class="ch-sum"></span>
+        <button class="ch-q" type="button">?</button></header>
+      <div class="ch-help" hidden></div>
+      <div class="ch-b">
+        <p class="say" id="foSay"></p>
+        <div class="note" id="foNote"></div>
+        <div class="box bad" id="foErr" hidden></div>
+        <div class="seg rowsel" id="foAct">
+          <button type="button" data-v="fix">Zamień na krzywe</button>
+          <button type="button" data-v="keep">Zostaw jak jest</button>
+        </div>
+        <div class="seg rowsel" id="foSeen" hidden><button type="button">Pokaż, jak wydrukuje</button></div>
+        <div class="mini sim" id="foSimBar" data-sim="print" hidden><span>ekran</span><input type="range" min="0" max="100" value="100"><span>druk</span></div>
+        <div class="mini" id="foMini" hidden><span>przed</span><input type="range" min="0" max="100" value="100" data-step="outline"><span>po</span></div>
+      </div>
+    </section>
+
+    <section class="ch" id="ch-flat" data-st="locked" hidden>
+      <header class="ch-h"><span class="ch-ico">…</span><h2>Spłaszczenie</h2><span class="ch-sum"></span>
+        <button class="ch-q" type="button">?</button></header>
+      <div class="ch-help" hidden></div>
+      <div class="ch-b">
+        <p class="say" id="flSay"></p>
+        <div class="note" id="flNote"></div>
+        <div class="box bad" id="flErr" hidden></div>
+        <div class="seg rowsel" id="flAct">
+          <button type="button" data-v="fix">Spłaszcz projekt</button>
+          <button type="button" data-v="keep">Zostaw jak jest</button>
+        </div>
+        <div class="seg rowsel" id="flSeen" hidden><button type="button">Pokaż, jak wydrukuje</button></div>
+        <div class="mini sim" id="flSimBar" data-sim="print" hidden><span>ekran</span><input type="range" min="0" max="100" value="100"><span>druk</span></div>
+        <div class="mini" id="flMini" hidden><span>przed</span><input type="range" min="0" max="100" value="100" data-step="flatten"><span>po</span></div>
+      </div>
+    </section>
+
+    <section class="ch" id="ch-qual" data-st="locked" hidden>
+      <header class="ch-h"><span class="ch-ico">…</span><h2>Jakość wydruku</h2><span class="ch-sum"></span>
+        <button class="ch-q" type="button">?</button></header>
+      <div class="ch-help" hidden></div>
+      <div class="ch-b">
+        <p class="say" id="quSay"></p>
+        <div class="bar" id="quBar" hidden><i></i></div>
+        <div class="note" id="quNote"></div>
+        <div class="box bad" id="quErr" hidden></div>
+        <div class="seg rowsel" id="quShow" hidden><button type="button">Pokaż na podglądzie</button></div>
+        <details class="more" id="quListBox" hidden><summary>Lista miejsc</summary><ol class="qlist" id="quList"></ol></details>
+      </div>
+    </section>
+
+    <section class="ch" id="ch-acc" data-st="locked" hidden>
+      <header class="ch-h"><span class="ch-ico">…</span><h2>Akceptacja pliku</h2><span class="ch-sum"></span>
+        <button class="ch-q" type="button">?</button></header>
+      <div class="ch-help" hidden></div>
+      <div class="ch-b">
+        <p class="say" id="acSay"></p>
+        <div class="seg rowsel" id="acShow"><button type="button">Pokaż wydruk przed i po</button></div>
+        <div class="mini sim" id="acSimBar" data-sim="final" hidden><span>przed poprawkami</span><input type="range" min="0" max="100" value="100"><span>po</span></div>
+        <div class="seg rowsel" id="acOk" hidden><button type="button">Akceptuję plik</button></div>
+      </div>
+    </section>
+
+    <section class="ch" id="ch-dl" data-st="locked" hidden>
+      <header class="ch-h"><span class="ch-ico">…</span><h2>Pobierz plik do druku</h2><span class="ch-sum"></span>
+        <button class="ch-q" type="button">?</button></header>
+      <div class="ch-help" hidden></div>
+      <div class="ch-b">
+        <p class="say" id="dlSay"></p>
+        <ul class="dlsum" id="dlSum"></ul>
+        <a class="btn primary big" id="dlDo" href="#" download>Pobierz plik do druku</a>
+        <div class="note" id="dlName"></div>
+      </div>
+    </section>
+
+  </aside>
+
+  <!-- ======================= PODGLĄD ======================= -->
+  <section class="view" id="view">
+    <div class="vbar">
+      <div class="vleft">
+        <div class="vname" id="vName">—</div>
+      </div>
+      <!-- przycisk szablonu zostaje na środku; pasek pełnej jakości tuż obok, po prawej (Tomasz 24.09) -->
+      <div class="vmid">
+        <button class="btn tpl" id="vTpl" type="button" disabled title="Linie szablonu z wytycznych na podglądzie">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1"/><rect x="4" y="5" width="8" height="6" rx=".5" stroke-dasharray="2 1.6"/></svg>
+          Podgląd szablonu</button>
+      </div>
+      <div class="vright">
+        <!-- pasek pełnej jakości: zaraz na prawo od „Podgląd szablonu", w swojej części paska (nie zasłania lupek) -->
+        <div class="vprog" id="vProg" hidden><span class="bar"><i></i></span><span class="t"></span></div>
+        <button class="btn small icon tool" id="vIn" type="button" title="Lupka + (Z): kliknij w podgląd, żeby powiększyć, albo zaznacz obszar. Spacja = przesuwanie">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="6.6" cy="6.6" r="4.7"/><path d="M10 10 14.4 14.4M4.4 6.6h4.4M6.6 4.4v4.4"/></svg></button>
+        <button class="btn small icon tool" id="vOut" type="button" title="Lupka − (Alt+Z): kliknij w podgląd, żeby pomniejszyć, albo zaznacz obszar">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="6.6" cy="6.6" r="4.7"/><path d="M10 10 14.4 14.4M4.4 6.6h4.4"/></svg></button>
+        <span class="vsep"></span>
+        <button class="btn small" id="v100" type="button" title="Rzeczywista wielkość wydruku: 1 mm wydruku = 1 mm na ekranie (największe możliwe przybliżenie)">Rzeczywista wielkość</button>
+        <button class="btn small" id="vFit" type="button" title="Cały projekt w oknie">Dopasuj</button>
+        <button class="btn small on" id="vNavi" type="button" title="Nawigator — miniatura z ramką widoku">Nawigator</button>
+      </div>
+    </div>
+    <div class="vempty" id="vEmpty">Wgraj plik — podgląd pokaże się tutaj.</div>
+    <div class="vmain" id="vMain" hidden>
+      <div class="thumbs" id="thumbs" hidden></div>
+      <div class="vstage" id="vStage"><div class="vcanvas" id="vCanvas"></div></div>
+    </div>
+    <div class="vwait" id="vWait" hidden><div><span class="spin"></span><span class="t">wczytuję podgląd…</span></div></div>
+    <div class="navi" id="navi" hidden><div class="nv" id="naviIn"></div></div>
+    <!-- nawigacja po miejscach z rozdziału „Jakość wydruku": ‹ › i Esc -->
+    <div class="qnav" id="qnav" hidden>
+      <button class="btn small" id="qnPrev" type="button" title="Poprzednie (←)">‹</button>
+      <span class="qn-t" id="qnTxt"></span>
+      <button class="btn small" id="qnNext" type="button" title="Następne (→)">›</button>
+      <button class="btn small" id="qnClose" type="button" title="Zamknij (Esc)">×</button>
+    </div>
+  </section>
+</main>
+
+<!-- pytanie „na pewno?" -->
+<div class="modal" id="ask" hidden>
+  <div class="modal-box ask">
+    <h2 id="askT"></h2><div id="askX"></div>
+    <div class="row"><button class="btn" id="askNo" type="button"></button><button class="btn primary" id="askYes" type="button"></button></div>
+  </div>
+</div>
+
+<!-- ustawienia -->
+<div class="modal" id="settings" hidden>
+  <div class="modal-box">
+    <div class="row" style="margin:0;justify-content:space-between"><h2 style="margin:0">Ustawienia</h2>
+      <button class="btn small" id="setClose" type="button">Zamknij</button></div>
+
+    <div id="setCal">
+    <h3>Kalibracja monitora (przycisk „Rzeczywista wielkość")</h3>
+    <p class="note">Żeby „Rzeczywista wielkość" pokazywała wydruk w prawdziwym rozmiarze, program musi znać gęstość pikseli ekranu.</p>
+    <div id="calNow" class="note"></div>
+    <div class="row"><label class="muted">Przekątna monitora [cale] <input type="number" id="calDiag" step="0.1" min="5" max="100" style="width:80px"></label>
+      <button class="btn small" id="calDiagOk" type="button">Zastosuj</button><span class="note" id="calRes"></span></div>
+    <p class="note">…albo przyłóż linijkę do paska niżej (od czerwonej do czerwonej kreski) i wpisz, ile ma mm:</p>
+    <div class="ruler-wrap"><svg id="calRuler"></svg></div>
+    <div class="row"><label class="muted">Zmierzona długość [mm] <input type="number" id="calMm" step="0.5" min="20" max="400" style="width:80px"></label>
+      <button class="btn small" id="calMmOk" type="button">Zastosuj</button>
+      <button class="btn small" id="calReset" type="button">Przywróć domyślne</button></div>
+    </div>
+    <div id="calCheckWrap">
+    <p class="note">Sprawdzenie — ten pasek powinien mieć na linijce dokładnie 100 mm:</p>
+    <div class="ruler-wrap"><svg id="calCheck"></svg></div>
+    </div>
+
+    <div id="setAcc">
+    <h3>Dokładność oceny jakości</h3>
+    <label><input type="radio" name="dmBlock" value="128"> standardowa — wykrywa elementy od ok. 25 mm</label><br>
+    <label><input type="radio" name="dmBlock" value="64"> wysoka — od ok. 15 mm, liczy się ok. 2× dłużej</label>
+    </div>
+
+    <div id="setIdx">
+    <h3>Sugestie produktu po wymiarze pliku</h3>
+    <p class="note">Program zna wymiary szablonów tylko tych produktów, których wytyczne pobrał. Indeks wszystkich
+      (~1000 plików) buduje się raz, w tle, zwykle 2–4 minuty.</p>
+    <div id="idxSt" class="note"></div>
+    <div class="bar"><i id="idxBar"></i></div>
+    <div class="row"><button class="btn small" id="idxBuild" type="button">Zbuduj / wznów indeks</button>
+      <button class="btn small" id="idxRetry" type="button">Ponów nieudane</button>
+      <button class="btn small" id="idxStop" type="button" hidden>Zatrzymaj</button></div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

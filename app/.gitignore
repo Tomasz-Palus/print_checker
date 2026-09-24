@@ -1,0 +1,6 @@
+work/
+__pycache__/
+data/products_cache.json
+data/guidelines/
+data/fonts/
+# data/template_index.json JEST w repozytorium — instalator dostaje indeks wymiarów z dnia wydania
