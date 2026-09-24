@@ -10,7 +10,7 @@ Odrzucone:
   klientów trafiałyby do obcej firmy;
 - **serwer w sieci firmowej** — Tomasz wybrał instalator.
 
-Repozytorium jest publiczne na GitHubie (`Tomasz-Palus/adChecker`). Instalatory buduje GitHub.
+Repozytorium jest publiczne na GitHubie (`Tomasz-Palus/print_checker`). Instalatory buduje GitHub.
 
 ## Co trafia na GitHub
 
@@ -119,3 +119,20 @@ Paczka PyInstallera: 198 MB.
 - Program zamknął się sam po zamknięciu karty.
 
 Windowsa i Maca sprawdzają self-test na GitHubie i Tomasz.
+
+## Pierwsze budowanie na GitHubie (24.09, wieczór)
+
+- **Mac:** przeszło za pierwszym razem w 3 minuty, razem z budowaniem Ghostscripta ze źródeł
+  i self-testem. DMG waży 72 MB.
+- **Windows:** zawisł na instalowaniu Ghostscripta (30 min bez postępu).
+  - Przyczyna: cichy instalator Ghostscripta w środku uruchamia instalator Visual C++
+    (`vcredist_x64.exe`), a ten na maszynie GitHuba czekał bez końca.
+  - Poprawka: instalatora nie uruchamiamy — **rozpakowujemy go 7-Zipem**.
+  - `gsdll64.dll` potrzebuje bibliotek Visual C++ (`msvcp140.dll`, `vcruntime140.dll`,
+    `vcruntime140_1.dll`). Kopiujemy je z systemu maszyny budującej obok `gswin64c.exe`, żeby
+    program działał także na komputerze bez pakietu Visual C++. Microsoft pozwala tak
+    rozprowadzać te pliki.
+  - Każde zadanie ma limit czasu (60 min, kroki gs i testu 10–15 min). Nic już nie zawiśnie na
+    6 godzin.
+- **Nazwa repozytorium:** zostało `print_checker`. `version.REPO` wskazuje
+  `Tomasz-Palus/print_checker`. Po ewentualnej zmianie nazwy GitHub przekierowuje stary adres.
