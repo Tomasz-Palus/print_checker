@@ -186,3 +186,22 @@ Samej instalacji na Windowsie nie da się sprawdzić bez dwóch wydań. Test u T
 - **Przypięcie (S.pin) poprawione:** zdejmuje je rozdział dalej, który pojawia się **pierwszy
   raz** (praca poszła naprzód). Jakość i akceptacja, które tylko wracają po poprawce we
   wcześniejszym rozdziale, przypięcia nie zdejmują — suwak spłaszczenia zostaje.
+
+## 0.4.5 — Spłaszczenie czeka na wybór, rozdziały nie znikają po poprawce (Tomasz 25.09)
+
+- **Spłaszczenie zawsze czeka na wybór**, także bez przezroczystości. Wcześniej rozdział sam się
+  zamykał („niepotrzebne”) i od razu pojawiała się Jakość.
+  - Bez przezroczystości program pisze, że spłaszczać nie trzeba, i podpowiada „Zostaw jak jest”.
+    Ten wybór od razu zamyka rozdział — bez „Pokaż, jak wydrukuje”, bo nic się nie zmienia.
+  - „Spłaszcz projekt” działa jak dotąd (potem „Pokaż, jak wydrukuje”).
+  - Pomoc („?”) poprawiona.
+- **Po „Spłaszcz projekt” rozdziały od Overprintu znikały i wracały po kolei.**
+  - Przyczyna: po każdej poprawce program analizuje nową wersję pliku. Do końca analizy
+    Overprint, Fonty i Spłaszczenie „nie wiedziały”, czy są czyste, więc się chowały. Wcześniej
+    trwało to ułamek sekundy, a od 0.4.4 wracały co 1,5 s.
+  - Poprawka: `state.facts(name)` — rozdział ocenia plik w wersji sprzed swojego kroku (tak jak go
+    widział, gdy był bieżący). Analizy wszystkich wersji zostają w `S.factsCache`
+    (`main.loadAnalysis`). Późniejsza poprawka nie zmienia werdyktu wcześniejszego rozdziału.
+- Sprawdzone na `spady.pdf`: po Overprincie pojawiają się Fonty i Spłaszczenie, a Jakość dopiero
+  po wyborze. Po „Spłaszcz projekt” nic nie znika. Zmiana na „Zostaw jak jest” od razu pokazuje
+  Jakość. Samouczek przechodzi.

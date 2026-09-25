@@ -77,8 +77,8 @@ export const HELP = {
     Rozdzielczość zależy od wielkości wydruku: 300 ppi do 80 cm, 200 ppi do 1,5 m, 150 ppi do 3 m,
     wyżej 120 ppi. Cena: tekst i linie przestają być wektorowe, plik robi się większy.<br><br>
     Wybierasz w rzędach: <b>Spłaszcz projekt</b> albo <b>Zostaw jak jest</b>, a potem
-    <b>Pokaż, jak wydrukuje</b>. Gdy projekt nie ma przezroczystości, rozdział jest od razu
-    zamknięty — spłaszczyć można i tak.`,
+    <b>Pokaż, jak wydrukuje</b>. Gdy projekt nie ma przezroczystości, wystarczy <b>Zostaw jak
+    jest</b> — rozdział od razu się zamyka (spłaszczyć można i tak).`,
   qual: `Program otwiera każdy obraz w projekcie i czyta jego piksele. Sprawdza dwie rzeczy:<br><br>
     1) czy obraz ma <b>dość pikseli</b> na swój rozmiar na wydruku — wytyczne wymagają
     <b>120 ppi</b> (w pliku 1:10 to 1200 ppi w pliku). Za mało = rozmycie i schodki, trzeba

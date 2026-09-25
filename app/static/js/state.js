@@ -7,6 +7,7 @@ export const S = {
   job: null,               // {job_id, file, suggestions, versions:[{id, step, text, pages_mm, map}]}
   analysis: null,          // analiza OSTATNIEJ wersji pliku
   analysisFor: null,       // id wersji, której dotyczy `analysis`
+  factsCache: {},          // analizy wszystkich wersji tego pliku: "<wersja>:<strona>" → analiza
   // produkt
   candidate: null,         // produkt na karcie do potwierdzenia
   product: null,           // produkt POTWIERDZONY
@@ -51,7 +52,7 @@ export function resetJobState() {
   Object.assign(S, {
     settle: {}, choice: {}, stepErr: {}, busy: null,
     fscan: { key: "", data: null, err: "" }, qual: { key: "", data: null, err: "" },
-    accShown: null, pin: null, sz: null, sizeEdit: false, cmp: null, sim: null, simMix: 100, cmykProfile: "fogra39",
+    accShown: null, pin: null, factsCache: {}, sz: null, sizeEdit: false, cmp: null, sim: null, simMix: 100, cmykProfile: "fogra39",
   });
 }
 
@@ -165,11 +166,22 @@ export function sizeSettled() {
 // ---------------------------------------------------------------- etap 3: kolory → overprint → fonty → spłaszczenie
 // Fakty o OSTATNIEJ wersji pliku, o wybranej stronie (analiza). null = jeszcze się liczą.
 export const factsKey = () => (S.job && head() ? `${head().id}:${S.page}` : "");
-export function facts() {
-  if (!S.job || S.analysisFor !== factsKey() || !S.analysis) return null;
+// `facts(name)` — analiza pliku TAK, JAK WIDZIAŁ GO ROZDZIAŁ `name`: wersji sprzed jego kroku
+// (i późniejszych). Późniejsza poprawka nie zmienia werdyktu wcześniejszego rozdziału. Wcześniej
+// po spłaszczeniu Overprint, Fonty i Spłaszczenie czekały na analizę nowej wersji — znikały
+// i wracały po kolei (Tomasz 25.09). Analizy wersji trzyma S.factsCache (main.loadAnalysis).
+export function facts(name) {
+  if (!S.job) return null;
+  if (name) {
+    const oi = STEP_ORDER.indexOf(name);
+    let v = S.job.versions[0];
+    for (const x of S.job.versions.slice(1)) if (STEP_ORDER.indexOf(x.step) < oi) v = x;
+    const c = S.factsCache[`${v.id}:${S.page}`];
+    if (c) return c;
+  }
+  if (S.analysisFor !== factsKey() || !S.analysis) return null;
   return S.analysis;
 }
-const factsFailed = () => S.analysisFor === factsKey() && !!S.analysis?.error;
 
 // Co w kolorach trzeba przeliczyć (tak samo liczy serwer: steps.color_need). Gray obok
 // CMYK nie jest problemem — drukuje się czarną farbą.
@@ -205,14 +217,16 @@ export function transparencyKinds(a = facts()) {
 // wtedy `settle` = "done" (poprawione) albo "skip" (zostawione). Bez problemu w pliku — od razu.
 function settledByChoice(name, prev, clean) {
   if (!prev) return false;
-  if (S.settle[name] || factsFailed()) return true;
-  const a = facts();
+  const a = facts(name);
+  if (S.settle[name] || a?.error) return true;
   return !hasStep(name) && !S.choice[name]?.act && !!a && clean(a);
 }
 export const colorSettled = () => settledByChoice("cmyk", sizeSettled(), (a) => !colorNeed(a).any);
 export const overprintSettled = () => settledByChoice("overprint", colorSettled(), (a) => !isPdf() || !(a.overprint_uses > 0));
 export const fontsSettled = () => settledByChoice("outline", overprintSettled(), (a) => !isPdf() || !(a.fonts || []).length);
-export const flattenSettled = () => settledByChoice("flatten", fontsSettled(), (a) => !isPdf() || !transparencyKinds(a).length);
+// Spłaszczenie: ZAWSZE czeka na wybór, także bez przezroczystości (Tomasz 25.09: „kolejny rozdział
+// nie powinien się pojawić, dopóki nie wybiorę")
+export const flattenSettled = () => settledByChoice("flatten", fontsSettled(), (a) => !isPdf());
 
 // Ile pikseli wyjdzie po spłaszczeniu (to samo liczy serwer: steps.flatten_plan).
 export function flattenPlan() {

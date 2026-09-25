@@ -31,6 +31,11 @@ async function setAct(name, act) {
   if (!(await reopen(name))) return;
   S.choice[name] = { act, profile: null, seen: false };
   S.sim = null; S.cmp = null;
+  // spłaszczenie bez przezroczystości: „Zostaw jak jest" od razu zamyka rozdział (nic się nie zmienia)
+  if (name === "flatten" && act === "keep") {
+    const a = facts("flatten");
+    if (a && !a.error && !transparencyKinds(a).length) { S.choice.flatten.seen = true; S.settle.flatten = "skip"; }
+  }
   changed();
   if (act === "fix") await applyStep(name, name === "flatten" ? { k: scaleK() } : {});
 }
@@ -79,7 +84,7 @@ export function renderColor() {
   const el = $("ch-color");
   el.hidden = !sizeSettled();
   if (el.hidden) return;
-  const on = hasStep("cmyk"), a = facts(), c = choice("cmyk");
+  const on = hasStep("cmyk"), a = facts("cmyk"), c = choice("cmyk");
   // fakty o kolorach bierzemy z wersji PRZED zamianą (po niej wszystko jest już w CMYK-u)
   const need = on ? { any: true } : (colorNeed(a) || { any: false });
   let st = "todo", sum = "", say = "", note = "";
@@ -146,7 +151,7 @@ export function renderOverprint() {
   const el = $("ch-op");
   el.hidden = !colorSettled() || !isPdf();
   if (el.hidden) return;
-  const on = hasStep("overprint"), a = facts(), c = choice("overprint");
+  const on = hasStep("overprint"), a = facts("overprint"), c = choice("overprint");
   const uses = on || (a && !a.error ? a.overprint_uses || 0 : 0);
   let st = "todo", sum = "", say = "", note = "";
   if (!on && !c.act && !a) {
@@ -197,7 +202,7 @@ export function renderFonts() {
   const el = $("ch-fonts");
   el.hidden = !overprintSettled() || !isPdf();
   if (el.hidden) return;
-  const on = hasStep("outline"), a = facts(), c = choice("outline");
+  const on = hasStep("outline"), a = facts("outline"), c = choice("outline");
   const fonts = a && !a.error ? a.fonts || [] : [];
   const any = on || fonts.length > 0;
   let st = "todo", sum = "", say = "", note = "";
@@ -248,7 +253,7 @@ export function renderFlatten() {
   const el = $("ch-flat");
   el.hidden = !fontsSettled() || !isPdf();
   if (el.hidden) return;
-  const on = hasStep("flatten"), a = facts(), c = choice("flatten");
+  const on = hasStep("flatten"), a = facts("flatten"), c = choice("flatten");
   const kinds = a && !a.error ? transparencyKinds(a) : [];
   const pl = flattenPlan();
   const plan = pl ? `Strona stanie się jednym obrazem CMYK ${nf(pl.px[0])} × ${nf(pl.px[1])} px `
@@ -267,6 +272,9 @@ export function renderFlatten() {
                  + (c.seen ? "" : "Zobacz, jak to wydrukuje.")
                : S.busy ? "Spłaszczam projekt…" : "Nie udało się spłaszczyć projektu.";
       note = on ? esc(stepText("flatten")) : plan;
+    } else if (c.act === "keep" && !kinds.length) {
+      sum = "zostawione";
+      say = `<span class="say ok">Projekt zostaje jak jest</span> — bez przezroczystości nie ma czego spłaszczać.`;
     } else if (c.act === "keep") {
       sum = S.settle.flatten ? "zostawione" : "";
       say = c.seen ? "Projekt zostaje warstwowy — przezroczystość spłaszczy drukarnia."
@@ -276,9 +284,9 @@ export function renderFlatten() {
         + `sama i czasem zostawia ślady — jasne obwódki, szwy. Bezpieczniej spłaszczyć tutaj.`;
       note = plan;
     } else {
-      // bez przezroczystości rozdział jest od razu zamknięty; spłaszczyć można i tak
-      st = "done"; sum = "niepotrzebne";
-      say = `<span class="say ok">Projekt nie ma przezroczystości</span> — spłaszczać nie trzeba.`;
+      // bez przezroczystości też czekamy na wybór (Tomasz 25.09) — zwykle „Zostaw jak jest"
+      say = `<span class="say ok">Projekt nie ma przezroczystości</span> — spłaszczać nie trzeba. `
+        + `Kliknij <b>Zostaw jak jest</b>. Spłaszcz, tylko jeśli drukarnia tego wymaga.`;
       note = plan;
     }
   }
@@ -286,6 +294,8 @@ export function renderFlatten() {
   $("flSay").innerHTML = say;
   $("flNote").innerHTML = note; $("flNote").hidden = !note;
   rowsFor("fl", "flatten", !!a && !a.error || on || !!c.act, on);
+  // „Zostaw jak jest" bez przezroczystości: nic się nie zmienia, więc bez „Pokaż, jak wydrukuje"
+  if (c.act === "keep" && !kinds.length) $("flSeen").hidden = $("flSimBar").hidden = true;
 }
 
 // Wspólne rzędy fontów i spłaszczenia: [poprawka | zostaw] → [Pokaż, jak wydrukuje] → suwak.

@@ -108,7 +108,7 @@ async function loadAnalysis() {
   try {
     const a = await api(`/api/jobs/${S.job.job_id}/analysis?v=${v.id}&page=${S.page}`);
     if (seq !== anSeq) return;
-    S.analysis = a; S.analysisFor = key;
+    S.analysis = a; S.analysisFor = key; S.factsCache[key] = a;
   } catch (e) {
     if (seq !== anSeq) return;
     S.analysis = { error: e.message }; S.analysisFor = key;
