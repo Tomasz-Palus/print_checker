@@ -290,7 +290,8 @@ TILE = 1024
 MAX_MPX = 400          # sufit poziomu 0 (większe strony schodzą z ppi — i mówimy o tym)
 OVERVIEW_PX = 2048     # dłuższy bok podglądu całej strony
 JPEG_Q = 90
-RENDER_VER = 6         # zmiana sposobu renderu = nowe klucze = stare kafelki się nie mieszają
+SS = 2                 # nadpróbkowanie podglądu i spłaszczenia (_supersample)
+RENDER_VER = 7         # zmiana sposobu renderu = nowe klucze = stare kafelki się nie mieszają
 
 
 def plan(page_w_pt: float, page_h_pt: float, print_w_mm: float, print_h_mm: float,
@@ -327,7 +328,9 @@ def _gs_args(src, page, dpi, op, proof, w_px, h_px, ss=1) -> list:
     cmyk = proof or op
     # na urządzeniu CMYK zawsze ścieżka bezpieczna przy overprincie — obie strony suwaka
     # symulacji (bez i z overprintem) mają wtedy identyczne wygładzanie krawędzi
-    aa = [] if ss > 1 else gs.aa_args(cmyk, w_px, h_px, 4 if cmyk else 3)
+    # wygładzanie Ghostscripta liczone dla renderu ss× (gdy przy overprincie niebezpieczne — samo
+    # nadpróbkowanie)
+    aa = gs.aa_args(cmyk, w_px * ss, h_px * ss, 4 if cmyk else 3)
     return ["-dSAFER", *(gs.proof_args() if cmyk else gs.color_args()),
             "-sDEVICE=" + ("pamcmyk32" if cmyk else "ppmraw"), f"-r{dpi:.4f}",
             f"-dFirstPage={page + 1}", f"-dLastPage={page + 1}", *gs.SPEED, *aa,
@@ -336,9 +339,16 @@ def _gs_args(src, page, dpi, op, proof, w_px, h_px, ss=1) -> list:
 
 
 def _supersample(op: bool, w: int, h: int) -> int:
-    """Przy overprincie za dużym na render w całości (gs.aa_args zwraca []) liczymy 2× gęściej
-    bez wygładzania Ghostscripta i uśredniamy sami — inaczej tekst był postrzępiony."""
-    return 2 if op and not gs.aa_args(op, w, h, 4) else 1
+    """Podgląd liczymy ZAWSZE 2× gęściej i uśredniamy sami (Pillow reduce).
+
+    - Przy overprincie za dużym na render w całości (gs.aa_args zwraca []) to jedyne wygładzanie
+      — inaczej tekst był postrzępiony.
+    - Tekst wypełniony gradientem (gradient przycięty kształtem liter) Ghostscript rysuje BEZ
+      wygładzania nawet z AlphaBits — przycięcia nie wygładza (Tomasz 25.09, `spady.pdf`: litery
+      „PACHNĄCE” poszarpane). Nadpróbkowanie wygładza każdą krawędź.
+    Koszt zmierzony na spady.pdf: render 2× z wygładzaniem 1,9 s wobec 2,5 s dla 1× — czas idzie
+    głównie na wczytanie obrazów, nie na piksele."""
+    return SS
 
 
 def _head(p) -> tuple:
@@ -420,13 +430,16 @@ def _save(path: str, im: Image.Image) -> None:
 def _render_whole(src, page, pl, W, H, op, proof, stop) -> Image.Image | None:
     """Cała strona naraz w rozdzielczości W×H (podgląd całości)."""
     dpi = pl["px_per_pt"] * 72 * W / pl["w"]
-    p = gs.stream(_gs_args(src, page, dpi, op, proof, W, H))
+    ss = _supersample(op or proof, W, H)
+    p = gs.stream(_gs_args(src, page, dpi * ss, op, proof, W, H, ss))
     try:
         w, h, ch = _head(p)
         a = np.frombuffer(_read(p, w * h * ch, "podgląd całości"), np.uint8).reshape(h, w, ch)
         if stop():
             return None
-        im = _img(a)
+        mode = "CMYK" if ch == 4 else "RGB"
+        im = Image.frombuffer(mode, (w, h), np.ascontiguousarray(a).tobytes(), "raw", mode, 0, 1).reduce(ss)
+        im = proof_rgb(im) if ch == 4 else im
     finally:
         _close(p)
     return im if im.size == (W, H) else im.resize((W, H), Image.LANCZOS)

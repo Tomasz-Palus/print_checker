@@ -68,6 +68,10 @@ a { color: var(--accent); }
 /* rozdział, który właśnie się pojawił, wjeżdża (po kolei — opóźnienie ustawia revealChapters) */
 .ch.enter { animation: chIn .45s cubic-bezier(.2,.7,.3,1) both; overflow: hidden; }
 @keyframes chIn { from { opacity: 0; transform: translateY(-10px); max-height: 0; } 60% { opacity: 1; } to { opacity: 1; transform: none; max-height: 900px; } }
+/* Starszy rozdział z decyzją (nie jeden z dwóch ostatnich): tylko „Cofnij" (Tomasz 25.09) */
+.ch .ch-back { display: none; }
+.ch.past .ch-back { display: flex; }
+.ch.past .rowsel, .ch.past .mini, .ch.past .now-only { display: none !important; }
 @media (prefers-reduced-motion: reduce) { .ch-b, .ch.enter { transition: none !important; animation: none !important; } }
 .ch[data-st="done"] .ch-h { cursor: pointer; }
 .ch[data-st="done"] .ch-ico { background: var(--ok-bg); color: var(--ok); }

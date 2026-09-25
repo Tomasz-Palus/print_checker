@@ -1,6 +1,6 @@
 // Start programu: wgrywanie pliku, jedna pętla rysowania rozdziałów i podglądu, ustawienia.
 import { $, esc, fmtMm, fmtBytes, api, ask, chapter, initChapters, plural, shown, revealChapters } from "./util.js";
-import { S, changed, onChange, resetJobState, head, template, scaleK, printMm, isPdf, colorSettled, factsKey, STEP_NAME } from "./state.js";
+import { S, changed, onChange, resetJobState, head, template, scaleK, printMm, isPdf, colorSettled, factsKey, STEP_NAME, STEP_CH, stepIndex } from "./state.js";
 import { HELP } from "./help.js";
 import * as viewer from "./viewer.js";
 import * as product from "./product.js";
@@ -49,7 +49,7 @@ async function upload(file) {
   const seq = ++upSeq;
   if (S.job) fetch(`/api/jobs/${S.job.job_id}`, { method: "DELETE" }).catch(() => {});
   S.job = null; S.analysis = null; S.analysisFor = null; S.page = 0;
-  resetJobState();
+  resetJobState(); resetReveal();
   viewer.setScene(null);
   $("fileErr").hidden = true;
   $("dropIdle").hidden = true; $("dropFile").hidden = false;
@@ -245,6 +245,51 @@ viewer.onViewChange(() => {
     + ". Bardziej przybliżyć się nie da — dalej widać już tylko piksele ekranu.";
 });
 
+// ------------------------------------------------------------------ rozdziały po kolei
+// Rozdziały, które pojawiają się naraz (zaliczone same: fonty „brak tekstu", spłaszczenie
+// „niepotrzebne"…), wychodzą PO KOLEI, co REVEAL_GAP ms — widać, że program sprawdza je jeden po
+// drugim (Tomasz 25.09: „najpierw fonty, po kilku sekundach spłaszczenie, potem jakość").
+// Czekający rozdział jest schowany (hidden); jego logika (np. liczenie jakości) już działa.
+const REVEAL_GAP = 1500;
+let logical = new Set(), revealQ = [], lastReveal = -1e9, revealTimer = null;
+function gateChapters() {
+  const vis = [...document.querySelectorAll(".ch")].filter((ch) => !ch.hidden);
+  const now = performance.now();
+  const animate = document.body.classList.contains("ready")
+    && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const ids = new Set(vis.map((ch) => ch.id));
+  revealQ = revealQ.filter((id) => ids.has(id));
+  for (const ch of vis) {
+    if (logical.has(ch.id)) continue;                       // już był widoczny
+    if (animate && (revealQ.length || now - lastReveal < REVEAL_GAP)) revealQ.push(ch.id);
+    else revealed(ch, animate ? now : lastReveal);
+  }
+  logical = ids;
+  revealQ.forEach((id) => { $(id).hidden = true; });
+  if (revealQ.length && !revealTimer) {
+    revealTimer = setTimeout(() => {
+      revealTimer = null;
+      const id = revealQ.shift();
+      if (id) revealed($(id), performance.now());
+      changed();
+    }, Math.max(0, REVEAL_GAP - (now - lastReveal)));
+  }
+}
+const everShown = new Set();                                // rozdziały tego pliku widziane choć raz
+function revealed(ch, now) {
+  lastReveal = now;
+  // pojawił się PIERWSZY RAZ rozdział dalej niż ten z przypiętym suwakiem — praca poszła naprzód,
+  // więc przypięty rozdział może się już zwinąć (S.pin, niżej). Rozdział, który tylko wraca po
+  // poprawce we wcześniejszym (jakość, akceptacja), przypięcia nie zdejmuje.
+  const pin = S.pin && $(S.pin);
+  if (pin && pin !== ch && !everShown.has(ch.id) && pin.compareDocumentPosition(ch) & Node.DOCUMENT_POSITION_FOLLOWING) S.pin = null;
+  everShown.add(ch.id);
+}
+function resetReveal() {                                   // nowy plik: nic nie czeka
+  revealQ = []; everShown.clear();
+  if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
+}
+
 // ------------------------------------------------------------------ jedna pętla rysowania
 let lastAuto = "";
 function render() {
@@ -268,6 +313,7 @@ function render() {
   // poprawkę albo kliknięto „Pokaż, jak wydrukuje" (S.pin), zostaje rozwinięty, choć za nim
   // pojawiły się rozdziały zaliczone same (np. jakość „w porządku" i akceptacja) — inaczej zwijał
   // się razem ze swoim suwakiem. Puszcza, gdy suwak przejdzie do innego rozdziału.
+  gateChapters();
   const chs = [...document.querySelectorAll(".ch:not([hidden])")];
   const lastTwo = chs.slice(-2);
   const pin = chs.find((ch) => ch.id === S.pin) || null;
@@ -275,6 +321,16 @@ function render() {
   if (autoKey !== lastAuto) {
     lastAuto = autoKey;
     chs.forEach((ch) => ch.classList.toggle("open", lastTwo.includes(ch) || ch === pin));
+  }
+  // Starszy rozdział z poprawką albo decyzją (nie jeden z dwóch ostatnich ani przypięty) pokazuje
+  // tylko „Cofnij" — cofa do niego (Tomasz 25.09). Wybór, „Pokaż, jak wydrukuje" i suwaki są
+  // tylko w rozdziałach, nad którymi się teraz pracuje.
+  for (const [name, id] of Object.entries(STEP_CH)) {
+    const ch = $(id), step = stepIndex(name) > 0;
+    const decided = step || (!!S.settle[name] && S.settle[name] !== "auto");
+    ch.classList.toggle("past", !ch.hidden && decided && !lastTwo.includes(ch) && ch !== pin);
+    const back = ch.querySelector(".ch-back button");
+    if (back) back.textContent = step ? "Cofnij" : "Zmień decyzję";
   }
   // Tylko JEDEN suwak w panelu — ostatni, czyli najświeższy (Tomasz 24.09: przy overprincie
   // suwak z kolorów tylko mylił). Rozdziały ustawiają swoje suwaki przy każdym rysowaniu,

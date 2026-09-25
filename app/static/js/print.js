@@ -34,6 +34,11 @@ async function setAct(name, act) {
   changed();
   if (act === "fix") await applyStep(name, name === "flatten" ? { k: scaleK() } : {});
 }
+// „Cofnij" w starszym rozdziale (klasa `past`, main.render): cofa do tego rozdziału — razem
+// z krokami zrobionymi później (undoStep pyta, gdy jakieś są).
+document.querySelectorAll(".ch-back button").forEach((b) => b.addEventListener("click", () => {
+  if (!S.busy) undoStep(b.dataset.back);
+}));
 const SIM = { cmyk: "proof", overprint: "op", outline: "print", flatten: "print" };
 const CH = { cmyk: "ch-color", overprint: "ch-op", outline: "ch-fonts", flatten: "ch-flat" };
 function setSeen(name) {
@@ -91,7 +96,7 @@ export function renderColor() {
     if (c.act === "convert") {
       sum = S.settle.cmyk ? "CMYK" : "";
       say = on ? `<span class="say ok">Kolory zamienione na CMYK.</span> `
-                 + (c.seen ? "<b>Podgląd pokazuje teraz wydruk</b>; suwakiem porównasz go z ekranem sprzed zamiany." : "Zobacz, jak to wydrukuje.")
+                 + (c.seen ? "<b>Podgląd pokazuje teraz wydruk</b><span class=\"now-only\">; suwakiem porównasz go z ekranem sprzed zamiany</span>." : "Zobacz, jak to wydrukuje.")
                : S.busy ? "Zamieniam kolory na CMYK…" : "Wybierz profil kolorów, który zostanie zapisany w pliku.";
       if (on) note = esc(stepText("cmyk"));
     } else if (c.act === "keep") {
@@ -157,7 +162,7 @@ export function renderOverprint() {
     if (c.act === "fix") {
       sum = S.settle.overprint ? "wyłączony" : "";
       say = on ? `<span class="say ok">Overprint wyłączony</span> — wydrukuje się to, co widać na ekranie. `
-                 + (c.seen ? "Suwak niżej pokazuje wydruk przed i po." : "Zobacz, jak to wydrukuje.")
+                 + (c.seen ? "<span class=\"now-only\">Suwak niżej pokazuje wydruk przed i po.</span>" : "Zobacz, jak to wydrukuje.")
                : S.busy ? "Wyłączam overprint…" : "Nie udało się wyłączyć overprintu.";
     } else if (c.act === "keep") {
       sum = S.settle.overprint ? "zostawiony" : "";
@@ -209,7 +214,7 @@ export function renderFonts() {
     if (c.act === "fix") {
       sum = S.settle.outline ? "na krzywych" : "";
       say = on ? `<span class="say ok">Tekst zamieniony na krzywe.</span> `
-                 + (c.seen ? "Suwakiem niżej porównasz przed i po." : "Zobacz, jak to wydrukuje.")
+                 + (c.seen ? "<span class=\"now-only\">Suwakiem niżej porównasz przed i po.</span>" : "Zobacz, jak to wydrukuje.")
                : S.busy ? "Zamieniam tekst na krzywe…" : "Nie udało się zamienić tekstu na krzywe.";
       if (on) note = esc(stepText("outline"));
     } else if (c.act === "keep") {

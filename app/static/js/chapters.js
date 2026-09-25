@@ -40,7 +40,7 @@ export function renderFrames() {
   let st = "open", sum = "", say = "", note = "", skip = "", hidden = false;
   if (on) {
     st = "done"; sum = "usunięty";
-    say = `<span class="say ok">Szablon usunięty z projektu.</span> Suwakiem niżej porównasz przed i po.`;
+    say = `<span class="say ok">Szablon usunięty z projektu.</span> <span class="now-only">Suwakiem niżej porównasz przed i po.</span>`;
   } else if (S.fscan.err) {
     st = "done"; sum = "nie udało się sprawdzić";
     say = `<span class="say warn">Nie udało się przeszukać pliku.</span>`; note = esc(S.fscan.err);

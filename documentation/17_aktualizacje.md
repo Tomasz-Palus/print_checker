@@ -142,14 +142,47 @@ Samej instalacji na Windowsie nie da się sprawdzić bez dwóch wydań. Test u T
     bezpieczne tylko dla strony renderowanej w całości. Duża strona (np. 5522 × 11 374 px) się nie
     mieściła, więc spłaszczenie szło bez wygładzania. Litery i linie miały schodki. Dotyczyło też
     pliku przykładowego z samouczka.
-  - Poprawka: w takim przypadku spłaszczenie liczy stronę **2× gęściej bez wygładzania i uśrednia
-    bloki 2 × 2** (`steps._flatten_supersampled`), jak podgląd.
+  - Poprawka: spłaszczenie liczy stronę **2× gęściej i uśrednia bloki 2 × 2**
+    (`steps._flatten_supersampled`, Pillow `reduce`), jak podgląd. Wygładzanie Ghostscripta jest
+    dokładane, gdy przy tej wielkości jest bezpieczne.
     - Obraz idzie strumieniem pasmami (`pamcmyk32`).
     - Wynik leży w pliku na dysku (`numpy.memmap`) i Pillow zapisuje z niego JPEG CMYK (ta sama
       konwencja Adobe co Ghostscript, `/Decode` bez zmian).
-    - Gdy wygładzanie jest bezpieczne, spłaszczenie działa jak dotąd.
+    - Od 0.4.4 (niżej) nadpróbkowanie jest ZAWSZE, nie tylko przy dużej stronie.
   - `gs.stream` zachowuje cały dziennik (`p.err_all`, do 2 MB) — potrzebny do wykrywania
     zamienionych fontów.
   - Zmierzone na pliku przykładowym (6142 × 12 047 px): kolory jak dotąd (średnia różnica
-    0,19/255), krawędzie gładkie. Czas 16 s zamiast 3 s. Python ok. 600 MB (w tym plik na dysku),
-    Ghostscript 76 MB.
+    0,19/255), krawędzie gładkie. Czas ok. 9 s zamiast 3 s; `spady.pdf` 6 s. Python ok. 500–600 MB
+    (w tym plik na dysku), Ghostscript 76 MB.
+
+## 0.4.4 — poszarpane litery, rozdziały po kolei, „Cofnij” w starszych rozdziałach (Tomasz 25.09)
+
+- **Litery poszarpane po „Dopasuj wymiar” (`spady.pdf`).**
+  - Przyczyna: napis „PACHNĄCE PRANIE” jest wypełniony gradientem przyciętym kształtem liter.
+    Ghostscript nie wygładza krawędzi takiego przycięcia, nawet z `AlphaBits`. Było tak w każdej
+    wersji przed zamianą na CMYK (po niej podgląd szedł już ścieżką z nadpróbkowaniem, stąd
+    „znowu gładko”). Po dopasowaniu wymiaru było po prostu widać wyraźniej.
+  - Poprawka: podgląd (`render._supersample`, `render.SS = 2`) i spłaszczenie liczą **zawsze** 2×
+    gęściej i uśredniają. Wygładzanie Ghostscripta jest liczone dla renderu 2× (`gs.aa_args`
+    z podwojonym wymiarem). Podgląd całości też.
+  - Koszt zmierzony na `spady.pdf`: render 2× z wygładzaniem 1,9 s wobec 2,5 s dla 1× — czas idzie
+    na wczytanie obrazów. `RENDER_VER = 7`, więc stare kafelki się nie mieszają.
+- **Rozdziały pojawiają się po kolei, co 1,5 s** (`main.gateChapters`, `REVEAL_GAP`).
+  - Rozdziały zaliczone same (fonty „brak tekstu”, spłaszczenie „niepotrzebne”…) nie wychodzą
+    naraz. Pierwszy od razu, następne co 1,5 s; czekający jest schowany (`hidden`), ale jego
+    logika już działa (np. jakość już się liczy).
+  - Sprawdzone na `spady.pdf` po „Pokaż, jak wydrukuje” w Overprincie: Fonty 0,2 s, Spłaszczenie
+    1,6 s, Jakość 3,1 s.
+  - Nowy plik czyści kolejkę. Przy starcie programu i przy „ogranicz ruch” nic nie czeka.
+- **Starszy rozdział z poprawką pokazuje tylko „Cofnij”.**
+  - Rozdział Szablon, Spady, Wymiar, Kolory, Overprint, Fonty albo Spłaszczenie, w którym jest
+    poprawka albo decyzja, a który nie jest jednym z dwóch ostatnich (ani przypiętym), dostaje
+    klasę `past`. Znikają wybory, „Pokaż, jak wydrukuje”, suwaki i zdania o suwakach
+    (`.now-only`); zostaje opis i przycisk **„Cofnij”** (przy decyzji bez poprawki: „Zmień
+    decyzję”).
+  - „Cofnij” cofa do tego rozdziału razem z krokami zrobionymi później — program pyta, gdy takie
+    są. Potem rozdział jest znów ostatni i ma pełne wybory.
+  - Sprawdzone: po cofnięciu Kolorów (z pytaniem o overprint) Kolory czekają na decyzję.
+- **Przypięcie (S.pin) poprawione:** zdejmuje je rozdział dalej, który pojawia się **pierwszy
+  raz** (praca poszła naprzód). Jakość i akceptacja, które tylko wracają po poprawce we
+  wcześniejszym rozdziale, przypięcia nie zdejmują — suwak spłaszczenia zostaje.

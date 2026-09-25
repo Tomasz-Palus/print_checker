@@ -117,14 +117,14 @@ const seen = new Set();
 let lastEnter = 0, queued = 0;
 export function revealChapters() {
   const now = performance.now();
-  if (now - lastEnter > 1500) queued = 0;          // nowa seria — od zera
+  if (now - lastEnter > 1000) queued = 0;          // nowa seria — od zera
   const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   document.querySelectorAll(".ch").forEach((ch) => {
     const vis = !ch.hidden;
     if (vis && !seen.has(ch)) {
       seen.add(ch);
       if (reduce || !document.body.classList.contains("ready")) return;
-      ch.style.animationDelay = `${queued++ * 150}ms`;
+      ch.style.animationDelay = `${queued++ * 150}ms`;   // po kolei co 1,5 s pilnuje main.gateChapters
       lastEnter = now;
       ch.classList.remove("enter"); void ch.offsetWidth; ch.classList.add("enter");
       ch.addEventListener("animationend", () => { ch.classList.remove("enter"); ch.style.animationDelay = ""; }, { once: true });
