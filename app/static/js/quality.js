@@ -186,6 +186,7 @@ $("acShow").querySelector("button").addEventListener("click", () => {
   $("acSimBar").querySelector("input").value = 0;
   S.accShown = head().id;
   closeNav();
+  if (!on) viewer.zoomFit();              // cały projekt w oknie, jak po „Dopasuj" (Tomasz 25.09)
   changed();
 });
 $("acOk").querySelector("button").addEventListener("click", () => {
@@ -202,8 +203,11 @@ export function renderAccept() {
   const ok = acceptSettled();
   if (!ok && S.settle.accept) delete S.settle.accept;            // plik się zmienił
   chapter("ch-acc", ok ? "done" : "todo", ok ? "zaakceptowany" : "");
+  const same = !S.job.versions.some((v, i) => i > 0 && !["frames", "trim", "resize"].includes(v.step));
   $("acSay").innerHTML = ok
     ? `<span class="say ok">Plik zaakceptowany.</span>`
+    : same ? `Od rozdziału Kolory plik nie potrzebował poprawek, więc wydruk <b>przed</b> i <b>po</b> wygląda tak samo. `
+      + `Obejrzyj go jeszcze raz — tak, jak zrobi to drukarnia — i jeśli wszystko gra, zaakceptuj plik.`
     : `Porównaj, jak plik wydrukowałby się <b>bez poprawek</b> i jak wydrukuje się <b>teraz</b> — `
       + `z kolorami i overprintem tak, jak zrobi to drukarnia. Jeśli wszystko gra, zaakceptuj plik.`;
   const b = $("acShow").querySelector("button");

@@ -160,6 +160,10 @@ export function setScene(sc) {
     live.clear(); canvas.innerHTML = ""; $("navi").hidden = true; progress(); wait();
     return;
   }
+  // Dwie IDENTYCZNE warstwy (np. „Akceptacja" pliku bez poprawek: przed = po) to jedna warstwa.
+  // Inaczej obie trafiały na ten sam element, a przezroczystość górnej (suwak na „przed" = 0)
+  // chowała go całkiem — podgląd był biały (Tomasz 25.09).
+  { const keys = sc.layers.map(layerKey); sc.layers = sc.layers.filter((_, i) => keys.indexOf(keys[i]) === i); }
   const want = sc.layers.map(layerKey);
   const old = [...live.values()];
   for (const [k, l] of live) if (!want.includes(k)) { l.kill(); live.delete(k); }

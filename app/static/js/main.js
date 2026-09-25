@@ -297,14 +297,40 @@ onChange(render);
 product.loadProducts();
 changed();
 
-// wersja programu i nowsze wydanie na GitHubie (link otwiera się w przeglądarce)
-api("/api/version").then((d) => {
-  $("ver").textContent = "v" + d.version;
-  if (d.update) {
-    $("upd").hidden = false; $("upd").href = d.update_url;
-    $("upd").textContent = `Jest nowa wersja ${d.update} — pobierz`;
+// Wersja programu i aktualizacja (updater.py). Zainstalowany program sam pobiera nową wersję
+// w tle, a potem pokazuje przycisk „Zaktualizuj do X" (Tomasz 25.09). Uruchomiony z kodu
+// (run.bat) albo gdy pobieranie się nie uda — zwykły link do strony wydania.
+let upd = null;
+async function checkVersion() {
+  try { upd = await api("/api/version"); } catch (_) { return; }
+  $("ver").textContent = "v" + upd.version;
+  const a = $("upd");
+  a.hidden = !upd.update;
+  a.classList.toggle("wait", upd.status === "downloading");
+  if (upd.update) {
+    a.href = upd.update_url || "#";
+    a.textContent = !upd.self_update || upd.status === "error" ? `Jest nowa wersja ${upd.update} — pobierz`
+      : upd.status === "ready" ? `Zaktualizuj do wersji ${upd.update}`
+      : `Pobieram wersję ${upd.update}… ${upd.progress} %`;
+    a.title = upd.status === "error" ? `Automatyczne pobranie nie wyszło (${upd.error}). Kliknij, żeby pobrać ręcznie.` : "";
   }
-}).catch(() => {});
+  setTimeout(checkVersion, upd.status === "downloading" ? 3000 : 10 * 60 * 1000);
+}
+$("upd").addEventListener("click", async (e) => {
+  if (!upd?.self_update || upd.status === "error") return;     // zwykły link do wydania
+  e.preventDefault();
+  if (upd.status !== "ready") return;
+  if (!(await ask(`Zaktualizować do wersji ${upd.update}?`,
+      `Program zamknie się na kilkanaście sekund i uruchomi ponownie już w nowej wersji.`
+      + (S.job ? ` Otwarty plik trzeba będzie wgrać jeszcze raz.` : ""), "Zaktualizuj teraz", "Później"))) return;
+  try {
+    await api("/api/update/install", { method: "POST" });
+    $("updating").hidden = false;
+  } catch (err) {
+    await ask("Aktualizacja się nie udała", esc(err.message), "OK", "Zamknij");
+  }
+});
+checkVersion();
 // „żyję" — program uruchomiony bez własnego okna kończy się sam, gdy zamkniesz kartę
 setInterval(() => fetch("/api/alive", { method: "POST" }).catch(() => {}), 20000);
 initTour({ upload });

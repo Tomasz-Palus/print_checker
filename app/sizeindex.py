@@ -34,15 +34,32 @@ MAX_ERROR_STREAK = 15
 WORKERS = 8          # równoległe pobrania
 
 
+def _read(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def load() -> dict:
+    """Indeks użytkownika + indeks z instalatora. Instalator każdej wersji wiezie indeks z dnia
+    wydania; produkty, których użytkownik jeszcze nie ma (albo ma tylko nieudane próby), bierzemy
+    stamtąd — nowa wersja programu przynosi też nowe wymiary."""
     global _index
     with _lock:
-        if not _index and os.path.exists(INDEX_PATH):
-            try:
-                with open(INDEX_PATH, "r", encoding="utf-8") as f:
-                    _index = json.load(f)
-            except (OSError, ValueError):
-                _index = {}
+        if not _index:
+            _index = _read(INDEX_PATH) if os.path.exists(INDEX_PATH) else {}
+            ro = os.path.join(paths.DATA_RO, "template_index.json")
+            if os.path.abspath(ro) != os.path.abspath(INDEX_PATH):
+                added = 0
+                for k, v in _read(ro).items():
+                    if k not in _index or (not _index[k].get("ok") and v.get("ok")):
+                        _index[k] = v
+                        added += 1
+                if added:
+                    print(f"[indeks] z instalatora dołożono {added} produktów")
         return _index
 
 

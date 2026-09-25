@@ -126,11 +126,18 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: out
-      - name: Wydanie na GitHubie
+      # Wydanie powstaje TYLKO przy nowym numerze wersji (app/version.py). Zwykła zmiana to test:
+      # instalatory leżą wtedy w „Artifacts" tego przebiegu, a ludzie nic nie dostają.
+      - name: Wydanie na GitHubie (tylko nowa wersja)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           V=$(python3 -c "import re;print(re.search(r'VERSION\s*=\s*\"([^\"]+)\"',open('app/version.py',encoding='utf-8').read()).group(1))")
-          gh release view "v$V" >/dev/null 2>&1 || \
-            gh release create "v$V" --title "adChecker $V" --target "$GITHUB_SHA" --notes-file packaging/INSTRUKCJA.md
-          gh release upload "v$V" out/windows/*.exe out/macos/*.dmg --clobber
+          if gh release view "v$V" >/dev/null 2>&1; then
+            echo "Wersja $V jest już wydana — ta zmiana to TEST (instalatory w Artifacts tego przebiegu)."
+            exit 0
+          fi
+          mkdir -p rel && cp out/windows/*.exe out/macos/*.dmg rel/
+          (cd rel && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          gh release create "v$V" --title "adChecker $V" --target "$GITHUB_SHA" \
+            --notes-file packaging/INSTRUKCJA.md rel/*

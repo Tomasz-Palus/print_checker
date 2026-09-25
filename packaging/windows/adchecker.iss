@@ -48,6 +48,8 @@ Name: "{autodesktop}\adChecker"; Filename: "{app}\adChecker.exe"; Tasks: desktop
 
 [Run]
 Filename: "{app}\adChecker.exe"; Description: "{cm:LaunchProgram,adChecker}"; Flags: nowait postinstall skipifsilent
+; aktualizacja z programu („Zaktualizuj teraz") idzie po cichu — wtedy program startuje sam
+Filename: "{app}\adChecker.exe"; Flags: nowait skipifnotsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"

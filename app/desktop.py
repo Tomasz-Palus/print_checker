@@ -154,6 +154,7 @@ def main() -> None:
     import server
     from version import VERSION
     jobs.clean_work_dir()
+    shutil.rmtree(os.path.join(paths.USER_DIR, "update"), ignore_errors=True)   # instalator po aktualizacji
     st = products.load_products()
     print(f"[adChecker {VERSION}] produkty: {st['count']} ({st['source']}); {url}")
     threading.Thread(target=_serve, args=(server.app, port), daemon=True).start()

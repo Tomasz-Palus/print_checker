@@ -9,10 +9,8 @@ from __future__ import annotations
 import os
 import re
 import sys
-import json
 import threading
 import time
-import urllib.request
 import webbrowser
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
@@ -28,7 +26,8 @@ import sizeindex
 import suggest
 import views
 import paths
-from version import REPO, UA, VERSION
+import updater
+from version import VERSION
 
 STATIC = paths.STATIC
 HOST, PORT = "127.0.0.1", int(os.environ.get("ADCHECK_PORT", "5000"))
@@ -408,37 +407,20 @@ def api_tile(jid, key, name):
 # ----------------------------------------------------------------------------
 # wersja programu i aktualizacje
 # ----------------------------------------------------------------------------
-_update = {"checked": 0.0, "latest": None, "url": None}
-
-
-def _check_update() -> None:
-    """Najnowsze wydanie na GitHubie (raz na 6 h, w tle). Brak sieci = cisza."""
-    try:
-        req = urllib.request.Request(f"https://api.github.com/repos/{REPO}/releases/latest",
-                                     headers={"User-Agent": UA, "Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(req, timeout=5) as r:
-            d = json.loads(r.read().decode("utf-8"))
-        _update["latest"] = str(d.get("tag_name", "")).lstrip("v") or None
-        _update["url"] = d.get("html_url")
-    except Exception:
-        pass
-
-
-def _newer(a: str | None, b: str) -> bool:
-    try:
-        return a is not None and tuple(int(x) for x in a.split(".")) > tuple(int(x) for x in b.split("."))
-    except ValueError:
-        return False
-
-
 @app.get("/api/version")
 def api_version():
-    if time.time() - _update["checked"] > 6 * 3600:
-        _update["checked"] = time.time()
-        threading.Thread(target=_check_update, daemon=True).start()
-    new = _newer(_update["latest"], VERSION)
-    return jsonify({"version": VERSION, "update": _update["latest"] if new else None,
-                    "update_url": _update["url"] if new else None})
+    """Wersja programu i stan aktualizacji (updater.py): nowsze wydanie, pobieranie, gotowe."""
+    return jsonify(updater.state())
+
+
+@app.post("/api/update/install")
+def api_update_install():
+    """„Zaktualizuj teraz": uruchamia instalację i zamyka program (nowa wersja wstaje sama)."""
+    msg = updater.install()
+    if msg:
+        return err(msg)
+    threading.Timer(1.0, lambda: os._exit(0)).start()      # najpierw odpowiedź, potem koniec
+    return jsonify({"ok": True})
 
 
 # Okno przeglądarki żyje? (program bez własnego okna kończy się sam, gdy nikt go nie używa)
