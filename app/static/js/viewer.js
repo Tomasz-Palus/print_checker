@@ -181,7 +181,7 @@ export function setScene(sc) {
       live.set(k, l);
     }
     l.spec = spec;
-    l.el.style.zIndex = String(i + 1);
+    l.el.style.zIndex = String(2 * i + 1);
     if (l.el.parentNode !== canvas) canvas.appendChild(l.el);
   });
   // obszar canvasu = ramka + to, co z warstw wystaje poza nią (chyba że przycinamy)
@@ -270,9 +270,11 @@ function drawNow() {
     const r = s.rect;
     Object.assign(l.el.style, { left: px(r.x) + "px", top: py(r.y) + "px", width: r.w * z + "px", height: r.h * z + "px" });
     l.el.style.opacity = i > 0 ? String(scene.mix ?? 1) : "1";
+    l.el.style.zIndex = String(2 * i + 1);          // między warstwami jest zasłona (niżej)
     l.el.classList.toggle("shadow", i === 0 && !scene.frameLabel);
     l.drawTiles(z, vp, px(r.x), py(r.y));
   });
+  drawVeil(z, px, py);
   drawDecor(z, px, py);
   drawNavi();
   for (const f of listeners) f();
@@ -353,6 +355,21 @@ function drawFill(z, px, py) {
                 LT: [0, 0, mL + ov + O, mT + ov + O], RT: [lx + W - ov - O, 0, mR + ov + O, mT + ov + O],
                 LB: [0, ty + H - ov - O, mL + ov + O, mB + ov + O], RB: [lx + W - ov - O, ty + H - ov - O, mR + ov + O, mB + ov + O] };
   for (const d of el.children) box(d, ...pos[d.dataset.side]);
+}
+
+// Suwak przed/po, gdy „przed" wystaje poza „po" (spady, szablon, wymiar): to, czego w „po" już
+// nie ma, znika razem z suwakiem. Wcześniej pas spadów z „przed" było widać także na „po" —
+// suwak wyglądał, jakby pokazywał tylko „przed" (Tomasz 25.09). Zasłona w kolorze tła podglądu
+// leży między warstwami: otwór = obszar „po", reszta przykryta w miarę przesuwania suwaka.
+function drawVeil(z, px, py) {
+  const veil = decor("veil");
+  const [a, b] = scene.layers;
+  const out = a && b && (a.rect.x < b.rect.x - 1e-6 || a.rect.y < b.rect.y - 1e-6
+    || a.rect.x + a.rect.w > b.rect.x + b.rect.w + 1e-6 || a.rect.y + a.rect.h > b.rect.y + b.rect.h + 1e-6);
+  veil.hidden = !out || !(scene.mix > 0);
+  if (veil.hidden) return;
+  box(veil, px(b.rect.x), py(b.rect.y), b.rect.w * z, b.rect.h * z);
+  veil.style.boxShadow = `0 0 0 100000px rgba(233, 235, 239, ${scene.mix})`;
 }
 
 function drawDecor(z, px, py) {

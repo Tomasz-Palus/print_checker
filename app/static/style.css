@@ -155,6 +155,7 @@ select.sel { width: 100%; padding: 7px 8px; border: 1px solid var(--line); borde
 .frame { position: absolute; z-index: 6; pointer-events: none; outline: 2px solid #16a34a; }
 .frame span { position: absolute; left: -2px; bottom: 100%; background: #16a34a; color: #fff; font-size: 11px;
               padding: 1px 6px; border-radius: 4px 4px 0 0; white-space: nowrap; }
+.veil { position: absolute; z-index: 2; pointer-events: none; }
 .dim { position: absolute; z-index: 4; pointer-events: none; box-shadow: 0 0 0 100000px rgba(30,35,45,.45); }
 .hilite { position: absolute; z-index: 7; pointer-events: none; border: 3px solid #f43f5e; border-radius: 3px;
           box-shadow: 0 0 0 2px #fff; }

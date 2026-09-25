@@ -230,3 +230,17 @@ spłaszczyła drukarnia. Miejsca zaproponował Claude:
   - Samouczek przy Spłaszczeniu każe teraz kliknąć **„Zostaw jak jest”** (wcześniej „Spłaszcz
     projekt”).
 - Sprawdzone: samouczek przechodzi od początku do końca, teksty widoczne na zrzutach.
+
+## 0.4.7 — suwak przed/po w Spadach „pokazywał tylko przed” (Tomasz 25.09)
+
+- **Objaw:** w rozdziale Spady (plik testowy, strona 3) suwak przesunięty na „po” wyglądał jak
+  „przed”.
+- **Przyczyna:** „po” (strona bez spadów) jest mniejsze niż „przed” i leży na nim. Pas spadów
+  ze znacznikami cięcia z „przed” wystawał więc spod „po” także przy suwaku na „po”. W środku obie
+  wersje wyglądają tak samo (szablon usunięty wcześniej), więc zmiany nie było widać.
+- **Poprawka:** `viewer.drawVeil` — między warstwami leży zasłona w kolorze tła podglądu,
+  z otworem w miejscu „po”. Im bliżej „po”, tym mocniej przykrywa to, czego w „po” już nie ma. Na
+  „po” zostaje sama strona bez spadów. Działa w każdym suwaku przed/po, w którym „przed” wystaje
+  poza „po” (spady, szablon, wymiar, akceptacja). Warstwy mają teraz `z-index` 1 i 3, zasłona 2.
+- Sprawdzone na stronie 3 pliku testowego: „przed” ze spadami i znacznikami, „po” bez. Samouczek
+  przechodzi.
