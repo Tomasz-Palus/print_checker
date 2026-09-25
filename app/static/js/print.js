@@ -47,7 +47,9 @@ function setSeen(name) {
     c.seen = true; S.settle[name] = "done";
   }
   S.cmp = null;
-  // rozdział zostaje ROZWINIĘTY — właśnie kliknięto „Pokaż", więc suwak ma być widać
+  // rozdział zostaje ROZWINIĘTY — właśnie kliknięto „Pokaż", więc suwak ma być widać — także
+  // gdy zaraz pojawią się kolejne rozdziały zaliczone same (main.render, S.pin)
+  S.pin = CH[name];
   $(CH[name]).classList.add("open");
   changed();
 }

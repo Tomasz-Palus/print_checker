@@ -176,7 +176,8 @@ def aa_args(overprint: bool, w_px: float, h_px: float, ncomp: int = 3) -> list:
     renderowanej PASAMI gubi prawie całą treść — podgląd pokazywał jeden obraz, a spłaszczenie
     dawało BIAŁĄ stronę (Tomasz 24.09, plik PRINT_CHECKER_TEST_100x200_SZABLON_PASERY.pdf).
     Obejście: przy overprincie cała strona naraz w pamięci (~12× rozmiaru strony); gdy to za
-    dużo — bez wygładzania (pyramid nadrabia to nadpróbkowaniem 2×)."""
+    dużo — bez wygładzania; wtedy piramida podglądu i spłaszczenie liczą 2× gęściej i uśredniają
+    same (nadpróbkowanie)."""
     aa = ["-dTextAlphaBits=4", "-dGraphicsAlphaBits=4"]
     if not overprint:
         return aa
@@ -238,11 +239,14 @@ def stream(args: list) -> subprocess.Popen:
     p = subprocess.Popen([exe(), "-q", "-dNOPAUSE", "-dBATCH", *args],
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1 << 20, **NO_WINDOW)
     p.err_tail = b""
+    p.err_all = bytearray()          # cały dziennik (do 2 MB) — np. zamienione fonty przy spłaszczaniu
 
     def drain():
         try:
             for chunk in iter(lambda: p.stderr.read(4096), b""):
                 p.err_tail = (p.err_tail + chunk)[-4096:]
+                if len(p.err_all) < 2_000_000:
+                    p.err_all += chunk
         except Exception:
             pass
     threading.Thread(target=drain, daemon=True).start()

@@ -6,7 +6,7 @@
 // z AKCJĄ czeka, aż użytkownik ją zrobi, i sam przechodzi dalej. Krok z OPISEM ma „Dalej".
 // Gdy akcja była zrobiona już wcześniej (np. monitor skalibrowany, powrót „Wstecz") — też „Dalej".
 // Kroki rozdziałów, które są już domknięte, idąc do przodu pomijamy.
-import { $ } from "./util.js";
+import { $, shown } from "./util.js";
 import { S, head, hasStep, isPdf, productOk, roleSettled, framesSettled, trimSettled, sizeSettled,
          colorSettled, overprintSettled, fontsSettled, flattenSettled } from "./state.js";
 import { qualitySettled, acceptSettled } from "./quality.js";
@@ -18,7 +18,7 @@ const SAMPLE_NAME = "przyklad_adChecker.pdf";
 const DONE_KEY = "adcheck.tourDone";
 const GRACE_MS = 1500;       // krok `grace`: stan dochodzi z serwera z opóźnieniem — spełniony tak szybko = był wcześniej
 
-const vis = (id) => { const el = $(id); return !!el && el.getClientRects().length > 0; };
+const vis = (id) => shown($(id));
 const settingsOpen = () => !$("settings").hidden;
 const isSample = () => S.job?.file?.name === SAMPLE_NAME;
 const btnText = (id, fb) => ($(id)?.textContent || fb).trim();

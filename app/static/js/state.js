@@ -51,7 +51,7 @@ export function resetJobState() {
   Object.assign(S, {
     settle: {}, choice: {}, stepErr: {}, busy: null,
     fscan: { key: "", data: null, err: "" }, qual: { key: "", data: null, err: "" },
-    accShown: null, sz: null, sizeEdit: false, cmp: null, sim: null, simMix: 100, cmykProfile: "fogra39",
+    accShown: null, pin: null, sz: null, sizeEdit: false, cmp: null, sim: null, simMix: 100, cmykProfile: "fogra39",
   });
 }
 
@@ -110,6 +110,9 @@ export function roleSettled() {
 }
 
 // ---------------------------------------------------------------- poprawki
+// rozdział z suwakiem danej poprawki
+export const STEP_CH = { frames: "ch-frames", trim: "ch-trim", resize: "ch-size", cmyk: "ch-color", overprint: "ch-op",
+  outline: "ch-fonts", flatten: "ch-flat" };
 export const STEP_ORDER = ["frames", "trim", "resize", "cmyk", "overprint", "outline", "flatten"];
 export const STEP_NAME = { frames: "usunięcie szablonu", trim: "przycięcie spadów", resize: "dopasowanie wymiaru",
   cmyk: "przeliczenie kolorów na CMYK", overprint: "wyłączenie overprintu", outline: "przekształcenie tekstu w krzywe",

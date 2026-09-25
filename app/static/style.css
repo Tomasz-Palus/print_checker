@@ -56,9 +56,19 @@ a { color: var(--accent); }
         color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 700; padding: 0; }
 .ch-q.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 .ch-help { margin: 0 12px 10px; padding: 10px 12px; background: #f6f8fb; border-radius: 8px; color: #3a4452; font-size: 13px; }
-.ch-b { padding: 0 12px 12px 46px; }
+.ch-b { padding: 0 12px 12px 46px; display: grid; grid-template-rows: 1fr; opacity: 1; visibility: visible;
+  /* rozwijanie rusza chwilę po zwijaniu — rozdziały zmieniają się po kolei, nie naraz */
+  transition: grid-template-rows .35s ease .12s, padding .35s ease .12s, opacity .3s ease .12s, visibility 0s; }
+.ch-in { min-height: 0; }
 .ch[data-st="locked"] { opacity: .55; }
-.ch[data-st="locked"] .ch-b, .ch[data-st="done"]:not(.open) .ch-b { display: none; }
+/* zwinięty rozdział: treść ma wysokość 0 (płynnie), a potem znika też dla klawiatury (visibility) */
+.ch[data-st="locked"] .ch-b, .ch[data-st="done"]:not(.open) .ch-b { grid-template-rows: 0fr; padding-top: 0; padding-bottom: 0;
+  opacity: 0; visibility: hidden; transition: grid-template-rows .35s ease, padding .35s ease, opacity .25s ease, visibility 0s linear .35s; }
+.ch.anim .ch-in, .ch[data-st="locked"] .ch-in, .ch[data-st="done"]:not(.open) .ch-in { overflow: hidden; }
+/* rozdział, który właśnie się pojawił, wjeżdża (po kolei — opóźnienie ustawia revealChapters) */
+.ch.enter { animation: chIn .45s cubic-bezier(.2,.7,.3,1) both; overflow: hidden; }
+@keyframes chIn { from { opacity: 0; transform: translateY(-10px); max-height: 0; } 60% { opacity: 1; } to { opacity: 1; transform: none; max-height: 900px; } }
+@media (prefers-reduced-motion: reduce) { .ch-b, .ch.enter { transition: none !important; animation: none !important; } }
 .ch[data-st="done"] .ch-h { cursor: pointer; }
 .ch[data-st="done"] .ch-ico { background: var(--ok-bg); color: var(--ok); }
 .ch[data-st="todo"] .ch-ico { background: var(--warn-bg); color: var(--warn); }

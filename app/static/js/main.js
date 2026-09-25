@@ -1,5 +1,5 @@
 // Start programu: wgrywanie pliku, jedna pętla rysowania rozdziałów i podglądu, ustawienia.
-import { $, esc, fmtMm, fmtBytes, api, ask, chapter, initChapters, plural } from "./util.js";
+import { $, esc, fmtMm, fmtBytes, api, ask, chapter, initChapters, plural, shown, revealChapters } from "./util.js";
 import { S, changed, onChange, resetJobState, head, template, scaleK, printMm, isPdf, colorSettled, factsKey, STEP_NAME } from "./state.js";
 import { HELP } from "./help.js";
 import * as viewer from "./viewer.js";
@@ -264,21 +264,28 @@ function render() {
   // Rozwinięte same (Tomasz 24.09): ZAWSZE dwa ostatnie widoczne rozdziały — bieżący i ten tuż
   // przed nim; reszta zwinięta. Tylko przy PRZEJŚCIU do innego rozdziału, więc ręcznie da się
   // rozwinąć każdy.
+  // Wyjątek (Tomasz 25.09, „spłaszczenie nie ma suwaka"): rozdział, w którym właśnie zrobiono
+  // poprawkę albo kliknięto „Pokaż, jak wydrukuje" (S.pin), zostaje rozwinięty, choć za nim
+  // pojawiły się rozdziały zaliczone same (np. jakość „w porządku" i akceptacja) — inaczej zwijał
+  // się razem ze swoim suwakiem. Puszcza, gdy suwak przejdzie do innego rozdziału.
   const chs = [...document.querySelectorAll(".ch:not([hidden])")];
   const lastTwo = chs.slice(-2);
-  const autoKey = lastTwo.map((ch) => ch.id).join("|");
+  const pin = chs.find((ch) => ch.id === S.pin) || null;
+  const autoKey = [...lastTwo, pin].map((ch) => ch?.id || "").join("|");
   if (autoKey !== lastAuto) {
     lastAuto = autoKey;
-    chs.forEach((ch) => ch.classList.toggle("open", lastTwo.includes(ch)));
+    chs.forEach((ch) => ch.classList.toggle("open", lastTwo.includes(ch) || ch === pin));
   }
   // Tylko JEDEN suwak w panelu — ostatni, czyli najświeższy (Tomasz 24.09: przy overprincie
   // suwak z kolorów tylko mylił). Rozdziały ustawiają swoje suwaki przy każdym rysowaniu,
   // więc tu wystarczy schować wszystkie poza ostatnim widocznym.
-  const minis = [...document.querySelectorAll(".ch:not([hidden]) .mini")].filter((m) => !m.hidden && m.offsetParent !== null);
+  const minis = [...document.querySelectorAll(".ch:not([hidden]) .mini")].filter((m) => !m.hidden && shown(m));
   const keep = minis[minis.length - 1];
   document.querySelectorAll(".ch .mini").forEach((m) => { if (m !== keep) m.hidden = true; });
+  if (S.pin && keep && keep.closest(".ch")?.id !== S.pin) S.pin = null;
   // porównanie ze schowanego suwaka nie może zostać na podglądzie
   if (S.cmp && !keep?.querySelector(`input[data-step="${S.cmp.step}"]`)) S.cmp = null;
+  revealChapters();
   // numery rozdziałów po kolei, licząc tylko widoczne
   let n = 0;
   document.querySelectorAll(".ch:not([hidden]) .ch-ico").forEach((ico) => {
@@ -297,6 +304,8 @@ onChange(render);
 
 product.loadProducts();
 changed();
+// animacje dopiero po pierwszym rysowaniu — przy starcie programu nic nie ma wjeżdżać
+setTimeout(() => document.body.classList.add("ready"), 400);
 
 // Wersja programu i aktualizacja (updater.py). Zainstalowany program sam pobiera nową wersję
 // w tle, a potem pokazuje przycisk „Zaktualizuj do X" (Tomasz 25.09). Uruchomiony z kodu

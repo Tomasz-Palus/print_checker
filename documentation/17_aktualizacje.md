@@ -104,3 +104,52 @@ Samej instalacji na Windowsie nie da się sprawdzić bez dwóch wydań. Test u T
     sam plik.
 - **Poprawka:** `state.resetJobState()` przy każdym wgraniu pliku (`main.upload`). Sprawdzone:
   po ponownym wgraniu tego samego pliku Kolory znów czekają na decyzję, a Overprint jest schowany.
+
+## 0.4.3 — animacje rozdziałów (Tomasz 25.09)
+
+- **Zwijanie i rozwijanie jest płynne.** Treść rozdziału jest w `.ch-in`, owijanym w
+  `initChapters`. `.ch-b` to siatka, która przechodzi z `1fr` do `0fr` w 0,35 s, razem
+  z przezroczystością i odstępami.
+  - Rozwijanie rusza 0,12 s po zwijaniu, więc rozdziały zmieniają się po kolei, a nie naraz.
+  - Na czas ruchu rozdział dostaje klasę `anim` (`MutationObserver` na `class`/`data-st`) i treść
+    jest przycinana. Poza ruchem nie jest, bo lista produktów wystaje poza rozdział.
+  - Zwinięta treść ma `visibility: hidden` — klawiatura po niej nie skacze.
+- **Rozdziały pojawiają się po kolei.** `revealChapters()` po każdym rysowaniu daje nowo widocznym
+  rozdziałom animację wjazdu (zjazd o 10 px i rozjaśnienie, 0,45 s) z opóźnieniem 150 ms
+  × numer w serii. Gdy program sam zaliczy kilka rozdziałów naraz (szablon „czysto”, spady „brak”,
+  wymiar się zgadza…), wjeżdżają jeden po drugim.
+  - Przy starcie programu nic nie wjeżdża (klasa `ready` na `body` po 0,4 s).
+- **Ograniczony ruch:** przy ustawieniu systemowym „ogranicz ruch” (`prefers-reduced-motion`)
+  animacji nie ma.
+- **„Czy element widać”:** zwinięta treść nie znika już z układu (ma wysokość 0), więc
+  `getClientRects`/`offsetParent` tego nie mówią. Nowe `util.shown(el)` sprawdza też, czy
+  rozdział jest zwinięty. Używają go: reguła jednego suwaka w `main.js` i samouczek.
+- **Sprawdzone** na `Wydruk_adWall_Vario…`: Spady i Wymiar pojawiły się 150 ms po sobie. Samouczek
+  przechodzi od początku do końca.
+
+## 0.4.3 — spłaszczenie: suwak i schodki na krawędziach (Tomasz 25.09)
+
+- **Brak suwaka „przed / po” po spłaszczeniu.**
+  - Przyczyna: reguła „rozwinięte dwa ostatnie rozdziały”. Gdy za Spłaszczeniem były już
+    widoczne Jakość i Akceptacja (np. spłaszczenie było „niepotrzebne”, więc przeszło się dalej,
+    a potem wróciło), rozdział zwijał się zaraz po „Pokaż, jak wydrukuje”, a razem z nim jego
+    suwak. Odtworzone na `spady.pdf`.
+  - Poprawka: rozdział, w którym właśnie zrobiono poprawkę albo kliknięto „Pokaż, jak wydrukuje”
+    (`S.pin`), zostaje rozwinięty, nawet jeśli nie jest wśród dwóch ostatnich. Puszcza, gdy
+    najświeższy suwak jest już w innym rozdziale. Dotyczy wszystkich rozdziałów z suwakiem.
+- **Pikselowe wektory po spłaszczeniu.**
+  - Przyczyna: obejście błędu Ghostscripta (`gs.aa_args`). Przy overprincie wygładzanie jest
+    bezpieczne tylko dla strony renderowanej w całości. Duża strona (np. 5522 × 11 374 px) się nie
+    mieściła, więc spłaszczenie szło bez wygładzania. Litery i linie miały schodki. Dotyczyło też
+    pliku przykładowego z samouczka.
+  - Poprawka: w takim przypadku spłaszczenie liczy stronę **2× gęściej bez wygładzania i uśrednia
+    bloki 2 × 2** (`steps._flatten_supersampled`), jak podgląd.
+    - Obraz idzie strumieniem pasmami (`pamcmyk32`).
+    - Wynik leży w pliku na dysku (`numpy.memmap`) i Pillow zapisuje z niego JPEG CMYK (ta sama
+      konwencja Adobe co Ghostscript, `/Decode` bez zmian).
+    - Gdy wygładzanie jest bezpieczne, spłaszczenie działa jak dotąd.
+  - `gs.stream` zachowuje cały dziennik (`p.err_all`, do 2 MB) — potrzebny do wykrywania
+    zamienionych fontów.
+  - Zmierzone na pliku przykładowym (6142 × 12 047 px): kolory jak dotąd (średnia różnica
+    0,19/255), krawędzie gładkie. Czas 16 s zamiast 3 s. Python ok. 600 MB (w tym plik na dysku),
+    Ghostscript 76 MB.

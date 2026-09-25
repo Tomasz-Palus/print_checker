@@ -2,7 +2,7 @@
 // Każda poprawka tworzy na serwerze NOWĄ wersję pliku (v1, v2…); cofnięcie ucina łańcuch
 // przed nią, razem z krokami zrobionymi później.
 import { $, esc, api, post, ask } from "./util.js";
-import { S, changed, STEP_ORDER, STEP_NAME } from "./state.js";
+import { S, changed, STEP_ORDER, STEP_NAME, STEP_CH } from "./state.js";
 
 // Wyczyść decyzje rozdziałów od `name` w dół (po cofnięciu pliku są nieaktualne).
 function forgetFrom(name) {
@@ -19,6 +19,7 @@ export async function applyStep(name, params) {
   try {
     S.job = await post(`/api/jobs/${S.job.job_id}/steps`, { name, params: { page: S.page, ...params } });
     S.cmp = null; S.sim = null;
+    S.pin = STEP_CH[name];            // rozdział z nową poprawką zostaje rozwinięty (main.render)
   } catch (e) {
     S.stepErr[name] = e.message;
   }

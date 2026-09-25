@@ -690,6 +690,59 @@ def flatten_plan(w_pt: float, h_pt: float, k: float) -> dict:
             "px": [round(w_pt / 72 * dpi), round(h_pt / 72 * dpi)]}
 
 
+FLATTEN_SS = 2              # nadpróbkowanie, gdy wygładzanie Ghostscripta jest niebezpieczne
+
+
+def _flatten_supersampled(base: list, dpi: float, ss: int, src: str, jpg: str) -> str:
+    """Spłaszczenie z nadpróbkowaniem: render ss× gęściej BEZ wygładzania Ghostscripta, uśrednienie
+    bloków ss×ss, zapis JPEG-a CMYK. Tak jak piramida podglądu (render._level0).
+
+    Po co: przy overprincie wygładzanie jest bezpieczne tylko dla strony renderowanej w całości
+    (gs.aa_args), a duża strona się nie mieści. Bez wygładzania litery i linie po spłaszczeniu
+    miały schodki (Tomasz 25.09). Obraz idzie strumieniem pasmami; wynik leży w pliku na dysku
+    (np.memmap), więc nawet 300 Mpx nie trzyma całej strony w pamięci. Zwraca dziennik gs."""
+    import math
+    import numpy as np
+    from PIL import Image
+    import render
+    raw = jpg + ".cmyk"
+    p = gs.stream([*base, "-sDEVICE=pamcmyk32", f"-r{dpi * ss:.4f}", "-sOutputFile=-",
+                   *gs.PREVIEW_PRE, gs.arg_path(src)])
+    out = im = None
+    try:
+        try:
+            W2, H2, ch = render._head(p)
+            if ch != 4:
+                raise RuntimeError("Ghostscript nie zwrócił obrazu CMYK.")
+            W, H = math.ceil(W2 / ss), math.ceil(H2 / ss)
+            out = np.memmap(raw, np.uint8, "w+", shape=(H, W, 4))
+            band_h = max(1, 64_000_000 // (W2 * 4 * ss))          # ~64 MB surowych danych na pasmo
+            for y in range(0, H, band_h):
+                hgt = min(band_h, H - y)
+                rows = min(hgt * ss, H2 - y * ss)
+                a = np.frombuffer(render._read(p, W2 * 4 * rows, "spłaszczenie"), np.uint8).reshape(rows, W2, 4)
+                if rows != hgt * ss or W2 != W * ss:
+                    a = np.pad(a, ((0, hgt * ss - rows), (0, W * ss - W2), (0, 0)), mode="edge")
+                s = a.reshape(hgt, ss, W, ss, 4).sum(axis=(1, 3), dtype=np.uint16)
+                out[y:y + hgt] = ((s + ss * ss // 2) // (ss * ss)).astype(np.uint8)
+        finally:
+            render._close(p)
+        log = bytes(p.err_all).decode("utf-8", "replace")
+        if p.returncode not in (0, None):
+            raise RuntimeError(f"kod {p.returncode}: " + log[-300:])
+        out.flush()
+        # Pillow zapisuje CMYK w konwencji Adobe (odwrócone) — jak jpegcmyk Ghostscripta
+        im = Image.frombuffer("CMYK", (W, H), out, "raw", "CMYK", 0, 1)
+        im.save(jpg, "JPEG", quality=FLATTEN_JPEG_Q, subsampling=0)
+        return log
+    except Exception as e:
+        _rm(jpg)
+        raise ValueError(f"Ghostscript nie dał rady spłaszczyć strony. Komunikat: {e}") from e
+    finally:
+        del im, out
+        _rm(raw)
+
+
 def step_flatten(src, dst, p, job) -> dict:
     """Cała strona zamieniona na JEDEN obraz CMYK — „spłaszczenie" jak w Photoshopie.
 
@@ -723,26 +776,30 @@ def step_flatten(src, dst, p, job) -> dict:
     op = pdfutil.uses_overprint(src)
     gs_src, finfo = _prepare_fonts(src, dst)
     jpg = dst + ".jpg"
-    args = ["-dSAFER", "--permit-file-read=" + icc, *gs.font_path_args(),
-            "-sOutputICCProfile=" + icc, "-sDefaultCMYKProfile=" + icc,
-            "-sDEVICE=jpegcmyk", f"-r{plan['dpi']:.4f}", f"-dJPEGQ={FLATTEN_JPEG_Q}", "-dUseCropBox",
+    # wygładzanie bezpieczne przy overprincie (błąd Ghostscripta — gs.aa_args); gdy przy tej
+    # wielkości strony się nie da — nadpróbkowanie 2× (Tomasz 25.09: „wektory pikselowate")
+    aa = gs.aa_args(op, plan["px"][0], plan["px"][1], 4)
+    base = ["-dSAFER", "--permit-file-read=" + icc, *gs.font_path_args(),
+            "-sOutputICCProfile=" + icc, "-sDefaultCMYKProfile=" + icc, "-dUseCropBox",
             f"-dFirstPage={page + 1}", f"-dLastPage={page + 1}", *gs.SPEED[:1],
-            # wygładzanie bezpieczne przy overprincie (błąd Ghostscripta — gs.aa_args)
-            *gs.aa_args(op, plan["px"][0], plan["px"][1], 4),
-            "-dOverprint=/simulate",                  # na urządzeniu CMYK to nie symulacja, tylko druk
-            "-sOutputFile=" + gs.arg_path(jpg),
-            # bez „fill adjust": Ghostscript domyślnie pogrubia każdy kształt o ułamek piksela —
-            # przy 150 ppi to było widać: tekst o 3,6 % grubszy, krawędzie 2× dalej od ideału
-            # (Tomasz 24.09: „napisy robią się grubsze i mniej wyraźne"). Bez niego 99,9 %.
-            *gs.PREVIEW_PRE, gs.arg_path(gs_src)]
+            "-dOverprint=/simulate"]                 # na urządzeniu CMYK to nie symulacja, tylko druk
+    # bez „fill adjust" (gs.PREVIEW_PRE): Ghostscript domyślnie pogrubia każdy kształt o ułamek
+    # piksela — przy 150 ppi to było widać: tekst o 3,6 % grubszy, krawędzie 2× dalej od ideału
+    # (Tomasz 24.09: „napisy robią się grubsze i mniej wyraźne"). Bez niego 99,9 %.
     try:
-        r = gs.run(args, 1800)
+        if aa:
+            r = gs.run([*base, *aa, "-sDEVICE=jpegcmyk", f"-r{plan['dpi']:.4f}", f"-dJPEGQ={FLATTEN_JPEG_Q}",
+                        "-sOutputFile=" + gs.arg_path(jpg), *gs.PREVIEW_PRE, gs.arg_path(gs_src)], 1800)
+            log = (r.stdout or "") + "\n" + (r.stderr or "")
+            err = None if r.returncode == 0 and os.path.exists(jpg) else gs.log_of(r)
+        else:
+            log, err = _flatten_supersampled(base, plan["dpi"], FLATTEN_SS, gs_src, jpg), None
     finally:
         _rm(gs_src if gs_src != src else None)
     try:
-        if r.returncode != 0 or not os.path.exists(jpg):
-            raise ValueError("Ghostscript nie dał rady spłaszczyć strony. Komunikat: " + gs.log_of(r))
-        subs = gs.substituted((r.stdout or "") + "\n" + (r.stderr or ""), finfo.get("niewidoczne", []))
+        if err:
+            raise ValueError("Ghostscript nie dał rady spłaszczyć strony. Komunikat: " + err)
+        subs = gs.substituted(log, finfo.get("niewidoczne", []))
         if subs:
             raise ValueError(_font_refusal("spłaszczam", subs, finfo))
         with open(jpg, "rb") as fh:
