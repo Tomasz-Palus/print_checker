@@ -81,3 +81,10 @@ Samej instalacji na Windowsie nie da się sprawdzić bez dwóch wydań. Test u T
 - **Przed wydaniem** warto podmienić `app\data\template_index.json` na najpełniejszy indeks. Ten
   z zainstalowanego programu Tomasza leży w `%LOCALAPPDATA%\adChecker\data\template_index.json`
   (1016 produktów wobec 1003 w repozytorium).
+
+## Wydanie 0.4 i test aktualizacji
+
+- **v0.4** wydana 25.09 (build zielony, ok. 3 min). W wydaniu są instalatory Windows i macOS oraz
+  `SHA256SUMS.txt`.
+- **0.4.1** zmienia tylko numer wersji. Służy wyłącznie do sprawdzenia przycisku „Zaktualizuj
+  teraz” na zainstalowanej 0.4.
