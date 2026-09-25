@@ -88,3 +88,19 @@ Samej instalacji na Windowsie nie da się sprawdzić bez dwóch wydań. Test u T
   `SHA256SUMS.txt`.
 - **0.4.1** zmienia tylko numer wersji. Służy wyłącznie do sprawdzenia przycisku „Zaktualizuj
   teraz” na zainstalowanej 0.4.
+- **Test aktualizacji:** działa. W dzienniku u Tomasza 0.4 pobrała 0.4.1 o 10:08, a o 10:09
+  program wystartował już jako 0.4.1.
+
+## 0.4.2 — błąd: drugi plik dziedziczył decyzje z pierwszego (Tomasz 25.09)
+
+- **Objaw:** czasem przy `spady.pdf` Kolory były „✓ CMYK”, a Overprint „✓ wyłączony”, choć
+  w treści było „Nie udało się wyłączyć overprintu”, a w Fontach „Nie udało się zamienić tekstu
+  na krzywe”. W plikach roboczych nie było ani wersji po kolorach, ani po overprincie.
+- **Przyczyna:** stan rozdziałów (`S.settle`, `S.choice`, `S.stepErr`, suwaki, akceptacja) nie
+  był czyszczony przy wgraniu nowego pliku. Drugi (trzeci…) plik w tej samej sesji zastawał
+  rozdziały „domknięte” decyzjami z poprzedniego pliku, choć na nim nic nie zrobiono. Stąd
+  „czasem działa”: pierwszy plik po uruchomieniu zawsze był dobry.
+  - Przyczynę znaleźliśmy, patrząc na żywo na pliki robocze, gdy Tomasz kilka razy wgrywał ten
+    sam plik.
+- **Poprawka:** `state.resetJobState()` przy każdym wgraniu pliku (`main.upload`). Sprawdzone:
+  po ponownym wgraniu tego samego pliku Kolory znów czekają na decyzję, a Overprint jest schowany.

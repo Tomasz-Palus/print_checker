@@ -44,6 +44,17 @@ try {
   if (v > 20 && v < 1000) { S.cssPxPerIn = v; S.calibrated = true; }
 } catch (_) {}
 
+// Nowy plik = czysta kartka. BŁĄD do 0.4.1 (Tomasz 25.09): decyzje z rozdziałów (settle, choice)
+// zostawały po poprzednim pliku — przy drugim wgraniu Kolory i Overprint były „domknięte”, choć na
+// nowym pliku nic nie zrobiono („Nie udało się wyłączyć overprintu”, „…zamienić tekstu na krzywe”).
+export function resetJobState() {
+  Object.assign(S, {
+    settle: {}, choice: {}, stepErr: {}, busy: null,
+    fscan: { key: "", data: null, err: "" }, qual: { key: "", data: null, err: "" },
+    accShown: null, sz: null, sizeEdit: false, cmp: null, sim: null, simMix: 100, cmykProfile: "fogra39",
+  });
+}
+
 const subs = [];
 let queued = false;
 export function onChange(fn) { subs.push(fn); }

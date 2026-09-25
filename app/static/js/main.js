@@ -1,6 +1,6 @@
 // Start programu: wgrywanie pliku, jedna pętla rysowania rozdziałów i podglądu, ustawienia.
 import { $, esc, fmtMm, fmtBytes, api, ask, chapter, initChapters, plural } from "./util.js";
-import { S, changed, onChange, head, template, scaleK, printMm, isPdf, colorSettled, factsKey, STEP_NAME } from "./state.js";
+import { S, changed, onChange, resetJobState, head, template, scaleK, printMm, isPdf, colorSettled, factsKey, STEP_NAME } from "./state.js";
 import { HELP } from "./help.js";
 import * as viewer from "./viewer.js";
 import * as product from "./product.js";
@@ -49,6 +49,7 @@ async function upload(file) {
   const seq = ++upSeq;
   if (S.job) fetch(`/api/jobs/${S.job.job_id}`, { method: "DELETE" }).catch(() => {});
   S.job = null; S.analysis = null; S.analysisFor = null; S.page = 0;
+  resetJobState();
   viewer.setScene(null);
   $("fileErr").hidden = true;
   $("dropIdle").hidden = true; $("dropFile").hidden = false;
