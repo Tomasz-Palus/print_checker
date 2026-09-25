@@ -37,6 +37,11 @@
           <div class="bar" id="upBar" hidden><i></i></div>
         </div>
         <div class="box bad" id="fileErr" hidden></div>
+        <div class="box info" id="fileNotice">
+          <b>Ważne:</b> adChecker pomaga przygotować plik do druku, ale nie zastępuje grafika DTP.
+          Nietypowe projekty może zinterpretować błędnie. Jeśli coś budzi Twoje wątpliwości, przed
+          wysłaniem do druku przekaż projekt do sprawdzenia grafikowi.
+        </div>
       </div>
     </section>
 
@@ -287,6 +292,9 @@
         <div class="box bad" id="quErr" hidden></div>
         <div class="seg rowsel" id="quShow" hidden><button type="button">Pokaż na podglądzie</button></div>
         <details class="more" id="quListBox" hidden><summary>Lista miejsc</summary><ol class="qlist" id="quList"></ol></details>
+        <p class="note" id="quNotice">Ocena jakości jest automatyczna i orientacyjna. Program może ocenić
+          niektóre obrazy inaczej niż grafik i nie wychwyci każdego problemu. Jeśli jakość jest w tym
+          projekcie szczególnie ważna albo masz wątpliwości, poproś grafika o sprawdzenie.</p>
       </div>
     </section>
 
@@ -311,6 +319,7 @@
         <ul class="dlsum" id="dlSum"></ul>
         <a class="btn primary big" id="dlDo" href="#" download>Pobierz plik do druku</a>
         <div class="note" id="dlName"></div>
+        <p class="note">Masz wątpliwości co do pliku? Przed wysłaniem do druku pokaż go grafikowi.</p>
       </div>
     </section>
 

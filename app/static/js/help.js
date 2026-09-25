@@ -69,16 +69,17 @@ export const HELP = {
     i powie, o co poprosić klienta.<br><br>
     Wybierasz w rzędach: <b>Zamień na krzywe</b> albo <b>Zostaw jak jest</b>, a potem
     <b>Pokaż, jak wydrukuje</b>.`,
-  flat: `<b>Spłaszczenie</b> zamienia całą stronę w jeden obraz CMYK — jak „Spłaszcz" w Photoshopie.<br><br>
-    Po co: przezroczystość (cienie, półprzezroczyste elementy, tryby mieszania) drukarnia i tak
-    spłaszcza przed drukiem, a tam, gdzie spotyka się z kolorem dodatkowym albo overprintem,
-    potrafi zostawić szew albo jasną obwódkę. Spłaszczone tutaj — widzisz dokładnie to, co
-    pójdzie na maszynę.<br><br>
+  flat: `<b>Spłaszczenie</b> zamienia całą stronę w jeden obraz CMYK — jak „Spłaszcz” w Photoshopie.<br><br>
+    <b>Używaj go tylko wtedy, gdy to konieczne.</b> Przezroczystość (cienie, półprzezroczyste
+    elementy, tryby mieszania) drukarnia i tak spłaszcza przy druku i zwykle robi to lepiej:
+    tekst i linie zostają wektorowe, a plik jest mniejszy. Spłaszcz tutaj, gdy drukarnia o to
+    prosi albo gdy „Pokaż, jak wydrukuje” pokazuje ślady — szew albo jasną obwódkę tam, gdzie
+    przezroczystość spotyka się z kolorem dodatkowym lub overprintem.<br><br>
     Rozdzielczość zależy od wielkości wydruku: 300 ppi do 80 cm, 200 ppi do 1,5 m, 150 ppi do 3 m,
     wyżej 120 ppi. Cena: tekst i linie przestają być wektorowe, plik robi się większy.<br><br>
-    Wybierasz w rzędach: <b>Spłaszcz projekt</b> albo <b>Zostaw jak jest</b>, a potem
+    Wybierasz w rzędach: <b>Zostaw jak jest</b> albo <b>Spłaszcz projekt</b>, a potem
     <b>Pokaż, jak wydrukuje</b>. Gdy projekt nie ma przezroczystości, wystarczy <b>Zostaw jak
-    jest</b> — rozdział od razu się zamyka (spłaszczyć można i tak).`,
+    jest</b> — rozdział od razu się zamyka.`,
   qual: `Program otwiera każdy obraz w projekcie i czyta jego piksele. Sprawdza dwie rzeczy:<br><br>
     1) czy obraz ma <b>dość pikseli</b> na swój rozmiar na wydruku — wytyczne wymagają
     <b>120 ppi</b> (w pliku 1:10 to 1200 ppi w pliku). Za mało = rozmycie i schodki, trzeba
@@ -87,7 +88,10 @@ export const HELP = {
     ale nic w nich nie ma. To trzeba obejrzeć: bywa też zwykłym rozmyciem ze zdjęcia.<br><br>
     „Pokaż na podglądzie" przechodzi po takich miejscach (strzałki ← →) w <b>rzeczywistej
     wielkości wydruku</b>. Wektor (napisy, kształty) nie ma rozdzielczości i nie jest oceniany.
-    Dokładność oceny ustawisz w Ustawieniach.`,
+    Dokładność oceny ustawisz w Ustawieniach.<br><br>
+    <b>Uwaga:</b> ocena jest automatyczna i orientacyjna. Program może ocenić niektóre obrazy
+    inaczej niż grafik i nie wychwyci każdego problemu — w razie wątpliwości poproś grafika
+    o sprawdzenie.`,
   dl: `Pobierasz ostatnią wersję pliku — ze wszystkimi poprawkami. Zawsze <b>jedną stronę</b>:
     PDF-a z kilkoma stronami nie wysyłamy do druku nigdy. Nazwa pliku to produkt i rola, bez
     wymiarów. Oryginał zostaje nietknięty.`,

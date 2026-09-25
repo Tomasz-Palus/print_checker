@@ -280,13 +280,16 @@ export function renderFlatten() {
       say = c.seen ? "Projekt zostaje warstwowy — przezroczystość spłaszczy drukarnia."
                    : "Projekt zostaje warstwowy. Zobacz, jak to wydrukuje.";
     } else if (kinds.length) {
-      say = `W projekcie jest <b>przezroczystość</b> (${esc(kinds.join(", "))}). Drukarnia spłaszcza ją `
-        + `sama i czasem zostawia ślady — jasne obwódki, szwy. Bezpieczniej spłaszczyć tutaj.`;
+      // Tomasz 25.09: spłaszczać tylko, gdy to konieczne — lepiej, żeby plik spłaszczyła drukarnia
+      say = `W projekcie jest <b>przezroczystość</b> (${esc(kinds.join(", "))}). Zwykle najlepiej `
+        + `zostawić ją drukarni — spłaszczy ją przy druku, a tekst i linie zostaną wektorowe. `
+        + `Spłaszcz tutaj tylko wtedy, gdy to konieczne: drukarnia o to prosi albo podgląd `
+        + `„Pokaż, jak wydrukuje” pokazuje ślady (jasne obwódki, szwy).`;
       note = plan;
     } else {
       // bez przezroczystości też czekamy na wybór (Tomasz 25.09) — zwykle „Zostaw jak jest"
       say = `<span class="say ok">Projekt nie ma przezroczystości</span> — spłaszczać nie trzeba. `
-        + `Kliknij <b>Zostaw jak jest</b>. Spłaszcz, tylko jeśli drukarnia tego wymaga.`;
+        + `Kliknij <b>Zostaw jak jest</b>. Spłaszcz tylko wtedy, gdy drukarnia tego wymaga.`;
       note = plan;
     }
   }

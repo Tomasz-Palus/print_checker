@@ -205,3 +205,28 @@ Samej instalacji na Windowsie nie da się sprawdzić bez dwóch wydań. Test u T
 - Sprawdzone na `spady.pdf`: po Overprincie pojawiają się Fonty i Spłaszczenie, a Jakość dopiero
   po wyborze. Po „Spłaszcz projekt” nic nie znika. Zmiana na „Zostaw jak jest” od razu pokazuje
   Jakość. Samouczek przechodzi.
+
+## 0.4.6 — uwagi o granicach programu, spłaszczanie tylko w razie potrzeby (Tomasz 25.09)
+
+Tomasz: program może błędnie zinterpretować niektóre projekty i nie zastąpi specjalisty; ocena
+jakości też może się mylić; spłaszczać tylko wtedy, gdy to konieczne, bo lepiej, żeby plik
+spłaszczyła drukarnia. Miejsca zaproponował Claude:
+
+- **Na początku:**
+  - Rozdział „Plik”, pod polem do wgrania — niebieska ramka (`#fileNotice`, `.box.info`):
+    „adChecker pomaga przygotować plik do druku, ale nie zastępuje grafika DTP…”. Widać ją
+    przed wgraniem pliku; potem rozdział się zwija.
+  - Pierwszy dymek samouczka („Witaj w adCheckerze!”): jedno zdanie o tym samym.
+- **Na końcu:** rozdział „Pobierz plik do druku” — „Masz wątpliwości co do pliku? Przed wysłaniem
+  do druku pokaż go grafikowi.”
+- **Jakość wydruku:** stała uwaga na dole rozdziału (`#quNotice`) i akapit w pomocy „?”: ocena
+  jest automatyczna i orientacyjna, może się różnić od oceny grafika i nie wychwyci każdego
+  problemu.
+- **Spłaszczenie — nowa zasada: tylko gdy konieczne.**
+  - Tekst przy przezroczystości: zwykle najlepiej zostawić ją drukarni (tekst i linie zostaną
+    wektorowe). Spłaszczyć tylko, gdy drukarnia o to prosi albo „Pokaż, jak wydrukuje” pokazuje
+    ślady. Wcześniej program zalecał spłaszczenie („Bezpieczniej spłaszczyć tutaj”).
+  - Pomoc „?” przepisana w tym duchu.
+  - Samouczek przy Spłaszczeniu każe teraz kliknąć **„Zostaw jak jest”** (wcześniej „Spłaszcz
+    projekt”).
+- Sprawdzone: samouczek przechodzi od początku do końca, teksty widoczne na zrzutach.

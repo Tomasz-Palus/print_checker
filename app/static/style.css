@@ -85,6 +85,7 @@ a { color: var(--accent); }
 .box.warn { background: var(--warn-bg); color: #7a4a06; }
 .box.bad { background: var(--bad-bg); color: #7f1d1d; }
 .box.ok { background: var(--ok-bg); color: #14532d; }
+.box.info { background: #eef3ff; color: #1e3a8a; line-height: 1.45; }
 
 /* plik */
 .drop { border: 2px dashed #c9ced6; border-radius: 10px; padding: 18px; text-align: center; cursor: pointer; color: var(--muted); }

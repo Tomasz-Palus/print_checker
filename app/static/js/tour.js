@@ -35,7 +35,9 @@ const STEPS = [
   { part: PART1, title: "Witaj w adCheckerze!",
     text: `Pomogę Ci przygotować plik do druku — nie musisz znać się ani na grafice, ani na druku.<br><br>
       Najpierw raz ustawimy trzy rzeczy, a potem przejdziemy razem przez przykładowy projekt.
-      Zajmie to około 10 minut.`,
+      Zajmie to około 10 minut.<br><br>
+      <span class="muted">adChecker podpowiada, ale nie zastępuje grafika. Jeśli coś budzi Twoje
+      wątpliwości, przekaż projekt do sprawdzenia specjaliście.</span>`,
     next: "Zaczynamy", cancel: "Nie teraz" },
 
   { part: PART1, target: ["btnSettings"], title: "Ustawienia", place: "bottom",
@@ -181,9 +183,10 @@ const STEPS = [
     wait: fontsSettled, skipDone: true },
 
   { part: PART2, target: ["ch-flat"], title: "Spłaszczenie", when: isPdf,
-    text: twoStep("flatten", `Cienie i półprzezroczyste elementy drukarnia i tak łączy w jedno — i czasem zostawia
-      przy tym ślady. <b>Spłaszczenie</b> robi to tutaj: cała strona staje się jednym obrazem, dokładnie takim,
-      jaki widzisz.`, "Spłaszcz projekt"),
+    text: twoStep("flatten", `Cienie i półprzezroczyste elementy drukarnia łączy w jedno przy druku i zwykle robi
+      to dobrze. <b>Spłaszczenie</b> robi to tutaj — cała strona staje się jednym obrazem, ale tekst i linie
+      przestają być wektorowe. Dlatego używaj go <b>tylko wtedy, gdy to konieczne</b>. Tu zostawiamy to
+      drukarni.`, "Zostaw jak jest"),
     wait: flattenSettled, skipDone: true },
 
   { part: PART2, target: ["ch-qual"], title: "Jakość wydruku",
