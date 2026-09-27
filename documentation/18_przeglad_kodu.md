@@ -167,3 +167,12 @@ Przegląd całego programu na prośbę Tomasza. Bez zmian w kodzie — to lista 
 3. **0.5:** A10, A12, A13 — obrócone strony, CropBox, UserUnit (większa przebudowa geometrii)
    i szablon.
 4. **Osobno:** B16–B18, C19–C20, C23–C24 — podpis aktualizacji, CI, jedna instancja, Mac.
+
+## Stan naprawy
+
+- **0.4.8:** A1, A2, A3, A4, A5, A11, A14, B15 — zrobione.
+- **0.4.9:** A6, A7, A8, A9, C21, C22, C26, C27 — zrobione.
+- **Zostaje:**
+  - A10, A12, A13 — obrócone strony, CropBox, UserUnit, szablon, OutputIntent.
+  - B16–B18 — podpis aktualizacji, CI, pliki po odinstalowaniu.
+  - C19, C20, C23–C25, C28 i drobne z części D.

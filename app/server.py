@@ -42,10 +42,16 @@ def err(msg: str, code: int = 400):
     return jsonify({"error": msg}), code
 
 
+class JobNotFound(Exception):
+    """Zadania nie ma (program uruchomiony od nowa, plik usunięty). Osobny wyjątek — wcześniej
+    handler łapał KAŻDY LookupError (IndexError, KeyError) i każdy błąd kończył się radą „wgraj
+    plik jeszcze raz” (przegląd kodu 27.09, C22)."""
+
+
 def job_or_404(jid):
     job = jobs.get(jid)
     if not job:
-        raise LookupError
+        raise JobNotFound
     return job
 
 
@@ -80,9 +86,20 @@ def _only_this_computer():
         return err("Zapytanie z innej strony — odrzucone.", 403)
 
 
-@app.errorhandler(LookupError)
+@app.errorhandler(JobNotFound)
 def _nojob(_):
     return err("Nie ma takiego zadania — wgraj plik jeszcze raz.", 404)
+
+
+@app.errorhandler(Exception)
+def _crash(e):
+    """Nieprzewidziany błąd: JSON z nazwą błędu (interfejs pokazuje go w rozdziale) i ślad w dzienniku."""
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return e
+    import traceback
+    traceback.print_exc()
+    return err(f"Błąd programu: {type(e).__name__}: {e}", 500)
 
 
 @app.errorhandler(413)
@@ -163,7 +180,14 @@ def api_upload():
         return err(str(e), 415)
     except Exception as e:
         return err(f"Nie udało się otworzyć pliku: {type(e).__name__}: {e}")
-    job.suggestions = suggestions_for(job, 0)
+    if job.info.get("page_count", 0) < 1:
+        jobs.delete(job.id)
+        return err("Plik nie ma żadnej strony.", 415)
+    try:
+        job.suggestions = suggestions_for(job, 0)
+    except Exception as e:                    # propozycje to wygoda — plik i tak się otwiera
+        print(f"[propozycje] {type(e).__name__}: {e}")
+        job.suggestions = []
     return jsonify(job.to_json())
 
 
@@ -231,8 +255,13 @@ def api_thumb(jid, n):
         return err("Nie ma takiej strony.", 404)
     cache = os.path.join(job.dir, f"thumb_{n}.png")
     if not os.path.exists(cache):
-        with open(cache, "wb") as fh:
-            fh.write(render.page_png(job.original.path, n, 240))
+        # przez plik tymczasowy: po błędzie renderu nie zostaje pusty plik, a równoległe
+        # zapytanie nie dostaje połowy obrazka (przegląd kodu 27.09, C21)
+        png = render.page_png(job.original.path, n, 240)
+        tmp = f"{cache}.{threading.get_ident()}.part"
+        with open(tmp, "wb") as fh:
+            fh.write(png)
+        os.replace(tmp, cache)
     return send_file(cache, mimetype="image/png", max_age=3600)
 
 
@@ -273,6 +302,8 @@ def api_frames(jid):
     pierwszą poprawką, więc to dokładnie ten plik, na którym zadziała."""
     job = job_or_404(jid)
     page = request.args.get("page", 0, type=int)
+    if not 0 <= page < job.info["page_count"]:
+        return err("Nie ma takiej strony.", 404)
     glp = request.args.get("glpage", -1, type=int)
     mm = job.original.pages_mm[page]
     if job.info["kind"] == "raster" or not mm or not mm[0]:
@@ -327,7 +358,7 @@ def api_quality(jid):
         k = round(float(request.args.get("k", "1")), 4)
         block = int(request.args.get("block", "128"))
         pm = (float(request.args["w_mm"]), float(request.args["h_mm"])) if request.args.get("w_mm") else None
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, KeyError):
         return err("Złe parametry.")
     if not (0 <= page < job.info["page_count"]) or not (0.01 <= k <= 100):
         return err("Złe parametry.")
@@ -352,10 +383,16 @@ def api_download(jid):
     """Plik do druku: OSTATNIA wersja, zawsze JEDNA strona (zasada Tomasza — PDF-a z kilkoma
     stronami nie pobieramy nigdy). Obraz — jak jest (JPG/TIFF po ewentualnej zamianie na CMYK)."""
     job = job_or_404(jid)
-    path, fname, mime = download_file(job, request.args.get("page", 0, type=int), request.args.get("name", ""))
+    page = request.args.get("page", 0, type=int)
+    if not 0 <= page < job.info["page_count"]:
+        return err("Nie ma takiej strony.", 404)
+    path, fname, mime = download_file(job, page, request.args.get("name", ""))
     resp = send_file(path, mimetype=mime, as_attachment=True, download_name=fname)
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+_download_lock = threading.Lock()
 
 
 def download_file(job, page: int, name: str) -> tuple[str, str, str]:
@@ -369,15 +406,20 @@ def download_file(job, page: int, name: str) -> tuple[str, str, str]:
         ext = ".pdf"
         if job.info["page_count"] > 1:
             path = os.path.join(job.dir, f"pobierz_{v.id}_p{page}.pdf")
-            if not os.path.exists(path):
-                import pikepdf
-                with pikepdf.open(v.path) as pdf:
-                    keep = pdf.pages[page]
-                    out = pikepdf.new()
-                    out.pages.append(keep)
-                    if "/OutputIntents" in pdf.Root:        # profil kolorystyczny idzie z plikiem
-                        out.Root.OutputIntents = out.copy_foreign(pdf.Root.OutputIntents)
-                    out.save(path)
+            # jeden naraz i przez plik tymczasowy: podwójne kliknięcie (albo okno „Zapisz jako”
+            # równolegle) dawało obcięty PDF (przegląd kodu 27.09, C21)
+            with _download_lock:
+                if not os.path.exists(path):
+                    import pikepdf
+                    tmp = path + ".part"
+                    with pikepdf.open(v.path) as pdf:
+                        keep = pdf.pages[page]
+                        out = pikepdf.new()
+                        out.pages.append(keep)
+                        if "/OutputIntents" in pdf.Root:        # profil kolorystyczny idzie z plikiem
+                            out.Root.OutputIntents = out.copy_foreign(pdf.Root.OutputIntents)
+                        out.save(tmp)
+                    os.replace(tmp, path)
     mime = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
             ".tif": "image/tiff", ".tiff": "image/tiff", ".png": "image/png"}.get(ext, "application/octet-stream")
     return path, base + ext, mime

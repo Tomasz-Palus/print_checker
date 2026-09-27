@@ -61,6 +61,12 @@ $("quShow").querySelector("button").addEventListener("click", () => {
   changed();
 });
 
+// po błędzie oceny — nowa próba (serwer zaczyna od nowa, gdy poprzednia skończyła się błędem)
+$("quRetry").querySelector("button").addEventListener("click", () => {
+  S.qual = { key: "", data: null, err: "" };
+  changed();
+});
+
 export function renderQuality() {
   const el = $("ch-qual");
   el.hidden = !flattenSettled();
@@ -76,6 +82,7 @@ export function renderQuality() {
   let st = "open", sum = "", say = "", note = "";
   const bar = $("quBar");
   bar.hidden = true;
+  $("quRetry").hidden = !S.qual.err;
   if (S.qual.err) {
     st = "done"; sum = "nie udało się sprawdzić";
     say = `<span class="say warn">Nie udało się sprawdzić jakości.</span>`; note = esc(S.qual.err);

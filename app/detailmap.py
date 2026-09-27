@@ -748,6 +748,25 @@ def build_pdf_objects(path: str, images: list, page_index: int, k: int, block: i
     pw, ph = (page_mm or (None, None))
     recs = [r for r in images or [] if not r.get("mask") and r.get("xref") and any(p.get("page", 0) == page_index for p in r["placements"])]
     areas = []
+
+    def lowres_only(rec, pl):
+        """Za mało pikseli na wydruku — fakt geometryczny, bez dekodowania obrazu. Dla obrazów inline
+        (bez numeru obiektu) i takich, których nie da się odczytać (przegląd kodu 27.09, A6/A8):
+        wcześniej wypadały z oceny całkiem i plik dostawał „ok”."""
+        for p in pl:
+            nominal = (p["ppi"] / k) if p.get("ppi") else None
+            if nominal is None or nominal >= REQUIRED_PPI or not (pw and ph and p.get("bw_mm") and p.get("bh_mm")):
+                continue
+            areas.append({"fx": round(p["x_mm"] / pw, 5), "fy": round(p["y_mm"] / ph, 5),
+                          "fw": round(p["bw_mm"] / pw, 5), "fh": round(p["bh_mm"] / ph, 5),
+                          "xref": rec.get("xref"), "page": page_index, "px": [rec["width"], rec["height"]],
+                          "uses": len(pl), "mm": [round(p["bw_mm"] * k, 1), round(p["bh_mm"] * k, 1)],
+                          "blocks": 0, "scope": "element", "reason": "lowres",
+                          "nominal_ppi": round(nominal, 1), "factor": 1.0, "ppi": round(nominal, 1)})
+
+    for rec in images or []:                       # jak niżej: obrazki < 8 px to wypełnienia, nie zdjęcia
+        if rec.get("inline") and not rec.get("mask") and rec["width"] >= 8 and rec["height"] >= 8:
+            lowres_only(rec, [p for p in rec["placements"] if p.get("page", 0) == page_index])
     blocks_total = 0; n_place = 0; per_image = []; soft_skipped = 0; small_skipped = 0; conf_counts = {}
     invisible_skipped = 0
     doc = pymupdf.open(path)
@@ -772,6 +791,7 @@ def build_pdf_objects(path: str, images: list, page_index: int, k: int, block: i
                         del g, chunks
                 except Exception as e:
                     per_image.append({"xref": rec["xref"], "error": f"{type(e).__name__}: {e}"})
+                    lowres_only(rec, pl)                 # pikseli nie przeczytamy, ale ich liczbę znamy
                     progress(i + 1, len(recs))
                     continue
                 res = _finish(acc, w, h, b)

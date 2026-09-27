@@ -288,3 +288,43 @@ Numery jak w `18_przeglad_kodu.md`.
   - Sprawdzone: obca strona, `Origin: null`, inny port, podmieniony Host → 403; własne okno
     i localhost → 200.
 - Samouczek przechodzi od początku do końca.
+
+## 0.4.9 — poprawki z przeglądu kodu, część 2 (27.09)
+
+Numery jak w `18_przeglad_kodu.md`.
+
+- **A6 — obrazy inline.** pikepdf nazywa operator `"INLINE IMAGE"`, a kod szukał `"BI"`.
+  - Teraz obraz inline liczy się do kolorów i do listy obrazów, z rozmiarem i ppi.
+  - Nie ma numeru obiektu, więc ocena jakości nie mierzy jego detalu. Sprawdza tylko, czy ma dość
+    pikseli (`detailmap.lowres_only`). Obrazki mniejsze niż 8 px to wypełnienia — jak dotąd
+    pomijane.
+  - Sprawdzone: obraz inline RGB 20 × 20 px rozciągnięty na 28 cm → „RGB” w kolorach, jakość
+    „bad” (1,8 ppi). Wcześniej: brak koloru i werdykt „sam wektor”.
+- **A7 — adnotacje.** Wygląd (`/AP /N`) adnotacji z flagą „drukuj” i bez „ukryta” jest
+  analizowany jak treść strony (`Analyzer.annotations`, macierz z `/Rect` i `/BBox`). Sprawdzone:
+  stempel z RGB, overprintem i nieosadzonym fontem → wszystko wykryte (wcześniej „czysto”).
+- **A8 — obraz, którego nie da się odczytać,** nie wypada już z oceny. Sprawdzenie liczby pikseli
+  (za mało ppi) działa bez dekodowania.
+- **A9 — wzory (tiling pattern).** Macierz wzoru liczona względem przestrzeni strony albo formy,
+  a nie macierzy w chwili `scn`. Sprawdzone: obraz we wzorze przy `cm 0.1` → 7,2 ppi i 353 mm
+  (wcześniej 72 ppi i 35 mm).
+- **C26 — formy rysujące same siebie** nie zawieszają już analizy. Działa ochrona przed cyklem
+  i budżet 3 mln operatorów (`truncated` liczy się jako ostrzeżenie). Sprawdzone: plik z cyklem
+  — ułamek sekundy (wcześniej > 60 s).
+- **C27 — ocenę jakości po błędzie da się powtórzyć.** Serwer zaczyna od nowa, gdy poprzednia
+  próba skończyła się błędem. W rozdziale pojawia się przycisk „Sprawdź jeszcze raz”.
+- **C21:**
+  - Miniatura stron zapisywana przez plik tymczasowy — po błędzie nie zostaje pusta.
+  - Plik do pobrania budowany pod blokadą i przez plik tymczasowy. Sprawdzone: cztery
+    równoległe pobrania — każde pełne.
+- **C22 — błędy mówią prawdę:**
+  - Własny wyjątek `JobNotFound` zamiast łapania każdego `LookupError`.
+  - Nieprzewidziany błąd zwraca JSON z nazwą błędu, a ślad trafia do dziennika.
+  - Numer strony spoza zakresu (`download`, `frames`, okno „Zapisz jako”) daje „Nie ma takiej
+    strony”.
+  - Plik bez stron jest odrzucany przy wgraniu.
+  - Błąd propozycji produktu nie blokuje wgrania.
+- **Bez regresji:**
+  - Analiza pliku przykładowego (3 strony) i `spady.pdf` daje wynik identyczny ze starą wersją
+    (porównanie pole po polu).
+  - Self-test OK, samouczek i testy rozdziałów przechodzą.

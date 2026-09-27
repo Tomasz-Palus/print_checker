@@ -119,6 +119,8 @@ class Api:
         job = jobs.get(jid)
         if not job:
             return {"ok": False, "error": "Nie ma takiego zadania — wgraj plik jeszcze raz."}
+        if not 0 <= int(page) < job.info["page_count"]:
+            return {"ok": False, "error": "Nie ma takiej strony."}
         path, fname, _ = server.download_file(job, int(page), name)
         ext = os.path.splitext(fname)[1].lstrip(".") or "*"
         res = webview.windows[0].create_file_dialog(

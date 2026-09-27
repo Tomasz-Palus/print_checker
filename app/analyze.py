@@ -92,6 +92,9 @@ class Analyzer:
         self.unknown_ops = 0
         self.fonts = Counter()          # (basefont, embedded) -> użycia Tf
         self.visited_forms = set()
+        self._active_forms = set()      # formy w toku (ochrona przed cyklem: forma rysuje samą siebie)
+        self._budget = OPS_BUDGET       # ile operatorów wolno przejść (formy wielokrotnie zagnieżdżone)
+        self.truncated = False          # budżet się skończył — analiza niepełna
         self.page_index = 0
         self.page_box = (0.0, 0.0, 0.0, 0.0)   # MediaBox bieżącej strony (x0, y0, x1, y1) w pt
 
@@ -220,9 +223,9 @@ class Analyzer:
             pass
 
     # --- obrazy
-    def _image(self, xobj, ctm, resources, name):
+    def _image(self, xobj, ctm, resources, name, inline=False):
         try:
-            key = xobj.objgen
+            key = xobj.objgen if not inline else ("inline", id(xobj))
         except Exception:
             key = (id(xobj), 0)
         w = int(xobj.get("/Width", 0)); h = int(xobj.get("/Height", 0))
@@ -249,7 +252,9 @@ class Analyzer:
                 "smask": "/SMask" in xobj or ("/Mask" in xobj),
                 "filter": str(xobj.get("/Filter", "")).replace("/", ""),
                 "placements": [], "min_ppi": None,
-                "xref": key[0] if isinstance(key, tuple) else None,
+                # obraz inline nie ma numeru obiektu — detailmap go nie dekoduje, sprawdza tylko
+                # liczbę pikseli (przegląd kodu 27.09, A6)
+                "xref": None if inline else (key[0] if isinstance(key, tuple) else None), "inline": inline,
                 "page": self.page_index, "rect_pdf": rect_pdf,
             }
             self._img_by_xref[key] = rec
@@ -277,13 +282,19 @@ class Analyzer:
 
     # --- strumień treści
     def walk(self, container, resources, ctm, depth=0):
-        if depth > 12:
+        if depth > 12 or self._budget <= 0:
+            if self._budget <= 0:
+                self.truncated = True
             return
         try:
             ops = pikepdf.parse_content_stream(container)
         except Exception:
             self.unknown_ops += 1
             return
+        self._budget -= len(ops)
+        # przestrzeń WZORU (pattern) = domyślna przestrzeń tego strumienia (strony albo formy),
+        # a nie macierz w chwili `scn` (przegląd kodu 27.09, A9: ppi obrazu we wzorze zawyżone 10×)
+        base_ctm = ctm
         stack = []
         fill_cs = {"family": "Gray"}   # domyślnie DeviceGray
         stroke_cs = {"family": "Gray"}
@@ -317,12 +328,12 @@ class Analyzer:
                     stroke_cs = self.classify(operands[0], resources)
                 elif o in ("sc", "scn"):
                     if fill_cs.get("family") == "Pattern":
-                        self._pattern(operands, resources, ctm, "fill", depth)
+                        self._pattern(operands, resources, base_ctm, "fill", depth)
                     else:
                         self._record(fill_cs, "fill")
                 elif o in ("SC", "SCN"):
                     if stroke_cs.get("family") == "Pattern":
-                        self._pattern(operands, resources, ctm, "stroke", depth)
+                        self._pattern(operands, resources, base_ctm, "stroke", depth)
                     else:
                         self._record(stroke_cs, "stroke")
                 elif o == "sh":
@@ -333,15 +344,13 @@ class Analyzer:
                     self._extgstate(operands[0], resources)
                 elif o == "Tf":
                     self._font(operands[0], resources)
-                elif o == "BI":
+                elif o in ("BI", "INLINE IMAGE"):   # pikepdf: „INLINE IMAGE” (przegląd kodu 27.09, A6)
                     self.inline_images += 1
                     if operands and isinstance(operands[0], pikepdf.PdfInlineImage):
-                        ii = operands[0]
                         try:
-                            cs = ii.obj.get("/CS") or ii.obj.get("/ColorSpace")
-                            self._record(self.classify(cs, resources), "inline")
+                            self._image(_InlineDict(operands[0].obj), ctm, resources, "inline", inline=True)
                         except Exception:
-                            pass
+                            self.unknown_ops += 1
                 elif o == "Do":
                     xod = resources.get("/XObject") if resources is not None else None
                     if xod is None or operands[0] not in xod:
@@ -369,7 +378,36 @@ class Analyzer:
         if grp is not None and str(grp.get("/S", "")) == "/Transparency" and key not in self.visited_forms:
             self.transparency["grupa przezroczystości"] += 1
         self.visited_forms.add(key)
-        self.walk(xo, res, _mul(m, ctm), depth + 1)
+        if key in self._active_forms:                # forma rysuje samą siebie (cykl) — koniec
+            self.unknown_ops += 1
+            return
+        self._active_forms.add(key)
+        try:
+            self.walk(xo, res, _mul(m, ctm), depth + 1)
+        finally:
+            self._active_forms.discard(key)
+
+    # --- adnotacje (stemple, pola formularzy…) — ich wygląd drukuje się jak treść strony
+    def annotations(self, page):
+        """Wygląd (/AP /N) adnotacji z flagą „drukuj” i bez „ukryta” — kolory, overprint, fonty
+        i obrazy w stemplu drukują się jak reszta strony (przegląd kodu 27.09, A7)."""
+        for annot in (page.get("/Annots") or []):
+            try:
+                flags = int(annot.get("/F", 0))
+                if not flags & 4 or flags & 2:           # bez „Print” albo „Hidden” — nie drukuje się
+                    continue
+                ap = annot.get("/AP")
+                n = ap.get("/N") if ap is not None else None
+                if n is None:
+                    continue
+                if not isinstance(n, pikepdf.Stream):    # słownik stanów (pole wyboru…) — bieżący /AS
+                    st = annot.get("/AS")
+                    n = n.get(st) if st is not None else None
+                    if not isinstance(n, pikepdf.Stream):
+                        continue
+                self._form(n, _annot_ctm(n, annot.get("/Rect")), page.get("/Resources"), 0)
+            except Exception:
+                self.unknown_ops += 1
 
     def _pattern(self, operands, resources, ctm, kind, depth):
         try:
@@ -410,6 +448,43 @@ class Analyzer:
             pass
 
 
+class _InlineDict:
+    """Słownik obrazu inline z pełnymi nazwami kluczy (w BI…ID wolno skróty: /W, /CS, /BPC…)."""
+    ABBR = {"/Width": "/W", "/Height": "/H", "/ColorSpace": "/CS", "/BitsPerComponent": "/BPC",
+            "/ImageMask": "/IM", "/Filter": "/F", "/Decode": "/D", "/Interpolate": "/I"}
+
+    def __init__(self, obj):
+        self.obj = obj
+
+    def get(self, key, default=None):
+        v = self.obj.get(key)
+        if v is None and key in self.ABBR:
+            v = self.obj.get(self.ABBR[key])
+        return default if v is None else v
+
+    def __contains__(self, key):
+        return self.get(key) is not None
+
+
+OPS_BUDGET = 3_000_000        # operatorów na analizę — powyżej: formy zagnieżdżone setki razy
+
+
+def _annot_ctm(form, rect):
+    """Macierz, którą PDF stawia wygląd adnotacji w jej /Rect: BBox przekształcony /Matrix formy
+    ma wypełnić /Rect (PDF 1.7, 12.5.5). `_form` sam dokłada /Matrix — tu reszta."""
+    r = [float(v) for v in rect]
+    bb = [float(v) for v in form.get("/BBox", [0, 0, 1, 1])]
+    mtx = form.get("/Matrix")
+    m = [float(v) for v in mtx] if mtx is not None else [1, 0, 0, 1, 0, 0]
+    pts = [(bb[0], bb[1]), (bb[2], bb[1]), (bb[0], bb[3]), (bb[2], bb[3])]
+    xs = [m[0] * x + m[2] * y + m[4] for x, y in pts]
+    ys = [m[1] * x + m[3] * y + m[5] for x, y in pts]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    sx = (max(r[0], r[2]) - min(r[0], r[2])) / (x1 - x0) if x1 > x0 else 1.0
+    sy = (max(r[1], r[3]) - min(r[1], r[3])) / (y1 - y0) if y1 > y0 else 1.0
+    return [sx, 0, 0, sy, min(r[0], r[2]) - x0 * sx, min(r[1], r[3]) - y0 * sy]
+
+
 def _mul(m, n):
     """m × n (najpierw m, potem n) dla macierzy PDF [a b c d e f]."""
     a, b, c, d, e, f = m
@@ -446,6 +521,7 @@ def analyze_pdf(path: str, only_page: int | None = None) -> dict:
                 pages.append({"index": i, "images": 0})
                 continue
             an.walk(page, res, [1, 0, 0, 1, 0, 0])
+            an.annotations(page)
             pages.append({"index": i, "images": len(an.images) - before_imgs})
 
         # Realny detal obrazów liczy detailmap.py (rozdział „Jakość wydruku") — tu tylko fakty.
@@ -547,7 +623,7 @@ def _summarize_pdf(an: Analyzer, pages, intents, meta, coverage=None, page_sizes
         "overprint_uses": an.overprint_uses,
         "transparency": dict(an.transparency),
         "fonts": [{"name": n, "embedded": e, "uses": c} for (n, e), c in an.fonts.most_common()],
-        "parse_warnings": an.unknown_ops,
+        "parse_warnings": an.unknown_ops + (1 if an.truncated else 0),
         "per_page": pages,
         "_images": an.images,     # pełne rekordy (xref, wszystkie umiejscowienia) — server zdejmuje przed wysłaniem do UI
     }
