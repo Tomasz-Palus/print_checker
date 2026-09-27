@@ -1,6 +1,6 @@
 // Rozdziały „Produkt", „Rola pliku" i „Strona".
 import { $, esc, fmtMm, fold, api, chapter } from "./util.js";
-import { S, changed, template, scaleK, productOk, roleSettled, pageSettled } from "./state.js";
+import { S, changed, template, scaleK, productOk, roleSettled, pageSettled, resetJobState } from "./state.js";
 
 // ------------------------------------------------------------------ lista produktów
 export async function loadProducts(refresh = false) {
@@ -274,6 +274,9 @@ export function renderRole() {
 // Strona idzie PRZED produktem: propozycje produktu i roli liczą się z wymiaru tej strony.
 async function setPage(n, confirm) {
   if (S.job.versions.length > 1 && !(await resetSteps("Wybrać inną stronę?"))) return false;
+  // decyzje w rozdziałach („zostaw jak jest”, wymiar „zgadza się”, akceptacja…) dotyczyły tamtej
+  // strony — bez tego strona 2 przechodziła do pobrania niesprawdzona (przegląd kodu 27.09, A3)
+  resetJobState();
   S.page = n; S.pageOk = !!confirm; S.roleOk = false;
   changed();
   if (confirm) await refreshSuggestions();

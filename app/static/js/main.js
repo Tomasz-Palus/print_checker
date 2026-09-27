@@ -49,6 +49,7 @@ async function upload(file) {
   const seq = ++upSeq;
   if (S.job) fetch(`/api/jobs/${S.job.job_id}`, { method: "DELETE" }).catch(() => {});
   S.job = null; S.analysis = null; S.analysisFor = null; S.page = 0;
+  anSeq++; anBusy = null;                       // analiza poprzedniego pliku w toku — do kosza
   resetJobState(); resetReveal();
   viewer.setScene(null);
   $("fileErr").hidden = true;
@@ -107,10 +108,10 @@ async function loadAnalysis() {
   anBusy = key;
   try {
     const a = await api(`/api/jobs/${S.job.job_id}/analysis?v=${v.id}&page=${S.page}`);
-    if (seq !== anSeq) return;
+    if (seq !== anSeq || factsKey() !== key) { if (anBusy === key) anBusy = null; return; }   // inny plik / wersja / strona
     S.analysis = a; S.analysisFor = key; S.factsCache[key] = a;
   } catch (e) {
-    if (seq !== anSeq) return;
+    if (seq !== anSeq || factsKey() !== key) { if (anBusy === key) anBusy = null; return; }
     S.analysis = { error: e.message }; S.analysisFor = key;
   }
   anBusy = null;
@@ -304,7 +305,10 @@ function render() {
     renderFrames(); renderTrim(); renderSize(); renderColor(); renderOverprint(); renderFonts(); renderFlatten();
     renderQuality(); renderAccept(); renderDownload();
   } else {
-    $("ch-qual").hidden = $("ch-acc").hidden = $("ch-dl").hidden = true;
+    // bez pliku (wgrywanie, błąd wgrania) nie ma czego pokazywać — stare rozdziały z żywymi
+    // przyciskami zapisywały decyzje dla NASTĘPNEGO pliku (przegląd kodu 27.09, A5)
+    for (const id of ["ch-role", "ch-frames", "ch-trim", "ch-size", "ch-color", "ch-op", "ch-fonts", "ch-flat",
+                      "ch-qual", "ch-acc", "ch-dl"]) $(id).hidden = true;
   }
   // Rozwinięte same (Tomasz 24.09): ZAWSZE dwa ostatnie widoczne rozdziały — bieżący i ten tuż
   // przed nim; reszta zwinięta. Tylko przy PRZEJŚCIU do innego rozdziału, więc ręcznie da się

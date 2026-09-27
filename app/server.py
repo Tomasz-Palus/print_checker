@@ -49,6 +49,37 @@ def job_or_404(jid):
     return job
 
 
+# ---------------------------------------------------------------------------- tylko ten komputer
+# Serwer słucha na 127.0.0.1 na stałym porcie — ale KAŻDA strona otwarta w przeglądarce może
+# wysłać tu zapytanie (formularz, fetch no-cors), a przez „DNS rebinding” nawet czytać odpowiedzi.
+# Dlatego (przegląd kodu 27.09, B15):
+# - nagłówek Host musi wskazywać ten komputer (127.0.0.1 / localhost / [::1]);
+# - zapytanie z nagłówkiem Origin (każde z przeglądarki poza zwykłym GET) musi pochodzić z tej samej
+#   strony co program. Zapytania bez Origin (self-test, sprawdzanie drugiego uruchomienia) przechodzą.
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+
+
+def _hostname(hostport: str) -> str:
+    h = (hostport or "").strip().lower()
+    if h.startswith("["):
+        return h[:h.find("]") + 1]
+    return h.split(":", 1)[0]
+
+
+@app.before_request
+def _only_this_computer():
+    if _hostname(request.host) not in LOCAL_HOSTS:
+        return err("Zapytanie spoza tego komputera — odrzucone.", 403)
+    origin = request.headers.get("Origin")
+    if origin is not None:
+        from urllib.parse import urlsplit
+        o = urlsplit(origin)
+        if o.scheme not in ("http", "https") or o.netloc.lower() != request.host.lower():
+            return err("Zapytanie z innej strony — odrzucone.", 403)
+    if request.headers.get("Sec-Fetch-Site") == "cross-site":
+        return err("Zapytanie z innej strony — odrzucone.", 403)
+
+
 @app.errorhandler(LookupError)
 def _nojob(_):
     return err("Nie ma takiego zadania — wgraj plik jeszcze raz.", 404)

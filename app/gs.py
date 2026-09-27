@@ -49,6 +49,10 @@ PDFWRITE_KEEP_IMAGES = [
     "-dAutoFilterColorImages=false", "-dColorImageFilter=/FlateEncode",
     "-dAutoFilterGrayImages=false", "-dGrayImageFilter=/FlateEncode"]
 
+# pdfwrite domyślnie (/PageByPage) OBRACA stronę, na której większość tekstu biegnie pionowo —
+# plik do druku zmieniał orientację po zamianie na CMYK (przegląd kodu 27.09, A11). Zawsze /None.
+PDFWRITE_NO_ROTATE = ["-dAutoRotatePages=/None"]
+
 # Ile pamięci wolno dać na render całej strony naraz (patrz aa_args).
 FULLPAGE_MAX = 1_500_000_000
 
@@ -203,13 +207,20 @@ def font_path_args() -> list:
 def substituted(log: str, ignore=()) -> list[str]:
     """Fonty, za które Ghostscript wziął ZAMIENNIK (decyzja Tomasza: nigdy kroju zastępczego).
 
-    Tylko bez `-q` Ghostscript pisze „Loading font X (or substitute) from <ścieżka>". Font
+    Tylko bez `-q` Ghostscript pisze „Loading font X (or substitute) from <ścieżka>" (przy
+    `stream` — `quiet=False`; przegląd kodu 27.09: spłaszczenie szło z `-q` i nic nie widziało). Font
     z systemu ma ścieżkę w katalogu fontów, zamiennik — w zasobach Ghostscripta (Resource/Font,
     na Windowsie `%rom%`). Fonty standardowe PDF-a (Helvetica…) pomijamy: ich zamiennik jest
     wzorcowy."""
     from pdfutil import is_base14
     skip = {x.split("+")[-1] for x in ignore}
     out = []
+    # font CID (np. japoński, chiński, czasem polski z Worda): Ghostscript mówi wprost „substitute”
+    # i bierze krój z CIDFSubst (review 27.09, A14)
+    for m in re.finditer(r"Loading CIDFont (\S+) substitute from", log):
+        name = m.group(1)
+        if name.split("+")[-1] not in skip and name not in out:
+            out.append(name)
     for m in re.finditer(r"Loading font (\S+) \(or substitute\) from (.+)", log):
         name, path = m.group(1), m.group(2).strip().lower().replace("\\", "/")
         if is_base14(name) or name.split("+")[-1] in skip:
@@ -230,13 +241,16 @@ def log_of(r: subprocess.CompletedProcess, n: int = 400) -> str:
     return ((r.stderr or "") + " " + (r.stdout or "")).strip()[-n:] or "brak komunikatu"
 
 
-def stream(args: list) -> subprocess.Popen:
+def stream(args: list, quiet: bool = True) -> subprocess.Popen:
     """Ghostscript z obrazem na stdout (piramida podglądu).
 
     Komunikaty (stderr) czytamy NA BIEŻĄCO w osobnym wątku: na Windowsie bufor potoku ma
     ~4 KB — przy wielu ostrzeżeniach Ghostscript stawał i czekał, a my czekaliśmy na obraz
     (pełna jakość wisiała w połowie bez błędu). Ostatnie ~4 KB zostają w `p.err_tail`."""
-    p = subprocess.Popen([exe(), "-q", "-dNOPAUSE", "-dBATCH", *args],
+    # quiet=False: pełny dziennik (np. „Loading font … (or substitute)”) — bez `-q` Ghostscript pisze
+    # komunikaty na stdout, więc przekierowujemy je na stderr, żeby nie wmieszały się w obraz
+    head = ["-q"] if quiet else ["-sstdout=%stderr"]
+    p = subprocess.Popen([exe(), *head, "-dNOPAUSE", "-dBATCH", *args],
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1 << 20, **NO_WINDOW)
     p.err_tail = b""
     p.err_all = bytearray()          # cały dziennik (do 2 MB) — np. zamienione fonty przy spłaszczaniu

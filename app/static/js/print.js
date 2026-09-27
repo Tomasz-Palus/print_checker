@@ -27,7 +27,7 @@ async function reopen(name) {
   return await undoStep(name);
 }
 async function setAct(name, act) {
-  if (S.busy || choice(name).act === act) return;
+  if (!S.job || S.busy || choice(name).act === act) return;
   if (!(await reopen(name))) return;
   S.choice[name] = { act, profile: null, seen: false };
   S.sim = null; S.cmp = null;
@@ -48,7 +48,7 @@ const SIM = { cmyk: "proof", overprint: "op", outline: "print", flatten: "print"
 const CH = { cmyk: "ch-color", overprint: "ch-op", outline: "ch-fonts", flatten: "ch-flat" };
 function setSeen(name) {
   const c = choice(name);
-  if (S.busy || c.seen || !c.act) return;
+  if (!S.job || S.busy || c.seen || !c.act) return;
   if (c.act === "keep") {
     c.seen = true; S.settle[name] = "skip";
     S.sim = SIM[name]; S.simMix = 100;   // suwak ekran ↔ druk

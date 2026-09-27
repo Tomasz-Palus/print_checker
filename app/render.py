@@ -87,7 +87,8 @@ def canonicalize(path: str) -> tuple[str, str | None]:
             f.write(data)
         return out, "SVG → PDF"
     if ext == ".eps":
-        r = gs.run(["-q", "-dSAFER", "-sDEVICE=pdfwrite", "-dEPSCrop", "-sOutputFile=" + gs.arg_path(out), path], 600)
+        r = gs.run(["-q", "-dSAFER", "-sDEVICE=pdfwrite", "-dEPSCrop", *gs.PDFWRITE_NO_ROTATE,
+                    "-sOutputFile=" + gs.arg_path(out), path], 600)
         if r.returncode != 0:
             raise UnsupportedFormat("Nie udało się otworzyć EPS — wyeksportuj go do PDF.")
         return out, "EPS → PDF"
@@ -532,7 +533,7 @@ def text_as_curves(src: str, page: int) -> tuple[str, int]:
     if not has:
         return src, page
     tmp = out + ".part"
-    r = gs.run(["-dSAFER", "-sDEVICE=pdfwrite", "-dNoOutputFonts", *gs.font_path_args(),
+    r = gs.run(["-dSAFER", "-sDEVICE=pdfwrite", "-dNoOutputFonts", *gs.PDFWRITE_NO_ROTATE, *gs.font_path_args(),
                 *gs.PDFWRITE_KEEP_IMAGES, "-dColorConversionStrategy=/LeaveColorUnchanged",
                 f"-sPageList={page + 1}", "-o", gs.arg_path(tmp), gs.arg_path(src)], 900)
     if r.returncode != 0 or not os.path.exists(tmp):

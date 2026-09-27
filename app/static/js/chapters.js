@@ -29,7 +29,7 @@ $("frDo").onclick = () => {
   applyStep("frames", { gl: S.guidelines?.hash || "", glpage: t ? t.page : -1 });
 };
 $("frUndo").onclick = () => undoStep("frames");
-$("frSkip").onclick = () => { S.settle.frames = "skip"; changed(); };
+$("frSkip").onclick = () => { if (S.job) { S.settle.frames = "skip"; changed(); } };
 
 export function renderFrames() {
   const el = $("ch-frames");
@@ -89,7 +89,7 @@ $("trDo").onclick = () => {
   applyStep("trim", { w_mm: i ? i.net[0] : 0, h_mm: i ? i.net[1] : 0 });
 };
 $("trUndo").onclick = () => undoStep("trim");
-$("trSkip").onclick = () => { S.settle.trim = "skip"; changed(); };
+$("trSkip").onclick = () => { if (S.job) { S.settle.trim = "skip"; changed(); } };
 
 export function renderTrim() {
   const el = $("ch-trim");

@@ -287,6 +287,7 @@ def _gs_page(src: str, dst: str, page: int, args: list, what: str, timeout: int 
     (i nie odmawia przez brakujący font na stronie, która i tak nie idzie do druku).
     Zwraca wynik Ghostscripta (log — do sprawdzania fontów zastępczych)."""
     out = dst + ".gs.pdf"
+    args = [*args, *gs.PDFWRITE_NO_ROTATE]           # strona nie może zmienić orientacji
     try:
         r = gs.run(args + [f"-sPageList={page + 1}", "-o", gs.arg_path(out), gs.arg_path(src)], timeout)
         if r.returncode != 0 or not os.path.exists(out):
@@ -705,7 +706,7 @@ def _flatten_supersampled(base: list, dpi: float, ss: int, src: str, jpg: str) -
     import render
     raw = jpg + ".cmyk"
     p = gs.stream([*base, "-sDEVICE=pamcmyk32", f"-r{dpi * ss:.4f}", "-sOutputFile=-",
-                   *gs.PREVIEW_PRE, gs.arg_path(src)])
+                   *gs.PREVIEW_PRE, gs.arg_path(src)], quiet=False)   # pełny dziennik: zamienione fonty
     out = im = None
     try:
         try:

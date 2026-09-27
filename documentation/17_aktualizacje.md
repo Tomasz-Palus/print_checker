@@ -244,3 +244,47 @@ spłaszczyła drukarnia. Miejsca zaproponował Claude:
   poza „po” (spady, szablon, wymiar, akceptacja). Warstwy mają teraz `z-index` 1 i 3, zasłona 2.
 - Sprawdzone na stronie 3 pliku testowego: „przed” ze spadami i znacznikami, „po” bez. Samouczek
   przechodzi.
+
+## 0.4.8 — poprawki z przeglądu kodu, część 1 (27.09)
+
+Numery jak w `18_przeglad_kodu.md`.
+
+- **A1 — spłaszczenie znów wykrywa podmieniony font.**
+  - Przyczyna: od 0.4.3–0.4.4 spłaszczenie szło przez `gs.stream`, który dodawał `-q`. W trybie
+    cichym Ghostscript nie pisze „Loading font … (or substitute)”.
+  - Poprawka: `gs.stream(…, quiet=False)` puszcza pełny dziennik, a komunikaty z stdout kieruje
+    na stderr (`-sstdout=%stderr`), żeby nie wmieszały się w obraz.
+  - Sprawdzone: PDF z nieosadzonym fontem → „Nie spłaszczam: w pliku brakuje fontu…”. Plik
+    przykładowy i `spady.pdf` spłaszczają się jak dotąd.
+- **A14 — wykrywanie zamiennika fontu CID** (dołożone od razu, ta sama funkcja).
+  `gs.substituted` rozpoznaje „Loading CIDFont X substitute from …”. Sprawdzone na PDF z
+  nieosadzonym fontem CID.
+- **A2 — analiza poprzedniego pliku nie trafia już do nowego.**
+  - Klucz analizy ma numer zadania (`zadanie:wersja:strona`), a nie tylko `v0:strona`.
+  - Wgranie pliku unieważnia analizę w toku (`anSeq`, `anBusy`).
+  - Spóźniona odpowiedź dla innego pliku, wersji albo strony jest pomijana.
+  - Sprawdzone: plik A wgrany i od razu zastąpiony `spady.pdf` → Kolory pokazują kolory `spady.pdf`
+    (Registration), nie pliku A.
+- **A4 — spóźniona poprawka albo cofnięcie nie nadpisuje zadania.** `applyStep`, `undoStep`
+  i `resetSteps` sprawdzają, czy zadanie jest nadal to samo. Jeśli nie, odpowiedź jest
+  pomijana, razem z błędem.
+- **A3 — zmiana strony czyści decyzje.** `setPage` woła `resetJobState()`: decyzje w rozdziałach,
+  wybory, akceptacja, podgląd porównań. Sprawdzone: na stronie 1 „zostaw szablon” i „zostaw
+  spady”, po przejściu na stronę 3 Szablon znów czeka na decyzję.
+- **A5 — bez pliku nie widać starych rozdziałów.**
+  - W trakcie wgrywania i po błędzie wgrania rozdziały od Roli do Pobierania są schowane.
+  - „Zatwierdź wymiar”, „zostaw szablon”, „zostaw spady”, wybory w Kolorach…Spłaszczeniu nic nie
+    robią bez pliku.
+- **A11 — Ghostscript nie obraca już stron.**
+  - `gs.PDFWRITE_NO_ROTATE` (`-dAutoRotatePages=/None`) jest we wszystkich wywołaniach pdfwrite:
+    CMYK i krzywe (`_gs_page`), EPS→PDF, krzywe do podglądu.
+  - Sprawdzone: strona 400 × 800 z pionowym tekstem — bez flagi pdfwrite dodawał `/Rotate 90`,
+    z flagą strona zostaje pionowa.
+- **B15 — program przyjmuje zapytania tylko od siebie** (`server._only_this_computer`).
+  - Host musi być 127.0.0.1, localhost albo [::1].
+  - Nagłówek Origin, gdy jest, musi być tym samym adresem co program.
+  - `Sec-Fetch-Site: cross-site` jest odrzucany.
+  - Zapytania bez Origin przechodzą: self-test, sprawdzanie drugiego uruchomienia.
+  - Sprawdzone: obca strona, `Origin: null`, inny port, podmieniony Host → 403; własne okno
+    i localhost → 200.
+- Samouczek przechodzi od początku do końca.

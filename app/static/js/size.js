@@ -114,6 +114,7 @@ $("szX10").onclick = () => setRatio(10);
 $("szEditBtn").onclick = () => { S.sizeEdit = true; changed(); };
 $("szUndo").onclick = () => undoStep("resize");
 $("szDo").onclick = () => {
+  if (!S.job) return;
   if (sizeMatches() && !touched()) { S.settle.resize = "ok"; S.sizeEdit = false; changed(); return; }
   const t = targetMm(), s = sz();
   applyStep("resize", { w_mm: t.w, h_mm: t.h, scale: scale(), dx_mm: s.dx, dy_mm: s.dy,

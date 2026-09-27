@@ -7,7 +7,7 @@ export const S = {
   job: null,               // {job_id, file, suggestions, versions:[{id, step, text, pages_mm, map}]}
   analysis: null,          // analiza OSTATNIEJ wersji pliku
   analysisFor: null,       // id wersji, której dotyczy `analysis`
-  factsCache: {},          // analizy wszystkich wersji tego pliku: "<wersja>:<strona>" → analiza
+  factsCache: {},          // analizy wszystkich wersji tego pliku: "<zadanie>:<wersja>:<strona>" → analiza
   // produkt
   candidate: null,         // produkt na karcie do potwierdzenia
   product: null,           // produkt POTWIERDZONY
@@ -165,7 +165,9 @@ export function sizeSettled() {
 
 // ---------------------------------------------------------------- etap 3: kolory → overprint → fonty → spłaszczenie
 // Fakty o OSTATNIEJ wersji pliku, o wybranej stronie (analiza). null = jeszcze się liczą.
-export const factsKey = () => (S.job && head() ? `${head().id}:${S.page}` : "");
+// klucz analizy: zadanie + wersja + strona. Oryginał KAŻDEGO pliku to „v0” — bez numeru zadania
+// analiza poprzedniego pliku trafiała do nowego (przegląd kodu 27.09, A2)
+export const factsKey = () => (S.job && head() ? `${S.job.job_id}:${head().id}:${S.page}` : "");
 // `facts(name)` — analiza pliku TAK, JAK WIDZIAŁ GO ROZDZIAŁ `name`: wersji sprzed jego kroku
 // (i późniejszych). Późniejsza poprawka nie zmienia werdyktu wcześniejszego rozdziału. Wcześniej
 // po spłaszczeniu Overprint, Fonty i Spłaszczenie czekały na analizę nowej wersji — znikały
@@ -176,7 +178,7 @@ export function facts(name) {
     const oi = STEP_ORDER.indexOf(name);
     let v = S.job.versions[0];
     for (const x of S.job.versions.slice(1)) if (STEP_ORDER.indexOf(x.step) < oi) v = x;
-    const c = S.factsCache[`${v.id}:${S.page}`];
+    const c = S.factsCache[`${S.job.job_id}:${v.id}:${S.page}`];
     if (c) return c;
   }
   if (S.analysisFor !== factsKey() || !S.analysis) return null;

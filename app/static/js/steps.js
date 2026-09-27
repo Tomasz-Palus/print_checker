@@ -12,15 +12,23 @@ function forgetFrom(name) {
   S.cmp = null; S.sim = null;
 }
 
+// Odpowiedź dla zadania, którego już nie ma (w międzyczasie wgrano inny plik), nie może nadpisać
+// S.job — program wracał do usuniętego zadania (przegląd kodu 27.09, A4).
+const same = (jid) => S.job?.job_id === jid;
+
 export async function applyStep(name, params) {
   if (!S.job || S.busy) return;
+  const jid = S.job.job_id;
   S.busy = `Pracuję: ${STEP_NAME[name]}…`; delete S.stepErr[name];
   changed();
   try {
-    S.job = await post(`/api/jobs/${S.job.job_id}/steps`, { name, params: { page: S.page, ...params } });
+    const job = await post(`/api/jobs/${jid}/steps`, { name, params: { page: S.page, ...params } });
+    if (!same(jid)) return;
+    S.job = job;
     S.cmp = null; S.sim = null;
     S.pin = STEP_CH[name];            // rozdział z nową poprawką zostaje rozwinięty (main.render)
   } catch (e) {
+    if (!same(jid)) return;
     S.stepErr[name] = e.message;
   }
   S.busy = null;
@@ -39,10 +47,14 @@ export async function undoStep(name) {
     if (later.length && !(await ask(own ? `Cofnąć ${STEP_NAME[name]}?` : "Zmienić decyzję?",
         `Razem z tym cofną się kroki zrobione później: <b>${esc(later.join(", "))}</b>. Oryginał jest nietknięty.`,
         own ? "Cofnij" : "Tak, zmieniam", "Zostaw"))) return false;
+    const jid = S.job.job_id;
     S.busy = "Cofam…"; changed();
     try {
-      S.job = await api(`/api/jobs/${S.job.job_id}/steps/${vs[i].step}`, { method: "DELETE" });
+      const job = await api(`/api/jobs/${jid}/steps/${vs[i].step}`, { method: "DELETE" });
+      if (!same(jid)) return false;
+      S.job = job;
     } catch (e) {
+      if (!same(jid)) return false;
       S.stepErr[name] = e.message;
     }
   }
@@ -61,8 +73,15 @@ export async function resetSteps(title) {
     const names = vs.slice(1).map((v) => STEP_NAME[v.step]).join(", ");
     if (!(await ask(title, `Nałożone poprawki (<b>${esc(names)}</b>) zostaną cofnięte — były robione pod `
         + `obecny format. Oryginał jest nietknięty, nałożysz je na nowo.`, "Tak, zmieniam", "Zostaw jak jest"))) return false;
+    const jid = S.job.job_id;
     S.busy = "Cofam poprawki…"; changed();
-    try { S.job = await api(`/api/jobs/${S.job.job_id}/steps/${vs[1].step}`, { method: "DELETE" }); } catch (_) {}
+    try {
+      const job = await api(`/api/jobs/${jid}/steps/${vs[1].step}`, { method: "DELETE" });
+      if (!same(jid)) return false;
+      S.job = job;
+    } catch (_) {
+      if (!same(jid)) return false;
+    }
     S.busy = null;
   }
   forgetFrom(STEP_ORDER[0]);
