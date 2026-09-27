@@ -19,6 +19,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+import pikepdf
 import pymupdf
 from PIL import Image
 
@@ -93,6 +94,140 @@ def canonicalize(path: str) -> tuple[str, str | None]:
             raise UnsupportedFormat("Nie udało się otworzyć EPS — wyeksportuj go do PDF.")
         return out, "EPS → PDF"
     return path, None
+
+
+# ----------------------------------------------------------------------------
+# geometria strony: obrót i CropBox wpisane w treść (przegląd kodu 27.09, A10)
+# ----------------------------------------------------------------------------
+def _box(o, key):
+    v = o.get(key)
+    return [float(x) for x in v] if v is not None else None
+
+
+def _apply(m, x, y):
+    return m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]
+
+
+def _map_box(m, b, W, H):
+    """Prostokąt przez macierz (obroty o 90°) i przycięty do nowej strony."""
+    pts = [_apply(m, x, y) for x in (b[0], b[2]) for y in (b[1], b[3])]
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    return [max(0.0, min(xs)), max(0.0, min(ys)), min(W, max(xs)), min(H, max(ys))]
+
+
+def _mat_mul(m, n):
+    a, b, c, d, e, f = m
+    a2, b2, c2, d2, e2, f2 = n
+    return [a * a2 + b * c2, a * b2 + b * d2, c * a2 + d * c2, c * b2 + d * d2,
+            e * a2 + f * c2 + e2, e * b2 + f * d2 + f2]
+
+
+def normalize_geometry(path: str) -> tuple[str, list]:
+    """Strona z /Rotate albo z CropBoxem mniejszym od MediaBoxa → zwykła strona: MediaBox od (0, 0)
+    równy temu, co widać, bez /Rotate. Wygląd strony (i wydruk) się nie zmienia.
+
+    Po co: MuPDF liczy stronę z obrotem i CropBoxem, a pikepdf, Ghostscript i nasze obliczenia
+    (spady, wymiar, szablon, maska widoczności w ocenie jakości) — w surowym MediaBoxie. Przy
+    obróconej stronie „Dopasuj wymiar” dawał pół białej strony, szablon nie był znajdowany,
+    a ocena jakości gubiła prawdziwe problemy.
+
+    Jak: na początku treści strony `q <macierz> cm`, na końcu `Q`. Wzory (pattern) z zasobów strony
+    liczą się w domyślnej przestrzeni strony, a nie w bieżącej macierzy — dostają kopię z przeliczoną
+    /Matrix. Adnotacje: nowy /Rect i obrót ich wyglądu. TrimBox/BleedBox/ArtBox przeliczone.
+    Zwraca (ścieżka, lista zmian); bez zmian — ta sama ścieżka."""
+    try:
+        pdf = pikepdf.open(path)
+    except Exception:
+        return path, []
+    notes = []
+    try:
+        for i, page in enumerate(pdf.pages):
+            o = page.obj
+            mb = _box(o, "/MediaBox")
+            if not mb or len(mb) != 4:
+                continue
+            mb = [min(mb[0], mb[2]), min(mb[1], mb[3]), max(mb[0], mb[2]), max(mb[1], mb[3])]
+            cb = _box(o, "/CropBox") or mb
+            cb = [min(cb[0], cb[2]), min(cb[1], cb[3]), max(cb[0], cb[2]), max(cb[1], cb[3])]
+            v = [max(mb[0], cb[0]), max(mb[1], cb[1]), min(mb[2], cb[2]), min(mb[3], cb[3])]
+            if v[2] - v[0] < 1 or v[3] - v[1] < 1:
+                v = mb
+            rot = int(o.get("/Rotate", 0) or 0) % 360
+            if rot % 90:
+                rot = 0
+            cropped = any(abs(a - b) > 0.01 for a, b in zip(v, mb))
+            if not rot and not cropped:
+                continue
+            x0, y0, x1, y1 = v
+            w, h = x1 - x0, y1 - y0
+            if rot == 90:
+                m, W, H = [0, -1, 1, 0, -y0, x1], h, w
+            elif rot == 180:
+                m, W, H = [-1, 0, 0, -1, x1, y1], w, h
+            elif rot == 270:
+                m, W, H = [0, 1, -1, 0, y1, -x0], h, w
+            else:
+                m, W, H = [1, 0, 0, 1, -x0, -y0], w, h
+            cmd = ("q " + " ".join(f"{x:.6f}".rstrip("0").rstrip(".") or "0" for x in m) + " cm\n").encode()
+            page.contents_add(pdf.make_stream(cmd), prepend=True)
+            page.contents_add(pdf.make_stream(b"\nQ\n"), prepend=False)
+            # wzory z zasobów STRONY — kopia z macierzą przeliczoną o nasz obrót/przesunięcie
+            res = o.get("/Resources")
+            pats = res.get("/Pattern") if res is not None else None
+            if pats is not None:
+                newp = pikepdf.Dictionary()
+                for name, pat in pats.items():
+                    pm = [float(x) for x in pat.get("/Matrix", [1, 0, 0, 1, 0, 0])]
+                    if isinstance(pat, pikepdf.Stream):
+                        cp = pikepdf.Stream(pdf, pat.read_raw_bytes())
+                        for k2, v2 in pat.items():
+                            if k2 not in ("/Length",):
+                                cp[k2] = v2
+                    else:
+                        cp = pikepdf.Dictionary({k2: v2 for k2, v2 in pat.items()})
+                    cp["/Matrix"] = pikepdf.Array(_mat_mul(pm, m))
+                    newp[name] = pdf.make_indirect(cp)
+                res = pikepdf.Dictionary({k2: v2 for k2, v2 in res.items()})
+                res["/Pattern"] = newp
+                o["/Resources"] = res
+            # pola strony
+            for key in ("/TrimBox", "/BleedBox", "/ArtBox"):
+                b = _box(o, key)
+                if b:
+                    o[key] = pikepdf.Array(_map_box(m, b, W, H))
+            o["/MediaBox"] = pikepdf.Array([0, 0, W, H])
+            for key in ("/CropBox", "/Rotate"):
+                if key in o:
+                    del o[key]
+            # adnotacje: nowe położenie; wygląd obrócony razem ze stroną
+            rot_only = [m[0], m[1], m[2], m[3], 0, 0]
+            for an in (o.get("/Annots") or []):
+                try:
+                    r = _box(an, "/Rect")
+                    if r:
+                        pts = [_apply(m, x, y) for x in (r[0], r[2]) for y in (r[1], r[3])]
+                        an["/Rect"] = pikepdf.Array([min(p[0] for p in pts), min(p[1] for p in pts),
+                                                     max(p[0] for p in pts), max(p[1] for p in pts)])
+                    ap = an.get("/AP")
+                    if rot and ap is not None and not (int(an.get("/F", 0)) & 16):   # 16 = NoRotate
+                        for k2 in ("/N", "/R", "/D"):
+                            st = ap.get(k2)
+                            forms = [st] if isinstance(st, pikepdf.Stream) else \
+                                    [x for x in (st.values() if st is not None else []) if isinstance(x, pikepdf.Stream)]
+                            for f in forms:
+                                fm = [float(x) for x in f.get("/Matrix", [1, 0, 0, 1, 0, 0])]
+                                f["/Matrix"] = pikepdf.Array(_mat_mul(fm, rot_only))
+                except Exception:
+                    pass
+            notes.append(f"str. {i + 1}: " + ", ".join(
+                ([f"obrót {rot}° wpisany w stronę"] if rot else []) + (["przycięta do CropBox"] if cropped else [])))
+        if not notes:
+            return path, []
+        out = os.path.splitext(path)[0] + "_geom.pdf"
+        pdf.save(out)
+    finally:
+        pdf.close()
+    return out, notes
 
 
 def inspect(path: str, original_name: str) -> dict:

@@ -133,9 +133,14 @@ def create(file_storage) -> Job:
     file_storage.save(path)
     try:
         path, converted = render.canonicalize(path)
+        geom = []
+        if not render.is_raster(name):
+            path, geom = render.normalize_geometry(path)
         info = render.inspect(path, name)
         if converted:
             info["converted"] = converted
+        if geom:                                       # wygląd bez zmian — tylko zapis strony
+            info["geometry"] = geom
         job = Job(jid, jdir, path, info)
     except Exception:
         shutil.rmtree(jdir, ignore_errors=True)

@@ -220,6 +220,19 @@ def _mirror(path_in, dst, page_index, left, top, pw, ph, tw, th, ov) -> int:
     return len(ops)
 
 
+def _keep_doc_level(src: str, dst: str) -> None:
+    """Nowy dokument z MuPDF-a nie ma tego, co było na poziomie DOKUMENTU: profilu wyjściowego
+    (OutputIntent) — potem „profil z pliku” i spłaszczenie po cichu brały FOGRA39 (przegląd kodu
+    27.09, A13). Przenosimy go ze źródła."""
+    with pikepdf.open(src) as s_pdf:
+        oi = s_pdf.Root.get("/OutputIntents")
+        if oi is None:
+            return
+        with pikepdf.open(dst, allow_overwriting_input=True) as d_pdf:
+            d_pdf.Root.OutputIntents = d_pdf.copy_foreign(oi)
+            d_pdf.save(dst)
+
+
 def step_resize(src, dst, p, job) -> dict:
     """Nowa strona w formacie z wytycznych; projekt wstawiony jako obiekt formy (wektor zostaje
     wektorem, nic nie jest rasteryzowane), w skali i położeniu z suwaków. Margines można
@@ -257,12 +270,15 @@ def step_resize(src, dst, p, job) -> dict:
         out.close()
     finally:
         srcd.close()
-    if fill and mode == "mirror":
-        filled = _mirror(tmp, dst, page, left, top, pw, ph, tw, th,
-                         min(_px_pt(EDGE_TRIM_PX, k) * pw / max(sr.width, 1e-6), pw * 0.05, ph * 0.05))
-        os.remove(tmp)
-    else:
-        os.replace(tmp, dst)
+    try:
+        if fill and mode == "mirror":
+            filled = _mirror(tmp, dst, page, left, top, pw, ph, tw, th,
+                             min(_px_pt(EDGE_TRIM_PX, k) * pw / max(sr.width, 1e-6), pw * 0.05, ph * 0.05))
+        else:
+            os.replace(tmp, dst)
+    finally:
+        _rm(tmp)
+    _keep_doc_level(src, dst)
     (cx, gx), (cy, gy) = _span(left, pw, tw), _span(top, ph, th)
     gap, cut = [gx * MM, gy * MM], [cx * MM, cy * MM]
     parts = [f"wymiar {_fmt(sr.width * MM)} × {_fmt(sr.height * MM)} → {_fmt(tw * MM)} × {_fmt(th * MM)} mm, "

@@ -278,12 +278,32 @@ def match_template(mine, mine_txt, tpl, tpl_txt) -> dict:
             same = len(norm(c["tekst"])) >= 3 and norm(c["tekst"]) == norm(t["tekst"])
             at_h = abs(s * c["y"] + oy - t["y"]) <= max(tol, 2 * s * c["size_mm"])
             alike = abs(s * c["size_mm"] - t["size_mm"]) <= s * c["size_mm"] * 0.25
-            if same or (at_h and alike and x0 - tol <= t["x"] <= x1):
+            # po samym położeniu i wielkości — tylko gdy treść też podobna (albo nieczytelna):
+            # stopka klienta „www… tel.” obok etykiety „Linia cięcia” znikała razem z szablonem
+            # (przegląd kodu 27.09, A12)
+            if same or (at_h and alike and x0 - tol <= t["x"] <= x1 and _text_like(c["tekst"], t["tekst"])):
                 targets.append({**t, "w": 0, "h": 0})
                 break
     return {"known": True, "match": best["score"] >= MATCH_MIN, "score": round(best["score"], 3),
             "err_mm": round(best["err"], 1), "scale": round(s, 3),
             "lines": len(best["hits"]), "lines_total": len(T), "targets": targets}
+
+
+def _fold(t: str) -> str:
+    """Małe litery i cyfry bez ogonków: „Linia cięcia” ≈ „LINIA CIECIA”."""
+    import unicodedata
+    t = unicodedata.normalize("NFKD", t or "").replace("ł", "l").replace("Ł", "L")
+    return "".join(ch for ch in t.lower() if ch.isalnum())
+
+
+def _text_like(tpl: str, mine: str) -> bool:
+    """Napis z pliku to ten napis z szablonu: podobna treść (≥ 60 %) albo treść nieczytelna
+    (font bez mapy znaków — wtedy zostaje tylko położenie i wielkość)."""
+    import difflib
+    a, b = _fold(tpl), _fold(mine)
+    if not b or not a:
+        return True
+    return difflib.SequenceMatcher(None, a, b).ratio() >= 0.6
 
 
 def _edge_frame(z, W, H) -> bool:

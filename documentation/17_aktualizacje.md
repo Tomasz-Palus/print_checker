@@ -328,3 +328,45 @@ Numery jak w `18_przeglad_kodu.md`.
   - Analiza pliku przykładowego (3 strony) i `spady.pdf` daje wynik identyczny ze starą wersją
     (porównanie pole po polu).
   - Self-test OK, samouczek i testy rozdziałów przechodzą.
+
+## 0.5 — geometria strony, szablon, profil kolorów (przegląd kodu, część 3, 27.09)
+
+Numery jak w `18_przeglad_kodu.md`.
+
+- **A10 — strony obrócone (`/Rotate`) i z CropBoxem mniejszym od strony.**
+  - **Problem:** MuPDF liczy stronę z obrotem i CropBoxem, a pikepdf, Ghostscript i nasze
+    obliczenia — w surowym MediaBoxie. Skutki:
+    - „Dopasuj wymiar” dawał pół białej strony;
+    - spady przycinały się w poziomie zamiast w pionie;
+    - szablon nie był znajdowany;
+    - ocena jakości uznawała prawdziwy problem za „zakryty”;
+    - podgląd był zniekształcony.
+  - **Poprawka:** przy wgraniu `render.normalize_geometry` zamienia taką stronę na zwykłą:
+    MediaBox od (0, 0) równy temu, co widać, bez `/Rotate`. Wygląd i wydruk się nie zmieniają.
+    - Na początku treści strony jest `q <macierz> cm`, na końcu `Q`.
+    - Wzory (pattern) z zasobów strony dostają kopię z przeliczoną macierzą — liczą się
+      w domyślnej przestrzeni strony, nie w bieżącej macierzy.
+    - Adnotacje dostają nowy `/Rect`, a ich wygląd obraca się razem ze stroną (poza `NoRotate`).
+    - TrimBox, BleedBox i ArtBox są przeliczone.
+    - Obrót dziedziczony po drzewie stron też jest obsłużony.
+  - **Sprawdzone na 9 plikach testowych** (obroty 90/180/270, CropBox, przesunięty MediaBox
+    z obrotem, obrót dziedziczony, wzór na obróconej stronie, stempel na obróconej stronie, strona
+    zwykła): render MuPDF po zmianie jest identyczny piksel w piksel z oryginałem. Ghostscript
+    różni się tylko wygładzaniem (średnio < 1/255).
+  - **Wyniki na plikach z przeglądu:**
+    - „Dopasuj wymiar” na obróconej stronie — identyczny z oryginałem.
+    - Szablon na obróconej stronie znaleziony (wynik 1,0, jak na stronie zwykłej).
+    - Spady na obróconej stronie przycinają się pionowo.
+    - Ocena jakości: obraz 36 ppi na stronie obróconej i przyciętej wykryty jak na zwykłej.
+  - **Zostaje:** UserUnit (strony większe niż 5 m zapisane w innej jednostce) — rzadkie, na razie
+    bez zmian.
+- **A12 — usuwanie szablonu nie kasuje już tekstu klienta.**
+  - Napis blisko etykiety szablonu, o podobnej wielkości, jest usuwany tylko wtedy, gdy ma też
+    podobną treść (≥ 60 %, bez ogonków i wielkości liter) albo jest nieczytelny.
+    „Linia cięcia” ≈ „LINIA CIECIA”; stopka „www… tel.” zostaje.
+  - Sprawdzone: 102 kombinacje prawdziwych plików i wytycznych — wykrywanie identyczne jak
+    wcześniej.
+- **A13 — „Dopasuj wymiar” zachowuje profil kolorów pliku (OutputIntent).**
+  `steps._keep_doc_level` przenosi go do nowego pliku, w obu trybach marginesu. Sprawdzone: plik
+  z profilem „ISO Coated v2” po dopasowaniu nadal go ma. Wcześniej był FOGRA39.
+- Self-test OK, samouczek i testy rozdziałów przechodzą.
