@@ -26,8 +26,9 @@ let zoom = "fit";          // "fit" albo px ekranu na mm ramki
 let bounds = { x: 0, y: 0, w: 1, h: 1 };   // obszar canvasu w mm ramki
 let margin = { x: PAD, y: PAD };
 let hilite = null, hiliteTimer = null;
-let naviOn = true;
-try { naviOn = localStorage.getItem("adcheck.navi") !== "0"; } catch (_) {}
+// Powiększanie (lupki, Ctrl+kółko, Z, rzeczywista wielkość) i nawigator — tylko przy rozdziale
+// „Jakość wydruku” (Tomasz 28.09). Poza nim podgląd jest zawsze dopasowany do okna.
+let zoomAllowed = false;
 const listeners = [];
 export const onViewChange = (fn) => listeners.push(fn);
 
@@ -405,9 +406,8 @@ function drawDecor(z, px, py) {
 // ------------------------------------------------------------------ nawigator
 const navi = $("navi"), naviIn = $("naviIn");
 function drawNavi() {
-  $("vNavi").classList.toggle("on", naviOn);
   const big = sizer.offsetWidth > stage.clientWidth + 2 || sizer.offsetHeight > stage.clientHeight + 2;
-  navi.hidden = !(scene && naviOn && big && zoom !== "fit");
+  navi.hidden = !(scene && zoomAllowed && big && zoom !== "fit");   // nawigator zawsze, gdy jest po czym jeździć
   if (navi.hidden) return;
   const s = 200 / Math.max(bounds.w, bounds.h);
   naviIn.style.width = bounds.w * s + "px"; naviIn.style.height = bounds.h * s + "px";
@@ -431,12 +431,17 @@ function naviGo(e) {
 navi.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); navi.setPointerCapture(e.pointerId); navi.dataset.drag = "1"; naviGo(e); });
 navi.addEventListener("pointermove", (e) => { if (navi.dataset.drag) naviGo(e); });
 navi.addEventListener("pointerup", () => { navi.dataset.drag = ""; });
-export function setNavi(on) {
-  naviOn = on;
-  try { localStorage.setItem("adcheck.navi", on ? "1" : "0"); } catch (_) {}
+export function setZoomAllowed(on) {
+  if (on === zoomAllowed) return;
+  zoomAllowed = on;
+  if (!on) {                              // wyjście z „Jakości”: bez lupki, cały projekt w oknie
+    tool = null; stage.classList.remove("zin", "zout");
+    zoom = "fit";
+    if (scene) drawNow();
+    for (const f of listeners) f();
+  }
   draw();
 }
-export const naviIsOn = () => naviOn;
 
 // ------------------------------------------------------------------ postęp i czekanie
 function progress() {
@@ -531,11 +536,12 @@ window.addEventListener("keydown", (e) => {
   if (e.target.matches("input, select, textarea")) return;
   if (e.code === "Space" && !space) { space = true; stage.classList.add("space"); if (scene) e.preventDefault(); }
   if (e.key === "Escape" && tool) setTool(tool);
-  if (e.code === "KeyZ" && !e.ctrlKey && !e.metaKey) setTool(e.altKey ? "out" : "in");
+  if (e.code === "KeyZ" && !e.ctrlKey && !e.metaKey && zoomAllowed) setTool(e.altKey ? "out" : "in");
 });
 window.addEventListener("keyup", (e) => { if (e.code === "Space") { space = false; stage.classList.remove("space"); } });
 stage.addEventListener("wheel", (e) => {
   if (!e.ctrlKey || !scene) return;
+  if (!zoomAllowed) { e.preventDefault(); return; }       // bez powiększania strony przeglądarki
   e.preventDefault();
   const p = local(e);
   zoomBy(e.deltaY < 0 ? 1.2 : 1 / 1.2, p.x, p.y);

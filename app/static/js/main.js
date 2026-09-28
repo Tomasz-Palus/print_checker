@@ -9,7 +9,7 @@ import { resetSteps } from "./steps.js";
 import { renderFrames, renderTrim } from "./chapters.js";
 import { renderSize, sizeScene } from "./size.js";
 import { renderColor, renderOverprint, renderFonts, renderFlatten, simLayers, CMP_WITH_OP } from "./print.js";
-import { renderQuality, renderAccept, renderDownload } from "./quality.js";
+import { renderQuality, renderAccept, renderDownload, navOpen } from "./quality.js";
 import { initTour, autoStartTour } from "./tour.js";
 
 product.setResetSteps(resetSteps);
@@ -235,7 +235,6 @@ $("vFit").onclick = viewer.zoomFit;
 $("v100").onclick = viewer.zoom100;
 $("vIn").onclick = () => viewer.setTool("in");
 $("vOut").onclick = () => viewer.setTool("out");
-$("vNavi").onclick = () => viewer.setNavi(!viewer.naviIsOn());
 $("vTpl").onclick = () => { S.overlayOn = !S.overlayOn; changed(); };
 viewer.onViewChange(() => {
   $("v100").classList.toggle("on", viewer.is100());
@@ -320,6 +319,11 @@ function render() {
   gateChapters();
   const chs = [...document.querySelectorAll(".ch:not([hidden])")];
   const lastTwo = chs.slice(-2);
+  // Lupki, rzeczywista wielkość, dopasuj i nawigator — tylko przy „Jakości wydruku”: gdy to bieżący
+  // (ostatni) rozdział albo gdy przeglądamy słabe miejsca (Tomasz 28.09)
+  const qualMode = !!S.job && (chs[chs.length - 1]?.id === "ch-qual" || navOpen());
+  $("vTools").hidden = !qualMode;
+  viewer.setZoomAllowed(qualMode);
   const pin = chs.find((ch) => ch.id === S.pin) || null;
   const autoKey = [...lastTwo, pin].map((ch) => ch?.id || "").join("|");
   if (autoKey !== lastAuto) {

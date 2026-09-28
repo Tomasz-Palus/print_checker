@@ -2,7 +2,7 @@
 // Jakość liczy serwer (quality.py → detailmap.py) i oddaje gotowy werdykt; tu tylko pokazanie
 // go po ludzku i nawigacja po słabych miejscach na podglądzie (w rzeczywistej wielkości wydruku).
 import { $, esc, fmtMm, api, chapter, plural } from "./util.js";
-import { S, changed, head, scaleK, printMm, isPdf, flattenSettled, template, STEP_NAME } from "./state.js";
+import { S, changed, head, scaleK, printMm, isPdf, flattenSettled, roleSettled, template, STEP_NAME } from "./state.js";
 import { detailBlock } from "./settings.js";
 import * as viewer from "./viewer.js";
 
@@ -67,7 +67,22 @@ $("quRetry").querySelector("button").addEventListener("click", () => {
   changed();
 });
 
+// Ocena jakości startuje W TLE zaraz po wyborze roli (znamy już stronę i skalę) — zanim użytkownik
+// przejdzie przez Szablon…Spłaszczenie, obrazy są zwykle policzone. Rozdział „Jakość” pyta potem
+// o wersję po poprawkach, a serwer bierze wyniki obrazów z pamięci (detailmap._img_cache).
+let prefetched = "";
+function prefetch() {
+  if (!S.job || !roleSettled() || S.busy) return;
+  const key = [S.job.job_id, S.page, isPdf() ? scaleK() : 1].join("|");
+  if (key === prefetched) return;
+  prefetched = key;
+  const pr = printMm();
+  api(`/api/jobs/${S.job.job_id}/quality?page=${S.page}&k=${isPdf() ? scaleK() : 1}`
+    + `&block=${detailBlock()}` + (pr ? `&w_mm=${pr.w}&h_mm=${pr.h}` : "")).catch(() => {});
+}
+
 export function renderQuality() {
+  prefetch();
   const el = $("ch-qual");
   el.hidden = !flattenSettled();
   if (el.hidden) { closeNav(); return; }
@@ -142,6 +157,7 @@ export function renderQuality() {
 
 // ------------------------------------------------------------------ nawigacja po miejscach
 let nav = null;               // numer pokazywanego miejsca albo null
+export const navOpen = () => nav !== null;
 function areas() { return S.qual.data?.areas || []; }
 function openNav(i) {
   const as = areas();
@@ -150,6 +166,7 @@ function openNav(i) {
   const a = as[nav], fr = viewer.frameMm();
   $("qnav").hidden = false;
   $("qnTxt").innerHTML = `Miejsce <b>${nav + 1}</b> z ${as.length} · ${esc(areaShort(a))}`;
+  $("qnTxt").title = `Miejsce ${nav + 1} z ${as.length} · ${areaShort(a)}`;
   // ocena ZAWSZE w rzeczywistej wielkości wydruku (decyzja Tomasza) — inaczej piksele
   // wyglądają lepiej albo gorzej niż na druku
   if (fr) viewer.showRect({ x: a.fx * fr.w, y: a.fy * fr.h, w: a.fw * fr.w, h: a.fh * fr.h },

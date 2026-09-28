@@ -341,14 +341,6 @@
       <div class="vright">
         <!-- pasek pełnej jakości: zaraz na prawo od „Podgląd szablonu", w swojej części paska (nie zasłania lupek) -->
         <div class="vprog" id="vProg" hidden><span class="bar"><i></i></span><span class="t"></span></div>
-        <button class="btn small icon tool" id="vIn" type="button" title="Lupka + (Z): kliknij w podgląd, żeby powiększyć, albo zaznacz obszar. Spacja = przesuwanie">
-          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="6.6" cy="6.6" r="4.7"/><path d="M10 10 14.4 14.4M4.4 6.6h4.4M6.6 4.4v4.4"/></svg></button>
-        <button class="btn small icon tool" id="vOut" type="button" title="Lupka − (Alt+Z): kliknij w podgląd, żeby pomniejszyć, albo zaznacz obszar">
-          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="6.6" cy="6.6" r="4.7"/><path d="M10 10 14.4 14.4M4.4 6.6h4.4"/></svg></button>
-        <span class="vsep"></span>
-        <button class="btn small" id="v100" type="button" title="Rzeczywista wielkość wydruku: 1 mm wydruku = 1 mm na ekranie (największe możliwe przybliżenie)">Rzeczywista wielkość</button>
-        <button class="btn small" id="vFit" type="button" title="Cały projekt w oknie">Dopasuj</button>
-        <button class="btn small on" id="vNavi" type="button" title="Nawigator — miniatura z ramką widoku">Nawigator</button>
       </div>
     </div>
     <div class="vempty" id="vEmpty">Wgraj plik — podgląd pokaże się tutaj.</div>
@@ -358,12 +350,25 @@
     </div>
     <div class="vwait" id="vWait" hidden><div><span class="spin"></span><span class="t">wczytuję podgląd…</span></div></div>
     <div class="navi" id="navi" hidden><div class="nv" id="naviIn"></div></div>
-    <!-- nawigacja po miejscach z rozdziału „Jakość wydruku": ‹ › i Esc -->
-    <div class="qnav" id="qnav" hidden>
-      <button class="btn small" id="qnPrev" type="button" title="Poprzednie (←)">‹</button>
-      <span class="qn-t" id="qnTxt"></span>
-      <button class="btn small" id="qnNext" type="button" title="Następne (→)">›</button>
-      <button class="btn small" id="qnClose" type="button" title="Zamknij (Esc)">×</button>
+    <!-- Pływający panel podglądu — tylko przy rozdziale „Jakość wydruku” (Tomasz 28.09): lupki, rzeczywista
+         wielkość, dopasuj, a pod nimi nawigacja po słabych miejscach (‹ › i Esc). Stała szerokość i wysokość —
+         przeklikiwanie miejsc nie zmienia rozmiaru panelu. -->
+    <div class="vtools" id="vTools" hidden>
+      <div class="vt-row">
+        <button class="btn small icon tool" id="vIn" type="button" title="Lupka + (Z): kliknij w podgląd, żeby powiększyć, albo zaznacz obszar. Spacja = przesuwanie">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="6.6" cy="6.6" r="4.7"/><path d="M10 10 14.4 14.4M4.4 6.6h4.4M6.6 4.4v4.4"/></svg></button>
+        <button class="btn small icon tool" id="vOut" type="button" title="Lupka − (Alt+Z): kliknij w podgląd, żeby pomniejszyć, albo zaznacz obszar">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="6.6" cy="6.6" r="4.7"/><path d="M10 10 14.4 14.4M4.4 6.6h4.4"/></svg></button>
+        <span class="vsep"></span>
+        <button class="btn small" id="v100" type="button" title="Rzeczywista wielkość wydruku: 1 mm wydruku = 1 mm na ekranie (największe możliwe przybliżenie)">Rzeczywista wielkość</button>
+        <button class="btn small" id="vFit" type="button" title="Cały projekt w oknie">Dopasuj</button>
+      </div>
+      <div class="vt-row qnav" id="qnav" hidden>
+        <button class="btn small" id="qnPrev" type="button" title="Poprzednie (←)">‹</button>
+        <span class="qn-t" id="qnTxt"></span>
+        <button class="btn small" id="qnNext" type="button" title="Następne (→)">›</button>
+        <button class="btn small" id="qnClose" type="button" title="Zamknij (Esc)">×</button>
+      </div>
     </div>
   </section>
 </main>
@@ -403,12 +408,6 @@
     <div id="calCheckWrap">
     <p class="note">Sprawdzenie — ten pasek powinien mieć na linijce dokładnie 100 mm:</p>
     <div class="ruler-wrap"><svg id="calCheck"></svg></div>
-    </div>
-
-    <div id="setAcc">
-    <h3>Dokładność oceny jakości</h3>
-    <label><input type="radio" name="dmBlock" value="128"> standardowa — wykrywa elementy od ok. 25 mm</label><br>
-    <label><input type="radio" name="dmBlock" value="64"> wysoka — od ok. 15 mm, liczy się ok. 2× dłużej</label>
     </div>
 
     <div id="setIdx">

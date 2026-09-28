@@ -88,7 +88,7 @@ export const HELP = {
     ale nic w nich nie ma. To trzeba obejrzeć: bywa też zwykłym rozmyciem ze zdjęcia.<br><br>
     „Pokaż na podglądzie" przechodzi po takich miejscach (strzałki ← →) w <b>rzeczywistej
     wielkości wydruku</b>. Wektor (napisy, kształty) nie ma rozdzielczości i nie jest oceniany.
-    Dokładność oceny ustawisz w Ustawieniach.<br><br>
+    Lupki, rzeczywistą wielkość i nawigator masz w panelu nad podglądem — tylko w tym rozdziale.<br><br>
     <b>Uwaga:</b> ocena jest automatyczna i orientacyjna. Program może ocenić niektóre obrazy
     inaczej niż grafik i nie wychwyci każdego problemu — w razie wątpliwości poproś grafika
     o sprawdzenie.`,

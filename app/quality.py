@@ -46,7 +46,7 @@ def request(job, page: int, k: float, block: int, print_mm: tuple | None) -> dic
     mid = f"{job.id}#{v.id}"
     st = detailmap.status(mid, page, k, block)
     if not st or st["status"] == "error":            # po błędzie — nowa próba (przegląd kodu 27.09, C27)
-        st = detailmap.start(mid, v.path, kind, page, k, block, images=images, page_mm=page_mm)
+        st = detailmap.start(mid, v.path, kind, page, k, block, images=images, page_mm=page_mm, scope=job.id)
     out = {"status": st["status"], "version": v.id, "band": st.get("band", 0), "bands": st.get("bands", 0),
            "error": st.get("error")}
     if st["status"] == "done" and st.get("result"):

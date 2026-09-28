@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import base64
 import functools
+import hashlib
 import io
 import math
 import os
@@ -740,7 +741,80 @@ def apply_visibility(areas: list, vis) -> int:
     return hidden
 
 
-def build_pdf_objects(path: str, images: list, page_index: int, k: int, block: int, page_mm, progress=lambda i, n: None) -> dict:
+# ----------------------------------------------------------------------------
+# Pamięć wyników obrazów (Tomasz 28.09: „przyspieszyć wczytywanie jakości”)
+#
+# Wynik jednego obrazu zależy tylko od jego pikseli i rozmiaru bloku. Poprawki przed oceną (szablon,
+# spady, wymiar, kolory, overprint, krzywe) pikseli obrazów nie ruszają albo ruszają tylko kolor —
+# a detal mierzymy w jasności, więc wynik jest ten sam. Dwa klucze:
+#  - treść: skrót surowych danych obrazu (ten sam plik wgrany jeszcze raz, szablon, spady, wymiar);
+#  - rodowód w zadaniu: (zadanie, wymiar w px, blok, który z kolei obraz tego wymiaru na stronie) —
+#    po zamianie na CMYK / overprincie / krzywych Ghostscript zapisuje obrazy od nowa, więc skrót się
+#    zmienia, ale to wciąż ten sam obraz w tym samym miejscu kolejności.
+# Wpis „w toku” czeka na wynik — ocena wystartowana wcześniej w tle (zaraz po wyborze roli) i ocena
+# z rozdziału „Jakość” nie liczą tego samego obrazu dwa razy.
+# ----------------------------------------------------------------------------
+IMG_CACHE_MAX = 96
+_img_cache: dict = {}          # klucz → {"ev": Event, "res": dict | None, "t": czas}
+_img_lock = threading.Lock()
+
+
+def _img_keys(doc, rec, b, scope, recs, i, page_index=0) -> list:
+    keys = []
+    try:
+        raw = doc.xref_stream_raw(rec["xref"])
+        if raw:
+            keys.append(("raw", hashlib.md5(raw).hexdigest(), rec["width"], rec["height"], b, bool(rec.get("smask"))))
+    except Exception:
+        pass
+    if scope:
+        nth = sum(1 for r in recs[:i] if r["width"] == rec["width"] and r["height"] == rec["height"])
+        keys.append(("job", scope, page_index, rec["width"], rec["height"], b, nth, bool(rec.get("smask"))))
+    return keys
+
+
+def _img_cache_get(keys):
+    """(wynik, None) z pamięci — albo (None, klucze do zapisania), gdy liczymy my."""
+    while True:
+        with _img_lock:
+            ent = next((_img_cache[k] for k in keys if k in _img_cache), None)
+            if ent is None:
+                ent = {"ev": threading.Event(), "res": None, "t": time.time()}
+                for k in keys:
+                    _img_cache[k] = ent
+                while len(_img_cache) > IMG_CACHE_MAX * 2:          # najstarsze wypadają
+                    oldest = min(_img_cache, key=lambda k: _img_cache[k]["t"])
+                    _img_cache.pop(oldest, None)
+                return None, (keys, ent)
+        if not ent["ev"].wait(timeout=1800):                        # ktoś liczy — czekamy
+            return None, None
+        if ent["res"] is not None:
+            # dopisz nasze klucze (np. rodowód nowej wersji) do tego samego wyniku
+            with _img_lock:
+                for k in keys:
+                    _img_cache.setdefault(k, ent)
+            return ent["res"], None
+        with _img_lock:                                             # tamten się nie udał — liczymy sami
+            for k in keys:
+                if _img_cache.get(k) is ent:
+                    _img_cache.pop(k, None)
+
+
+def _img_cache_put(mine, res) -> None:
+    if not mine:
+        return
+    keys, ent = mine
+    ent["res"] = res
+    if res is None:
+        with _img_lock:
+            for k in keys:
+                if _img_cache.get(k) is ent:
+                    _img_cache.pop(k, None)
+    ent["ev"].set()
+
+
+def build_pdf_objects(path: str, images: list, page_index: int, k: int, block: int, page_mm, progress=lambda i, n: None,
+                      scope: str | None = None) -> dict:
     """Każdy obraz (poza maskami) zdekodowany w całości, bloki w jego natywnych pikselach,
     rozmiar bloku dobrany tak, by na wydruku odpowiadał `block` px przy 240 ppi (≈ 13,5 mm);
     obszary rzutowane na WSZYSTKIE umiejscowienia obrazu na stronie."""
@@ -769,6 +843,7 @@ def build_pdf_objects(path: str, images: list, page_index: int, k: int, block: i
             lowres_only(rec, [p for p in rec["placements"] if p.get("page", 0) == page_index])
     blocks_total = 0; n_place = 0; per_image = []; soft_skipped = 0; small_skipped = 0; conf_counts = {}
     invisible_skipped = 0
+    reused = 0                                   # obrazy wzięte z pamięci (policzone wcześniej)
     doc = pymupdf.open(path)
     try:
         with ProcessPoolExecutor(max_workers=CHUNK_THREADS) as ex:
@@ -782,19 +857,30 @@ def build_pdf_objects(path: str, images: list, page_index: int, k: int, block: i
                 b = max(32, min(512, (b // 16) * 16))   # wielokrotność NOISE_SUB, żeby siatka szumu pasowała do bloków
                 if w < 8 or h < 8:
                     continue
-                acc = _Acc(w, h, b)
-                try:
-                    for y, g in _image_bands(doc, path, rec):
-                        chunks = [(y + cy, g[cy:cy + CHUNK_ROWS]) for cy in range(0, g.shape[0], CHUNK_ROWS)]
-                        for (cy, cc) in zip([c[0] for c in chunks], ex.map(functools.partial(chunk_curves, block=b), [c[1] for c in chunks], chunksize=1)):
-                            acc.place(cc, cy // b, 0)
-                        del g, chunks
-                except Exception as e:
-                    per_image.append({"xref": rec["xref"], "error": f"{type(e).__name__}: {e}"})
-                    lowres_only(rec, pl)                 # pikseli nie przeczytamy, ale ich liczbę znamy
-                    progress(i + 1, len(recs))
-                    continue
-                res = _finish(acc, w, h, b)
+                keys = _img_keys(doc, rec, b, scope, recs, i, page_index)
+                res, mine = _img_cache_get(keys)
+                if res is None:
+                    acc = _Acc(w, h, b)
+                    try:
+                        for y, g in _image_bands(doc, path, rec):
+                            chunks = [(y + cy, g[cy:cy + CHUNK_ROWS]) for cy in range(0, g.shape[0], CHUNK_ROWS)]
+                            for (cy, cc) in zip([c[0] for c in chunks], ex.map(functools.partial(chunk_curves, block=b), [c[1] for c in chunks], chunksize=1)):
+                                acc.place(cc, cy // b, 0)
+                            del g, chunks
+                    except Exception as e:
+                        _img_cache_put(mine, None)
+                        per_image.append({"xref": rec["xref"], "error": f"{type(e).__name__}: {e}"})
+                        lowres_only(rec, pl)                 # pikseli nie przeczytamy, ale ich liczbę znamy
+                        progress(i + 1, len(recs))
+                        continue
+                    try:
+                        res = _finish(acc, w, h, b)
+                    except Exception:
+                        _img_cache_put(mine, None)       # inni czekający nie mogą wisieć
+                        raise
+                    _img_cache_put(mine, res)
+                else:
+                    reused += 1
                 blocks_total += res["blocks_total"]
                 base = res.get("baseline")
                 per_image.append({"xref": rec["xref"], "w": w, "h": h, "block": b, "baseline": base,
@@ -864,7 +950,7 @@ def build_pdf_objects(path: str, images: list, page_index: int, k: int, block: i
         "blocks_total": blocks_total, "objects": len(recs), "placements": n_place, "per_image": per_image,
         "areas": areas[:MAX_AREAS], "areas_total": len(areas),
         "soft_skipped": soft_skipped, "small_skipped": small_skipped, "confidence_counts": conf_counts,
-        "hidden_skipped": hidden_skipped, "invisible_skipped": invisible_skipped,
+        "hidden_skipped": hidden_skipped, "invisible_skipped": invisible_skipped, "reused": reused,
         "worst_ppi": min((r["ppi"] for r in areas if r["ppi"] is not None), default=None),
         "seconds": round(time.time() - t0, 1),
     }
@@ -878,7 +964,7 @@ _lock = threading.Lock()
 
 
 def start(job_id: str, path: str, kind: str, page_index: int = 0, k: int = 1, block: int = BLOCK_PX, boxes: list | None = None,
-          images: list | None = None, page_mm=None) -> dict:
+          images: list | None = None, page_mm=None, scope: str | None = None) -> dict:
     key = (job_id, page_index, k, block)
     with _lock:
         t = _tasks.get(key)
@@ -893,7 +979,7 @@ def start(job_id: str, path: str, kind: str, page_index: int = 0, k: int = 1, bl
 
     def run():
         try:
-            res = build_pdf_objects(path, images, page_index, k, block, page_mm, progress) if kind == "pdf" and images is not None else build(path, kind, page_index, k, progress, block, boxes)
+            res = build_pdf_objects(path, images, page_index, k, block, page_mm, progress, scope) if kind == "pdf" and images is not None else build(path, kind, page_index, k, progress, block, boxes)
             with _lock:
                 t["result"] = res; t["status"] = "done" if res.get("ok") else "error"; t["error"] = res.get("error")
         except Exception as e:

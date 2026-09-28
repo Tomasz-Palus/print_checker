@@ -370,3 +370,47 @@ Numery jak w `18_przeglad_kodu.md`.
   `steps._keep_doc_level` przenosi go do nowego pliku, w obu trybach marginesu. Sprawdzone: plik
   z profilem „ISO Coated v2” po dopasowaniu nadal go ma. Wcześniej był FOGRA39.
 - Self-test OK, samouczek i testy rozdziałów przechodzą.
+
+## 0.5.1 — jedna dokładność oceny, pływający panel podglądu (Tomasz 28.09)
+
+- **Jedna dokładność oceny jakości — standardowa** (bloki 128 px, elementy od ok. 25 mm).
+  - Wybór „wysoka” zniknął z Ustawień (`#setAcc`) i z samouczka.
+  - `settings.detailBlock()` zawsze zwraca 128.
+  - Część „Ustawienia” samouczka ma teraz 6 kroków: „ustawimy dwie rzeczy”.
+- **Lupki, „Rzeczywista wielkość”, „Dopasuj” i nawigator tylko przy „Jakości wydruku”.**
+  - **Pływający panel** (`#vTools`) nad podglądem, na środku.
+    - Górny wiersz: lupki, „Rzeczywista wielkość”, „Dopasuj”.
+    - Dolny wiersz: nawigacja po słabych miejscach (‹ opis › ×).
+  - **Stały rozmiar:** 540 px szerokości, opis miejsca zawsze na dwie linie wysokości (dłuższy
+    ucięty „…”, pełny w dymku). Sprawdzone: przy przeklikiwaniu trzech miejsc panel ma cały czas
+    540 × 96 px.
+  - **Kiedy widać panel:** „Jakość wydruku” jest ostatnim rozdziałem albo przeglądamy słabe
+    miejsca (też z listy, gdy Akceptacja jest już widoczna).
+  - **Poza tym** (`viewer.setZoomAllowed(false)`) podgląd jest zawsze dopasowany do okna. Lupka
+    się wyłącza, a Z i Ctrl+kółko nic nie robią — Ctrl+kółko nie powiększa też strony programu.
+- **Nawigator bez przycisku.** Pokazuje się sam przy „Jakości wydruku”, gdy podgląd jest
+  powiększony. Zapamiętane „wyłączony” z poprzednich wersji już nie działa.
+- **Teksty:**
+  - Samouczek: „Słabe miejsca” wskazuje cały panel i wspomina lupki oraz nawigator.
+  - Samouczek: „Przed i po” nie odsyła już do „Dopasuj” (Akceptacja sama dopasowuje podgląd).
+  - Pomoc „?” w Jakości wspomina panel.
+- Samouczek przechodzi od początku do końca.
+- **Szybsza ocena jakości** (w tej samej wersji 0.5.1, Tomasz 28.09: „przyspieszyć wczytywanie
+  jakości”).
+  - **Start w tle zaraz po wyborze roli** (`quality.prefetch`, gdy znane są strona i skala). Zanim
+    użytkownik przejdzie przez Szablon…Spłaszczenie, obrazy są zwykle policzone.
+  - **Pamięć wyników obrazów** (`detailmap._img_cache`). Wynik obrazu zależy tylko od jego pikseli
+    i bloku, więc poprawki przed oceną go nie zmieniają. Dwa klucze:
+    - skrót surowych danych obrazu;
+    - „rodowód” w zadaniu: strona, wymiar w px, blok i który z kolei obraz tego wymiaru. Po zamianie
+      na CMYK, overprincie i krzywych Ghostscript zapisuje obrazy od nowa, więc skrót się zmienia.
+  - **Bez podwójnego liczenia:** wpis „w toku” czeka na wynik, więc ocena z tła i ocena z rozdziału
+    nie liczą tego samego obrazu dwa razy. Pamięć ma 96 obrazów, najstarsze wypadają.
+  - **Zmierzone na `spady.pdf`:** ocena w tle 8,3 s; po spadach, wymiarze, CMYK i overprincie
+    rozdział „Jakość” gotowy w 1,0 s (od zera 8,6 s), z identycznym wynikiem.
+  - **Plik przykładowy, strona 3:** po zamianie na CMYK wynik różni się od liczonego od zera, bo
+    konwersja kolorów zaciera ślady powiększenia. Obraz „10 / Sztucznie powiększony” (w pliku
+    testowym powiększony 4×) od zera wychodził 2×, z pamięci — 4×. Wynik z oryginalnych pikseli
+    jest wierniejszy.
+  - W samouczku ocena rusza po „Rola pliku”, a rozdział „Jakość” dostaje gotowy wynik po jednym-dwóch
+    zapytaniach.

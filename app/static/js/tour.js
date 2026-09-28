@@ -1,5 +1,5 @@
 // Samouczek (wersja 0.2): dymki krok po kroku, jak w nowoczesnych aplikacjach.
-// Część 1 — Ustawienia (kalibracja monitora, dokładność oceny jakości, indeks wymiarów).
+// Część 1 — Ustawienia (kalibracja monitora, indeks wymiarów).
 // Część 2 — plik przykładowy (ma prawie każdy typowy błąd), rozdział po rozdziale.
 //
 // Ekran jest przyciemniony; widać i da się kliknąć tylko wskazane miejsca („dziury"). Krok
@@ -34,7 +34,7 @@ let loadSample = async () => {};
 const STEPS = [
   { part: PART1, title: "Witaj w adCheckerze!",
     text: `Pomogę Ci przygotować plik do druku — nie musisz znać się ani na grafice, ani na druku.<br><br>
-      Najpierw raz ustawimy trzy rzeczy, a potem przejdziemy razem przez przykładowy projekt.
+      Najpierw raz ustawimy dwie rzeczy, a potem przejdziemy razem przez przykładowy projekt.
       Zajmie to około 10 minut.<br><br>
       <span class="muted">adChecker podpowiada, ale nie zastępuje grafika. Jeśli coś budzi Twoje
       wątpliwości, przekaż projekt do sprawdzenia specjaliście.</span>`,
@@ -57,11 +57,6 @@ const STEPS = [
     text: `Przyłóż linijkę do ekranu: od czerwonej do czerwonej kreski powinno być dokładnie <b>100 mm</b>.<br><br>
       Jeśli jest inaczej — zmierz linijką górny pasek wzorcowy, wpisz wynik w polu
       <b>Zmierzona długość</b> i kliknij <b>Zastosuj</b> obok niego.` },
-
-  { part: PART1, target: ["setAcc"], title: "Dokładność oceny jakości",
-    text: `Program ogląda każdy obraz w projekcie i szuka miejsc, które na wydruku wyjdą rozmyte.<br><br>
-      <b>Standardowa</b> wystarcza prawie zawsze. <b>Wysoka</b> znajdzie też mniejsze miejsca, ale liczy się
-      dwa razy dłużej. Zaznacz jedną i kliknij Dalej.` },
 
   { part: PART1, target: ["setIdx"], title: "Indeks wymiarów",
     enter: (c) => { c.t0 = Date.now(); },
@@ -196,9 +191,10 @@ const STEPS = [
          <b>Pokaż na podglądzie</b>.`,
     wait: () => qualitySettled() || vis("qnav"), skipDone: true },
 
-  { part: PART2, target: ["qnav", "vStage"], title: "Słabe miejsca", place: "left", when: () => vis("qnav"),
+  { part: PART2, target: ["vTools", "vStage"], title: "Słabe miejsca", place: "left", when: () => vis("qnav"),
     text: `Każde słabe miejsce program pokazuje w <b>rzeczywistej wielkości wydruku</b> — tak, jak zobaczysz je
-      z bliska. Strzałkami ‹ › (albo ← → na klawiaturze) przechodzisz do następnych.<br><br>Obrazy o za małej
+      z bliska. Strzałkami ‹ › (albo ← → na klawiaturze) przechodzisz do następnych. W tym samym panelu są lupki,
+      rzeczywista wielkość i dopasowanie do okna, a w rogu podglądu — nawigator.<br><br>Obrazy o za małej
       rozdzielczości trzeba wymienić na większe — poproś o nie klienta. Gdy obejrzysz, zamknij pasek <b>×</b>.`,
     wait: () => !vis("qnav"), skipDone: true },
 
@@ -207,9 +203,9 @@ const STEPS = [
       z wydrukiem po nich.`,
     wait: () => S.accShown === head()?.id || acceptSettled(), skipDone: true },
 
-  { part: PART2, target: ["ch-acc", "vStage", "vFit"], anchor: "acSimBar", title: "Przed i po",
-    text: `Przesuń suwak i porównaj: w lewo — wydruk bez poprawek, w prawo — po nich. <b>Dopasuj</b> u góry
-      pokaże cały projekt.<br><br>Jeśli wszystko gra, kliknij <b>Akceptuję plik</b>.`,
+  { part: PART2, target: ["ch-acc", "vStage"], anchor: "acSimBar", title: "Przed i po",
+    text: `Przesuń suwak i porównaj: w lewo — wydruk bez poprawek, w prawo — po nich.<br><br>Jeśli wszystko gra,
+      kliknij <b>Akceptuję plik</b>.`,
     wait: acceptSettled, skipDone: true },
 
   { part: PART2, target: ["ch-dl"], title: "Pobierz plik do druku", when: acceptSettled,

@@ -1,4 +1,4 @@
-// Ustawienia: kalibracja monitora (dla „100 %"), dokładność oceny jakości, indeks wymiarów.
+// Ustawienia: kalibracja monitora (dla „100 %") i indeks wymiarów.
 import { $, api } from "./util.js";
 import { S, changed } from "./state.js";
 
@@ -45,10 +45,8 @@ function saveCal(v) {
   renderCal(); changed();
 }
 
-export const detailBlock = () => {
-  try { const v = +localStorage.getItem("adcheck.dmBlock"); if (v === 64 || v === 128) return v; } catch (_) {}
-  return 128;
-};
+// Jedna dokładność oceny jakości — standardowa, bloki 128 px ≈ 25 mm (Tomasz 28.09: „wysoka” usunięta)
+export const detailBlock = () => 128;
 
 // ---------------------------------------------------------------- indeks wymiarów szablonów
 let idxTimer = null;
@@ -72,7 +70,6 @@ async function pollIdx(start, retry) {
 export function initSettings() {
   $("btnSettings").onclick = () => {
     renderCal();
-    document.querySelectorAll('input[name="dmBlock"]').forEach((r) => { r.checked = +r.value === detailBlock(); });
     pollIdx(false);
     $("settings").hidden = false;
   };
@@ -86,10 +83,6 @@ export function initSettings() {
   };
   $("calMmOk").onclick = () => { const m = parseFloat($("calMm").value); if (m > 10) saveCal(BAR_PX / m * 25.4); };
   $("calReset").onclick = () => saveCal(96);
-  document.querySelectorAll('input[name="dmBlock"]').forEach((r) => r.addEventListener("change", () => {
-    try { localStorage.setItem("adcheck.dmBlock", r.value); } catch (_) {}
-    changed();
-  }));
   $("idxBuild").onclick = () => pollIdx(true, false);
   $("idxRetry").onclick = () => pollIdx(true, true);
   $("idxStop").onclick = async () => { try { await api("/api/sizeindex/stop", { method: "POST" }); } catch (_) {} setTimeout(() => pollIdx(false), 800); };

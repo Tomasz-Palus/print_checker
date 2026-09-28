@@ -228,10 +228,16 @@ select.sel.small { width: auto; padding: 4px 8px; margin: 6px 0 0 24px; font-siz
 .qlist li { margin: 4px 0; }
 .qlist button { font: inherit; border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; text-align: left; }
 .qlist small { display: block; color: var(--muted); }
-.qnav { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); z-index: 20; display: flex; align-items: center;
-  gap: 8px; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px;
-  box-shadow: 0 4px 18px rgba(0,0,0,.12); max-width: 80%; }
-.qnav .qn-t { font-size: 13px; padding: 0 4px; }
+/* pływający panel podglądu przy „Jakości wydruku” (Tomasz 28.09): STAŁA szerokość i wysokość wiersza
+   z miejscem — przeklikiwanie miejsc nie zmienia rozmiaru panelu */
+.vtools { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); z-index: 20; width: 540px;
+  max-width: calc(100% - 24px); display: flex; flex-direction: column; gap: 6px; background: #fff;
+  border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; box-shadow: 0 4px 18px rgba(0,0,0,.12); }
+.vt-row { display: flex; align-items: center; gap: 6px; justify-content: center; height: 30px; }
+.vt-row.qnav { border-top: 1px solid var(--line); padding-top: 6px; height: 46px; }
+/* opis miejsca: zawsze dwie linie wysokości (krótszy — wyśrodkowany), dłuższy ucięty „…” */
+.qnav .qn-t { flex: 1; min-width: 0; height: 36px; font-size: 13px; line-height: 18px; padding: 0 4px; text-align: center;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 /* pobieranie */
 .dlsum { margin: 6px 0 12px; padding-left: 18px; font-size: 13px; color: #3a4452; }
 .dlsum li { margin: 3px 0; }
