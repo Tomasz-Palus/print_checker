@@ -41,45 +41,50 @@ export const HELP = {
     nią (przyciemnione), zostanie odcięte.<br><br>
     <b>Przesuń</b> działa aż do przeciwnej krawędzi formatu. Suwak lekko „przyciąga" do środka
     i do położeń, w których krawędź projektu równa się z krawędzią formatu. Dwuklik na suwaku = środek.`,
+  print: `Od tego rozdziału <b>podgląd pokazuje wydruk</b>, nie ekran: kolory tak, jak przeliczy je
+    drukarnia (profil Coated FOGRA39, intencja relatywna kolorymetryczna), i overprint, tak jak
+    zrobi to maszyna.<br><br>
+    Ekran i wydruk zawsze się różnią. Monitor świeci, a farba tylko odbija światło, więc bardzo
+    nasycone kolory (czysta zieleń, jaskrawy niebieski) w druku bledną. Przezroczystość drukarnia
+    miesza w przestrzeni zapisanej w pliku, a czerń z samej farby K drukuje się grafitem.<br><br>
+    Każdy dalszy suwak przed/po (Kolory, Overprint, Fonty, Spłaszczenie) porównuje <b>wydruk
+    z wydrukiem</b> — widać tylko to, co zmieniła sama poprawka, a nie różnicę ekran–druk.`,
   color: `Maszyny drukują czterema farbami — <b>CMYK</b>. Kolory RGB (ekranowe), Lab i dodatkowe
     (PANTONE, złoto, Registration) ktoś musi przeliczyć; lepiej zrobić to tutaj i zobaczyć wynik.<br><br>
     Przeliczamy tak jak Photoshop przy „Konwertuj do profilu": RGB jako sRGB, profil
     <b>Coated FOGRA39</b>, intencja relatywna kolorymetryczna z kompensacją punktu czerni.
     CMYK, który już jest w pliku, zostaje nietknięty.<br><br>
-    Wybierasz w rzędach: najpierw <b>Zamień na CMYK</b> albo <b>Zostaw jak jest</b>, przy zamianie
-    profil, a na końcu zawsze <b>Pokaż, jak wydrukuje</b> — suwak porówna ekran z tym, co wyjdzie
-    z drukarki. Dalej idziesz, gdy w każdym rzędzie coś wybierzesz.
-    Kolory bardzo nasycone (czysta zieleń, jaskrawy niebieski) w druku zawsze bledną — farby ich
-    nie mają.<br><br>
+    Wybierasz w rzędach: <b>Zamień na CMYK</b> albo <b>Zostaw jak jest</b>, a przy zamianie profil.
+    Po zamianie suwak porównuje wydruk przed nią z wydrukiem po niej. „Zostaw jak jest” — podgląd
+    pokazuje, jak kolory przeliczy drukarnia.<br><br>
     <b>Profil</b> tylko deklaruje, pod jaką maszynę jest plik. Gdy plik ma już swój profil CMYK
     (np. ISO Coated v2), można go zostawić („Z pliku").<br><br>
-    Po tym rozdziale (zamiana albo „Zostaw jak jest") <b>podgląd pokazuje już wydruk</b>, nie
-    ekran: drukarnia miesza przezroczystość w CMYK, a czerń z samej farby K drukuje się grafitem.`,
+    Uwaga na <b>półprzezroczystość na jaskrawych kolorach RGB</b>: bez zamiany drukarnia najpierw
+    miesza kolory, a potem je przelicza; po zamianie jest odwrotnie. Wynik w tych miejscach potrafi
+    się wyraźnie różnić — porównaj suwakiem.`,
   op: `<b>Overprint</b> (nadruk) każe farbie kłaść się NA tło zamiast je zakrywać. Czerwony napis
     na czarnym tle wychodzi wtedy prawie czarny, choć na ekranie był czerwony. Większość
-    programów na ekranie tego nie pokazuje — dlatego „Pokaż, jak wydrukuje".<br><br>
+    programów na ekranie tego nie pokazuje — nasz podgląd pokazuje (to już wydruk).<br><br>
     Wytyczne Adsystem overprintu nie dopuszczają. „Wyłącz overprint" sprawia, że wydrukuje się
-    to, co widać w projekcie. „Zostaw jak jest" przełącza podgląd na wydruk z overprintem.
-    Dalej idziesz po „Pokaż, jak wydrukuje".`,
+    to, co widać w projekcie; suwak porówna wydruk przed i po. „Zostaw jak jest" zostawia
+    overprint.`,
   fonts: `Tekst zapisany fontem drukarnia musi „złożyć" swoim programem — gdy fontu brakuje albo
     jest inna wersja, litery się zmieniają. <b>Krzywe</b> to gotowe kształty liter: wyglądają
     identycznie, tylko nie da się ich już edytować jako tekstu.<br><br>
     Kształty bierzemy z fontu <b>osadzonego w pliku</b>. Gdy fontu w pliku nie ma, program szuka go
     w Google Fonts, potem w fontach Windowsa. Kroju zastępczego nie używa nigdy — wtedy odmówi
     i powie, o co poprosić klienta.<br><br>
-    Wybierasz w rzędach: <b>Zamień na krzywe</b> albo <b>Zostaw jak jest</b>, a potem
-    <b>Pokaż, jak wydrukuje</b>.`,
+    Wybierasz <b>Zamień na krzywe</b> albo <b>Zostaw jak jest</b>.`,
   flat: `<b>Spłaszczenie</b> zamienia całą stronę w jeden obraz CMYK — jak „Spłaszcz” w Photoshopie.<br><br>
     <b>Używaj go tylko wtedy, gdy to konieczne.</b> Przezroczystość (cienie, półprzezroczyste
     elementy, tryby mieszania) drukarnia i tak spłaszcza przy druku i zwykle robi to lepiej:
     tekst i linie zostają wektorowe, a plik jest mniejszy. Spłaszcz tutaj, gdy drukarnia o to
-    prosi albo gdy „Pokaż, jak wydrukuje” pokazuje ślady — szew albo jasną obwódkę tam, gdzie
+    prosi albo gdy podgląd pokazuje ślady — szew albo jasną obwódkę tam, gdzie
     przezroczystość spotyka się z kolorem dodatkowym lub overprintem.<br><br>
     Rozdzielczość zależy od wielkości wydruku: 300 ppi do 80 cm, 200 ppi do 1,5 m, 150 ppi do 3 m,
     wyżej 120 ppi. Cena: tekst i linie przestają być wektorowe, plik robi się większy.<br><br>
-    Wybierasz w rzędach: <b>Zostaw jak jest</b> albo <b>Spłaszcz projekt</b>, a potem
-    <b>Pokaż, jak wydrukuje</b>. Gdy projekt nie ma przezroczystości, wystarczy <b>Zostaw jak
-    jest</b> — rozdział od razu się zamyka.`,
+    Wybierasz <b>Zostaw jak jest</b> albo <b>Spłaszcz projekt</b>. Gdy projekt nie ma
+    przezroczystości, wystarczy <b>Zostaw jak jest</b>.`,
   qual: `Program otwiera każdy obraz w projekcie i czyta jego piksele. Sprawdza dwie rzeczy:<br><br>
     1) czy obraz ma <b>dość pikseli</b> na swój rozmiar na wydruku — wytyczne wymagają
     <b>120 ppi</b> (w pliku 1:10 to 1200 ppi w pliku). Za mało = rozmycie i schodki, trzeba

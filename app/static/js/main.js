@@ -1,6 +1,6 @@
 // Start programu: wgrywanie pliku, jedna pętla rysowania rozdziałów i podglądu, ustawienia.
 import { $, esc, fmtMm, fmtBytes, api, ask, chapter, initChapters, plural, shown, revealChapters } from "./util.js";
-import { S, changed, onChange, resetJobState, head, template, scaleK, printMm, isPdf, colorSettled, factsKey, STEP_NAME, STEP_CH, stepIndex } from "./state.js";
+import { S, changed, onChange, resetJobState, head, template, scaleK, printMm, isPdf, sizeSettled, factsKey, STEP_NAME, STEP_CH, stepIndex } from "./state.js";
 import { HELP } from "./help.js";
 import * as viewer from "./viewer.js";
 import * as product from "./product.js";
@@ -8,7 +8,7 @@ import { initSettings } from "./settings.js";
 import { resetSteps } from "./steps.js";
 import { renderFrames, renderTrim } from "./chapters.js";
 import { renderSize, sizeScene } from "./size.js";
-import { renderColor, renderOverprint, renderFonts, renderFlatten, simLayers, CMP_WITH_OP } from "./print.js";
+import { renderPrint, renderColor, renderOverprint, renderFonts, renderFlatten, simLayers } from "./print.js";
 import { renderQuality, renderAccept, renderDownload, navOpen } from "./quality.js";
 import { initTour, autoStartTour } from "./tour.js";
 
@@ -149,14 +149,14 @@ function rectIn(a, b) {
   return { x: dx, y: dy, w: p.w * s, h: p.h * s };
 }
 
-// Podgląd = WYDRUK od chwili, gdy rozdział „Kolory" jest domknięty (Tomasz 24.09). Wcześniej
-// ekran pokazywał plik jak monitor, a to kłamie w dwóch miejscach, także gdy plik jest już
-// w CMYK-u: przezroczystość bez zadeklarowanej przestrzeni mieszania drukarnia miesza w CMYK
-// (zmierzone na PRINT_CHECKER_TEST: nałożenie 155/45/45 na ekranie, 166/55/55 w druku — tak
-// samo przy „zostaw" i po zamianie), a czarny z samego K drukuje się grafitem, nie czernią.
-// Zostawiony overprint → dochodzi symulacja overprintu.
+// Podgląd = WYDRUK od chwili, gdy widać rozdział „Symulacja wydruku” (Tomasz 28.09; wcześniej dopiero po Kolorach):
+// kolory z drukarki (FOGRA39) i overprint, tak jak zrobi to maszyna. Ekran kłamie w kilku miejscach,
+// także gdy plik jest już w CMYK-u: jaskrawe kolory RGB, przezroczystość (drukarnia miesza ją
+// w przestrzeni z pliku), czerń z samego K (drukuje się grafitem), overprint. Od tej chwili każdy
+// suwak przed/po porównuje wydruk z wydrukiem — widać tylko to, co zmieniła sama poprawka.
 function printFlags() {
-  return { pr: colorSettled(), op: S.settle.overprint === "skip" && !S.job.versions.some((v) => v.step === "flatten") };
+  const pr = sizeSettled();                  // rozdział „Symulacja wydruku” już widać — pokazuje wydruk
+  return { pr, op: pr && isPdf() };
 }
 
 function scene() {
@@ -184,26 +184,20 @@ function scene() {
     return { frame: pm, k: kOf(vs[hi]), mix: S.simMix / 100, overlay, frameLabel: label(pm),
              layers: [layer(vs[base], rectIn(base, hi), P), layer(vs[hi], { x: 0, y: 0, w: pm.w, h: pm.h }, P)] };
   }
-  // symulacja druku (rozdział Kolory / Overprint): ta sama wersja — na ekranie ↔ z drukarki
+  // „Symulacja wydruku”: ta sama wersja — na ekranie ↔ z drukarki
   const sim = simLayers();
   if (sim) {
     const pm = pageMmOf(vs[hi]), r = { x: 0, y: 0, w: pm.w, h: pm.h };
-    // overprint: druk BEZ overprintu ↔ druk Z overprintem — zmienia się tylko to, co robi
-    // overprint (ekran od druku różni się też gdzie indziej: czerń K100, mieszanie przezroczystości)
     return { frame: pm, k: kOf(vs[hi]), mix: sim.mix, overlay, frameLabel: label(pm),
              layers: [layer(vs[hi], r, sim.bottom), layer(vs[hi], r, sim.top)] };
   }
-  // suwak w rozdziale: tuż przed ↔ tuż po tym kroku. (Główny suwak „przed / po wszystkich
-  // poprawkach" usunięty — Tomasz 24.09: pokazywał plik, a nie wydruk. Wróci na końcu jako
-  // symulacja wydruku przed i po, z overprintem i kolorami z drukarki.)
+  // suwak w rozdziale: tuż przed ↔ tuż po tym kroku, obie strony tak samo (od Symulacji wydruku —
+  // wydruk ↔ wydruk; Szablon, Spady, Wymiar są przed nią — ekran ↔ ekran)
   const ci = S.cmp ? vs.findIndex((v) => v.step === S.cmp.step) : -1;
   if (ci > 0) {
     const pm = pageMmOf(vs[ci]);
-    // kolory: przed = jak na ekranie, po = wydruk; overprint i spłaszczenie: obie strony z overprintem
-    const [exA, exB] = S.cmp.step === "cmyk" ? [{ op: false, pr: false }, { op: false, pr: true }]
-      : CMP_WITH_OP.includes(S.cmp.step) ? [{ op: true, pr: true }, { op: true, pr: true }] : [{}, {}];
     return { frame: pm, k: kOf(vs[ci]), mix: S.cmp.v / 100, overlay, frameLabel: label(pm),
-             layers: [layer(vs[ci - 1], rectIn(ci - 1, ci), exA), layer(vs[ci], { x: 0, y: 0, w: pm.w, h: pm.h }, exB)] };
+             layers: [layer(vs[ci - 1], rectIn(ci - 1, ci)), layer(vs[ci], { x: 0, y: 0, w: pm.w, h: pm.h })] };
   }
   const pm = pageMmOf(vs[hi]);
   return { frame: pm, k: kOf(vs[hi]), mix: 1, overlay, frameLabel: label(pm),
@@ -310,12 +304,12 @@ function render() {
   product.renderProduct();
   product.renderRole();
   if (has) {
-    renderFrames(); renderTrim(); renderSize(); renderColor(); renderOverprint(); renderFonts(); renderFlatten();
+    renderFrames(); renderTrim(); renderSize(); renderPrint(); renderColor(); renderOverprint(); renderFonts(); renderFlatten();
     renderQuality(); renderAccept(); renderDownload();
   } else {
     // bez pliku (wgrywanie, błąd wgrania) nie ma czego pokazywać — stare rozdziały z żywymi
     // przyciskami zapisywały decyzje dla NASTĘPNEGO pliku (przegląd kodu 27.09, A5)
-    for (const id of ["ch-role", "ch-frames", "ch-trim", "ch-size", "ch-color", "ch-op", "ch-fonts", "ch-flat",
+    for (const id of ["ch-role", "ch-frames", "ch-trim", "ch-size", "ch-print", "ch-color", "ch-op", "ch-fonts", "ch-flat",
                       "ch-qual", "ch-acc", "ch-dl"]) $(id).hidden = true;
   }
   // Rozwinięte same (Tomasz 24.09): ZAWSZE dwa ostatnie widoczne rozdziały — bieżący i ten tuż
@@ -349,6 +343,8 @@ function render() {
     const back = ch.querySelector(".ch-back button");
     if (back) back.textContent = step ? "Cofnij" : "Zmień decyzję";
   }
+  const chp = $("ch-print");
+  chp.classList.toggle("past", !chp.hidden && !!S.settle.print && !lastTwo.includes(chp) && chp !== pin);
   // Tylko JEDEN suwak w panelu — ostatni, czyli najświeższy (Tomasz 24.09: przy overprincie
   // suwak z kolorów tylko mylił). Rozdziały ustawiają swoje suwaki przy każdym rysowaniu,
   // więc tu wystarczy schować wszystkie poza ostatnim widocznym.
@@ -356,8 +352,9 @@ function render() {
   const keep = minis[minis.length - 1];
   document.querySelectorAll(".ch .mini").forEach((m) => { if (m !== keep) m.hidden = true; });
   if (S.pin && keep && keep.closest(".ch")?.id !== S.pin) S.pin = null;
-  // porównanie ze schowanego suwaka nie może zostać na podglądzie
+  // porównanie (i symulacja) ze schowanego suwaka nie może zostać na podglądzie
   if (S.cmp && !keep?.querySelector(`input[data-step="${S.cmp.step}"]`)) S.cmp = null;
+  if (S.sim && !keep?.matches(`.sim[data-sim="${S.sim}"]`)) S.sim = null;
   revealChapters();
   // numery rozdziałów po kolei, licząc tylko widoczne
   let n = 0;

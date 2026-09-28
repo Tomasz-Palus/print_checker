@@ -32,8 +32,8 @@ export const S = {
   sz: null,                // ustawienia rozdziału „Wymiar" (suwaki)
   sizeEdit: false,         // wymiar się zgadza, ale użytkownik chce poprawić kadr
   cmp: null,               // suwak w rozdziale: {step, v}
-  sim: null,               // symulacja druku w rozdziale: "proof" (kolory) | "op" (overprint) | null
-  simMix: 100,             // suwak symulacji: 0 = jak na ekranie, 100 = jak z drukarki
+  sim: null,               // suwak symulacji: "print" (rozdział Symulacja wydruku: ekran ↔ druk) | "final" (Akceptacja) | null
+  simMix: 100,             // suwak symulacji: 0 = lewa strona, 100 = prawa
   cmykProfile: "fogra39",  // profil przy zamianie na CMYK: fogra39 | keep | none
   // podgląd
   overlayOn: false,
@@ -215,15 +215,21 @@ export function transparencyKinds(a = facts()) {
   return [...out];
 }
 
-// Kolory i overprint: domknięte dopiero, gdy w KAŻDYM rzędzie coś wybrano (Tomasz 24.09) —
-// wtedy `settle` = "done" (poprawione) albo "skip" (zostawione). Bez problemu w pliku — od razu.
+// „Symulacja wydruku” (Tomasz 28.09): od tego rozdziału podgląd pokazuje WYDRUK (kolory z drukarki
+// i overprint), a każdy dalszy suwak porównuje wydruk przed krokiem z wydrukiem po nim. Domknięty
+// przyciskiem „Rozumiem, dalej” — laik ma to przeczytać, a nie przelecieć.
+export const printSettled = () => sizeSettled() && !!S.settle.print;
+
+// Kolory, overprint, fonty, spłaszczenie: domknięte, gdy wybrano — poprawka nałożona (`hasStep`)
+// albo „Zostaw jak jest” (`settle` = "skip"). Bez problemu w pliku — od razu. Od 0.5.4 bez
+// „Pokaż, jak wydrukuje”: podgląd już jest wydrukiem (rozdział Symulacja wydruku).
 function settledByChoice(name, prev, clean) {
   if (!prev) return false;
   const a = facts(name);
-  if (S.settle[name] || a?.error) return true;
-  return !hasStep(name) && !S.choice[name]?.act && !!a && clean(a);
+  if (S.settle[name] || hasStep(name) || a?.error) return true;
+  return !S.choice[name]?.act && !!a && clean(a);
 }
-export const colorSettled = () => settledByChoice("cmyk", sizeSettled(), (a) => !colorNeed(a).any);
+export const colorSettled = () => settledByChoice("cmyk", printSettled(), (a) => !colorNeed(a).any);
 export const overprintSettled = () => settledByChoice("overprint", colorSettled(), (a) => !isPdf() || !(a.overprint_uses > 0));
 export const fontsSettled = () => settledByChoice("outline", overprintSettled(), (a) => !isPdf() || !(a.fonts || []).length);
 // Spłaszczenie: ZAWSZE czeka na wybór, także bez przezroczystości (Tomasz 25.09: „kolejny rozdział

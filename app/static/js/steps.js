@@ -8,7 +8,7 @@ import { S, changed, STEP_ORDER, STEP_NAME, STEP_CH } from "./state.js";
 function forgetFrom(name) {
   const i = STEP_ORDER.indexOf(name);
   for (const n of STEP_ORDER.slice(Math.max(0, i))) { delete S.settle[n]; delete S.stepErr[n]; delete S.choice[n]; }
-  if (i <= STEP_ORDER.indexOf("resize")) { S.sz = null; S.sizeEdit = false; }
+  if (i <= STEP_ORDER.indexOf("resize")) { S.sz = null; S.sizeEdit = false; delete S.settle.print; }
   S.cmp = null; S.sim = null;
 }
 
@@ -95,7 +95,7 @@ document.querySelectorAll(".mini:not(.sim) input").forEach((sl) => sl.addEventLi
   S.cmp = { step: sl.dataset.step, v: +sl.value };
   changed();
 }));
-// suwaki symulacji druku (kolory, overprint): ten sam plik — jak na ekranie ↔ jak z drukarki
+// suwaki symulacji (Symulacja wydruku: ekran ↔ druk; Akceptacja: wydruk przed ↔ po poprawkach)
 document.querySelectorAll(".mini.sim input").forEach((sl) => sl.addEventListener("input", () => {
   S.cmp = null; S.sim = sl.closest(".mini").dataset.sim; S.simMix = +sl.value;
   changed();

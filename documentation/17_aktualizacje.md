@@ -523,3 +523,39 @@ Numery jak w `18_przeglad_kodu.md`.
   - Po zamianie: najpierw zieleń jest przycinana do zasięgu CMYK (dużo bledsza), potem mieszana.
     Całość wychodzi jaśniejsza, a pudełko zostaje złote.
   - Sprawdzone Ghostscriptem i MuPDF-em — oba renderują tak samo.
+
+## 0.5.4 — rozdział „Symulacja wydruku”: od niego podgląd = wydruk (Tomasz 28.09)
+
+- **Problem (Tomasz):** w Kolorach „przed” pokazywało plik jak na ekranie, a „po” — wydruk.
+  Na ekranie kolory zawsze wyglądają lepiej, więc laik widział różnicę ekran–druk, a nie to,
+  co zrobiła sama zamiana. Tak zginęła różnica z strony.pdf (półprzezroczysta zieleń RGB
+  mieszana przed zamianą i po niej) — widać ją było dopiero w Akceptacji.
+- **Nowy rozdział „Symulacja wydruku”** zaraz pod Wymiarem wydruku.
+  - Od chwili, gdy go widać, podgląd pokazuje WYDRUK: kolory przeliczone jak w drukarni
+    (FOGRA39) i overprint jak na maszynie (`main.printFlags`: `pr` = `op` = Wymiar domknięty;
+    raster — bez overprintu).
+  - Krótki tekst: na wydruku kolory są bledsze niż na ekranie i to normalne. Suwak
+    „ekran ↔ druk” (`prSimBar`, `S.sim = "print"`).
+  - Domknięcie przyciskiem **Rozumiem, dalej** (`S.settle.print`) — laik ma to przeczytać.
+    Cofnięcie Szablonu, Spadów albo Wymiaru zdejmuje też to domknięcie (`steps.forgetFrom`).
+- **Dalsze rozdziały porównują wydruk z wydrukiem.**
+  - Kolory: „przed” = wydruk wersji sprzed zamiany, „po” = wydruk po zamianie (suwak
+    `przed ↔ po`).
+  - Overprint, Fonty, Spłaszczenie: tak samo — wydruk przed krokiem ↔ wydruk po nim.
+  - W `main.scene` zniknęły wyjątki dla poszczególnych kroków (`CMP_WITH_OP`): obie strony
+    suwaka mają te same flagi, więc widać tylko to, co zmieniła sama poprawka.
+- **Bez „Pokaż, jak wydrukuje”** w Kolorach, Overprincie, Fontach i Spłaszczeniu — podgląd
+  już jest wydrukiem. Zniknęły też suwaki „ekran ↔ druk” przy „Zostaw jak jest”.
+  - „Zostaw jak jest” od razu domyka rozdział (`S.settle = "skip"`).
+  - Poprawka domyka rozdział, gdy się nałoży (`state.settledByChoice` liczy `hasStep`).
+- **Akceptacja bez zmian:** wydruk bez poprawek ↔ wydruk po wszystkich.
+- Samouczek: nowy krok „Symulacja wydruku” (suwak + „Rozumiem, dalej”), krok „Wydruk przed
+  i po” przy suwaku Kolorów; w Overprincie, Fontach i Spłaszczeniu jedno kliknięcie.
+  Pomoc „?” — nowy wpis `print`, poprawione Kolory, Overprint, Fonty, Spłaszczenie
+  (z uwagą o półprzezroczystości na jaskrawym RGB).
+- Sprawdzone na strony.pdf (Playwright):
+  - Symulacja wydruku: druk (stonowana zieleń) ↔ ekran (jaskrawa).
+  - Kolory po zamianie: „przed” = zielone pudełko, „po” = złote — to ta różnica z Akceptacji,
+    teraz widoczna od razu.
+  - Kolory pojawiają się dopiero po „Rozumiem, dalej”; „Zostaw jak jest” w Spłaszczeniu
+    zamyka rozdział jednym kliknięciem.

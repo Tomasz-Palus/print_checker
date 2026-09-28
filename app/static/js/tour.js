@@ -8,7 +8,7 @@
 // Kroki rozdziałów, które są już domknięte, idąc do przodu pomijamy.
 import { $, shown } from "./util.js";
 import { S, head, hasStep, isPdf, productOk, roleSettled, framesSettled, trimSettled, sizeSettled,
-         colorSettled, overprintSettled, fontsSettled, flattenSettled } from "./state.js";
+         printSettled, colorSettled, overprintSettled, fontsSettled, flattenSettled } from "./state.js";
 import { qualitySettled, acceptSettled } from "./quality.js";
 import { cover } from "./size.js";
 import { calCount, idxState } from "./settings.js";
@@ -146,6 +146,12 @@ const STEPS = [
       trzeba.<br><br>Kliknij <b>${btnText("szDo", "Dopasuj wymiar")}</b>.`,
     wait: sizeSettled, skipDone: true },
 
+  { part: PART2, target: ["ch-print", "vStage"], anchor: "prSimBar", title: "Symulacja wydruku",
+    text: `Od tego miejsca podgląd pokazuje <b>wydruk</b>, a nie ekran. Przesuń suwak: w lewo — tak projekt wygląda
+      na ekranie, w prawo — tak wyjdzie z drukarki.<br><br>Jaskrawe kolory w druku bledną, bo farby nie mają tak
+      nasyconych barw. To normalne.<br><br>Kliknij <b>Rozumiem, dalej</b>.`,
+    wait: printSettled, skipDone: true },
+
   { part: PART2, target: ["ch-color"], title: "Kolory",
     text: `Maszyny drukują czterema farbami — to <b>CMYK</b>. W tym projekcie są też kolory z ekranu (RGB)
       i kolory specjalne (np. PANTONE, złoto) — trzeba je przeliczyć.<br><br>Kliknij <b>Zamień na CMYK</b>.`,
@@ -156,16 +162,10 @@ const STEPS = [
       kliknij go.`,
     wait: () => hasStep("cmyk") || colorSettled(), skipDone: true },
 
-  { part: PART2, target: ["coSeen"], title: "Pokaż, jak wydrukuje",
-    text: `Rozdziały z kolorami i drukiem kończą się przyciskiem <b>Pokaż, jak wydrukuje</b> — żeby nikt nie
-      szedł dalej, nie widząc wydruku. Kliknij go.`,
-    wait: colorSettled, skipDone: true },
-
-  { part: PART2, target: ["ch-color", "vStage"], anchor: () => vis("coMini") ? "coMini" : "coSimBar",
-    title: "Podgląd = wydruk", when: () => colorSettled() && !!S.choice.cmyk?.seen,
-    text: `Od teraz podgląd pokazuje <b>wydruk</b>, a nie ekran. Przesuń suwak: w lewo — tak było na ekranie,
-      w prawo — tak wyjdzie z drukarki.<br><br>Jaskrawe kolory w druku bledną, bo farby nie mają tak nasyconych
-      barw. To normalne.` },
+  { part: PART2, target: ["coMini", "vStage"], title: "Wydruk przed i po", when: () => hasStep("cmyk") && vis("coMini"),
+    text: `Suwak porównuje <b>wydruk przed zamianą</b> z <b>wydrukiem po niej</b> — widać tylko to, co zmieniło
+      samo przeliczenie kolorów. Przesuń go w lewo.`,
+    wait: () => S.cmp?.step === "cmyk" && S.cmp.v < 50, manual: true, optional: "Pomiń" },
 
   { part: PART2, target: ["ch-op"], title: "Overprint", when: isPdf,
     text: twoStep("overprint", `<b>Overprint</b> (nadruk) sprawia, że farba kładzie się na tło, zamiast je zakryć —
@@ -217,11 +217,9 @@ const STEPS = [
       <b>?</b> przy rozdziale.<br><br>Samouczek włączysz ponownie tym przyciskiem.` },
 ];
 
-// Overprint, fonty, spłaszczenie: najpierw poprawka (albo „zostaw"), potem „Pokaż, jak wydrukuje".
+// Overprint, fonty, spłaszczenie: jedna decyzja — poprawka albo „Zostaw jak jest" (podgląd już jest wydrukiem).
 function twoStep(name, intro, fix) {
-  return () => S.choice[name]?.act
-    ? `${intro}<br><br>${S.busy ? "Program pracuje — chwileczkę." : "Teraz kliknij <b>Pokaż, jak wydrukuje</b>."}`
-    : `${intro}<br><br>Kliknij <b>${fix}</b>, a potem <b>Pokaż, jak wydrukuje</b>.`;
+  return () => S.busy ? `${intro}<br><br>Program pracuje — chwileczkę.` : `${intro}<br><br>Kliknij <b>${fix}</b>.`;
 }
 
 function idxComplete() {
