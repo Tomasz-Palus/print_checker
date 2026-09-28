@@ -35,12 +35,16 @@ export const HELP = {
     z wytycznych: projekt wchodzi jako całość (wektor zostaje wektorem), nadmiar jest przycinany.<br><br>
     <b>Wielkość</b> w procentach: 100 % = projekt w swoim rozmiarze. Skróty ustawiają „wypełnij format"
     (bez pustych pasów, coś zostanie odcięte) albo „cały projekt" (nic nie odcięte, mogą zostać pasy).
-    <b>Skala projektu</b> (zwinięta) przydaje się, gdy plik przyszedł w złej skali, np. 1:1 zamiast 1:10.<br><br>
+    <b>Przeskalowanie pliku</b> (zwinięte) przydaje się, gdy plik przyszedł w złej skali, np. 1:1 zamiast
+    1:10 — wtedy ÷10 albo ×10. „Bez zmian” znaczy, że plik zostaje w skali wytycznych (przy wytycznych
+    1:10 drukuje się 10× większy).<br><br>
     Puste pasy można wypełnić <b>tłem z krawędzi</b> (ostatni rząd pikseli projektu powielony na
     margines) albo <b>odbiciem lustrzanym</b>. Na podglądzie zielona ramka to format, a to, co poza
     nią (przyciemnione), zostanie odcięte.<br><br>
     <b>Przesuń</b> działa aż do przeciwnej krawędzi formatu. Suwak lekko „przyciąga" do środka
-    i do położeń, w których krawędź projektu równa się z krawędzią formatu. Dwuklik na suwaku = środek.`,
+    i do położeń, w których krawędź projektu równa się z krawędzią formatu. Dwuklik na suwaku = środek.
+    Dokładną wartość wpiszesz w pole obok: mm na wydruku od środka, plus = w prawo / w dół,
+    minus = w lewo / w górę.`,
   print: `Od tego rozdziału <b>podgląd pokazuje wydruk</b>, nie ekran: kolory tak, jak przeliczy je
     drukarnia (profil Coated FOGRA39, intencja relatywna kolorymetryczna), i overprint, tak jak
     zrobi to maszyna.<br><br>

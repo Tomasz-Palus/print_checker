@@ -325,7 +325,7 @@ function render() {
   // Lupki, rzeczywista wielkość, dopasuj i nawigator — tylko przy „Jakości wydruku”: gdy to bieżący
   // (ostatni) rozdział albo gdy przeglądamy słabe miejsca (Tomasz 28.09)
   const qualMode = !!S.job && (chs[chs.length - 1]?.id === "ch-qual" || navOpen());
-  $("vTools").hidden = !qualMode;
+  viewer.showTools(qualMode);
   viewer.setZoomAllowed(qualMode);
   const pin = chs.find((ch) => ch.id === S.pin) || null;
   const autoKey = [...lastTwo, pin].map((ch) => ch?.id || "").join("|");

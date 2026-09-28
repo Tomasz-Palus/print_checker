@@ -450,7 +450,19 @@ export function setZoomAllowed(on) {
 }
 
 // ------------------------------------------------------------------ postęp i czekanie
+// Pływający panel (#vTools): lupki i nawigacja tylko przy „Jakości wydruku” (main.render → showTools),
+// a pasek wczytywania zawsze, gdy coś się liczy — w tym samym miejscu (Tomasz 28.09).
+let toolsOn = false;
+export function showTools(on) { toolsOn = !!on; floatPanel(); }
+function floatPanel() {
+  $("vtZoom").hidden = !toolsOn;
+  $("vTools").hidden = !toolsOn && $("vProg").hidden;
+}
 function progress() {
+  progressBar();
+  floatPanel();
+}
+function progressBar() {
   const el = $("vProg");
   const busy = (l) => ["wait", "queued", "run"].includes(l.state);
   const act = [...live.values()].filter((l) => l.full && busy(l));

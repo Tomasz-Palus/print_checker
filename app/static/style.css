@@ -129,9 +129,12 @@ select.sel { width: 100%; padding: 7px 8px; border: 1px solid var(--line); borde
 .vname { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .vname small { color: var(--muted); }
 .vmid { flex: none; }
-.vprog { margin-right: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600;
-  color: var(--accent-2); white-space: nowrap; background: #eef3ff; border: 1px solid #c9d8ff; border-radius: 8px; padding: 6px 10px; }
-.vprog .bar { width: 110px; height: 8px; margin: 0; background: #d6e2ff; border-radius: 4px; }
+/* pasek wczytywania w pływającym panelu (Tomasz 28.09): na całą szerokość, większy */
+.vprog { display: flex; align-items: center; gap: 12px; font-size: 14px; font-weight: 600;
+  color: var(--accent-2); white-space: nowrap; background: #eef3ff; border: 1px solid #c9d8ff; border-radius: 8px; padding: 8px 12px; }
+.vprog .bar { flex: 1; height: 12px; margin: 0; background: #d6e2ff; border-radius: 6px; overflow: hidden; }
+.vprog .bar i { border-radius: 6px; }
+.vprog .t { min-width: 150px; text-align: right; }
 .vprog.pulse .bar i { animation: vpulse 1.2s ease-in-out infinite alternate; }
 @keyframes vpulse { from { margin-left: 0; } to { margin-left: 65%; } }
 .vsep { width: 1px; height: 20px; background: var(--line); margin: 0 2px; }
@@ -198,6 +201,7 @@ a.btn { color: var(--text); text-decoration: none; display: inline-block; }
 .sl-lbl { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 13px; color: #3a4452; }
 .sl-lbl input { width: 70px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; text-align: right; }
 .sl-lbl span { color: var(--muted); }
+.sl-lbl small { font-size: 12px; margin-right: 6px; }
 .sl { width: 100%; margin: 4px 0 0; }
 .row.tight { margin-top: 6px; gap: 6px; }
 .more { margin-top: 12px; font-size: 13px; }

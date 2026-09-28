@@ -559,3 +559,30 @@ Numery jak w `18_przeglad_kodu.md`.
     teraz widoczna od razu.
   - Kolory pojawiają się dopiero po „Rozumiem, dalej”; „Zostaw jak jest” w Spłaszczeniu
     zamyka rozdział jednym kliknięciem.
+
+## 0.5.5 — przesunięcie w mm, czytelna skala przy wytycznych 1:10 (Tomasz 28.09)
+
+- **Przesuń w poziomie / w pionie: pole na własną wartość.**
+  - Obok suwaka pole w mm NA WYDRUKU od środka: plus = w prawo / w dół, minus = w lewo / w górę.
+    Przecinek albo kropka, Enter kończy wpisywanie.
+  - Wartość spoza zakresu (krawędź projektu dalej niż przeciwna krawędź formatu) przycina się
+    do zakresu, jak przy suwaku.
+  - Suwak z magnesem (środek, równo z krawędzią) działa jak dotąd. Opis obok pola mówi już
+    tylko kierunek albo „środek” / „równo z … krawędzią” — liczba jest w polu.
+- **„Skala projektu: 1:1” przy wytycznych 1:10 myliła** (laik czytał to jako „drukuję 1:1”).
+  - Teraz „Przeskalowanie pliku: **bez zmian** (wytyczne w skali 1:10 — plik drukuje się 10×
+    większy)”. Przyciski: ÷10 / bez zmian / ×10; podpowiedź przy złej skali mówi „po
+    przeskalowaniu ×10” zamiast „w skali 10:1”.
+  - Przy wytycznych 1:10 zdanie na górze rozdziału podaje najpierw wymiary NA WYDRUKU
+    („Na wydruku plik ma 6160 × 2320 mm, a wytyczne wymagają 6000 × 2270 mm”), a wymiar
+    pliku w nawiasie.
+  - Opis pod suwakami („przycięte…”, „puste pasy…”) też w mm na wydruku — wcześniej w mm pliku.
+- **Pasek wczytywania w pływającym panelu** (Tomasz 28.09).
+  - „Pełna jakość NN %” jest teraz w panelu z lupkami, pod opisem miejsca („Miejsce 1 z 22…”),
+    na całą szerokość panelu, większy (pasek 12 px, napis 14 px). Wcześniej był mały, na
+    górnym pasku obok „Podgląd szablonu”.
+  - „Wczytuję podgląd…” (suwaki przed/po, symulacja) pokazuje się w tym samym miejscu. Poza
+    „Jakością” panel ma wtedy tylko pasek, bez lupek (`viewer.showTools` + `floatPanel`).
+- Sprawdzone (Playwright, 1878, format 3030 × 2280): wpisane −12,5 i 999 mm → suwaki i opis
+  się zgadzają. Wariantu 1:10 nie dało się odtworzyć w sandboksie (brak dostępu do wytycznych
+  z sieci) — do sprawdzenia u Tomasza na adWall Vario Prosta 600.

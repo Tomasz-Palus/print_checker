@@ -167,18 +167,20 @@
             <button class="btn small" id="szFill" type="button">wypełnij format</button>
             <button class="btn small" id="szWhole" type="button">cały projekt</button>
           </div>
-          <details class="more" id="szRatioBox"><summary>Skala projektu: <b id="szRatioVal">1:1</b></summary>
+          <details class="more" id="szRatioBox"><summary>Przeskalowanie pliku: <b id="szRatioVal">bez zmian</b> <small id="szRatioNote"></small></summary>
             <input type="range" class="sl" id="szRatio" min="0" max="28" value="14" step="1">
             <div class="row tight">
-              <button class="btn small" id="szD10" type="button">1:10</button>
-              <button class="btn small" id="szR11" type="button">1:1</button>
-              <button class="btn small" id="szX10" type="button">10:1</button>
+              <button class="btn small" id="szD10" type="button" title="Plik 10× mniejszy">÷10</button>
+              <button class="btn small" id="szR11" type="button" title="Plik w swoim rozmiarze">bez zmian</button>
+              <button class="btn small" id="szX10" type="button" title="Plik 10× większy">×10</button>
             </div>
             <div class="box warn" id="szHint" hidden></div>
           </details>
-          <div class="sl-lbl" id="szXLbl">Przesuń w poziomie <span id="szXVal"></span></div>
+          <div class="sl-lbl" id="szXLbl">Przesuń w poziomie <span><small id="szXVal"></small>
+            <input type="text" inputmode="decimal" id="szXmm" title="mm na wydruku od środka: plus = w prawo, minus = w lewo"> mm</span></div>
           <input type="range" class="sl" id="szX" min="-1000" max="1000" value="0" step="1" title="Dwuklik = na środek">
-          <div class="sl-lbl" id="szYLbl">Przesuń w pionie <span id="szYVal"></span></div>
+          <div class="sl-lbl" id="szYLbl">Przesuń w pionie <span><small id="szYVal"></small>
+            <input type="text" inputmode="decimal" id="szYmm" title="mm na wydruku od środka: plus = w dół, minus = w górę"> mm</span></div>
           <input type="range" class="sl" id="szY" min="-1000" max="1000" value="0" step="1" title="Dwuklik = na środek">
           <div id="szFillBox">
             <div class="sl-lbl">Puste marginesy</div>
@@ -342,10 +344,7 @@
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1"/><rect x="4" y="5" width="8" height="6" rx=".5" stroke-dasharray="2 1.6"/></svg>
           Podgląd szablonu</button>
       </div>
-      <div class="vright">
-        <!-- pasek pełnej jakości: zaraz na prawo od „Podgląd szablonu", w swojej części paska (nie zasłania lupek) -->
-        <div class="vprog" id="vProg" hidden><span class="bar"><i></i></span><span class="t"></span></div>
-      </div>
+      <div class="vright"></div>
     </div>
     <div class="vempty" id="vEmpty">Wgraj plik — podgląd pokaże się tutaj.</div>
     <div class="vmain" id="vMain" hidden>
@@ -358,7 +357,7 @@
          wielkość, dopasuj, a pod nimi nawigacja po słabych miejscach (‹ › i Esc). Stała szerokość i wysokość —
          przeklikiwanie miejsc nie zmienia rozmiaru panelu. -->
     <div class="vtools" id="vTools" hidden>
-      <div class="vt-row">
+      <div class="vt-row" id="vtZoom">
         <button class="btn small icon tool" id="vIn" type="button" title="Lupka + (Z): kliknij w podgląd, żeby powiększyć, albo zaznacz obszar. Spacja = przesuwanie">
           <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><circle cx="6.6" cy="6.6" r="4.7"/><path d="M10 10 14.4 14.4M4.4 6.6h4.4M6.6 4.4v4.4"/></svg></button>
         <button class="btn small icon tool" id="vOut" type="button" title="Lupka − (Alt+Z): kliknij w podgląd, żeby pomniejszyć, albo zaznacz obszar">
@@ -373,6 +372,8 @@
         <button class="btn small" id="qnNext" type="button" title="Następne (→)">›</button>
         <button class="btn small" id="qnClose" type="button" title="Zamknij (Esc)">×</button>
       </div>
+      <!-- pasek wczytywania (Tomasz 28.09): pod opisem miejsca; poza „Jakością” panel pokazuje sam pasek -->
+      <div class="vprog" id="vProg" hidden><span class="bar"><i></i></span><span class="t"></span></div>
     </div>
   </section>
 </main>

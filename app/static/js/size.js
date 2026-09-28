@@ -7,12 +7,13 @@ import { $, fmtMm, chapter } from "./util.js";
 import { S, changed, pageMm, targetMm, scaleK, hasStep, beforeStep, trimSettled, sizeMatches, isPdf } from "./state.js";
 import { applyStep, undoStep, stepControls } from "./steps.js";
 
-// Skala projektu w dwóch poziomach (ustalenie Tomasza): SKALA w notacji drukarskiej
-// (1:10 … 1:1 … 10:1, rzadko ruszana, schowana) × WIELKOŚĆ w procentach.
+// Skala projektu w dwóch poziomach (ustalenie Tomasza): PRZESKALOWANIE PLIKU (÷10 … bez zmian … ×10,
+// rzadko ruszane, schowane) × WIELKOŚĆ w procentach. Do 0.5.4 pisało się to „Skala projektu 1:1” —
+// przy wytycznych 1:10 laik czytał to jako „drukuję w skali 1:1” (Tomasz 28.09).
 const RATIOS = [1/50, 1/40, 1/30, 1/25, 1/20, 1/16, 1/12, 1/10, 1/8, 1/6, 1/5, 1/4, 1/3, 1/2,
                 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 25, 30, 40, 50];
 const R11 = 14;
-const ratioLabel = (m) => m >= 1 ? `${Math.round(m)}:1` : `1:${Math.round(1 / m)}`;
+const ratioLabel = (m) => Math.abs(m - 1) < 1e-9 ? "bez zmian" : m > 1 ? `×${Math.round(m)}` : `÷${Math.round(1 / m)}`;
 const EDGE_TRIM_PX = 3, EDGE_FILL_PPI = 120;     // jak w steps.py
 
 const fileMm = () => pageMm(beforeStep("resize"));
@@ -95,6 +96,20 @@ function slide(axis) {
 }
 on("szX", "input", () => slide("x"));
 on("szY", "input", () => slide("y"));
+// Własna wartość w mm (Tomasz 28.09): mm NA WYDRUKU od środka, plus = w prawo / w dół. Poza zakresem
+// (krawędź projektu dalej niż przeciwna krawędź formatu) — przycinamy do zakresu, jak suwak.
+function typed(axis) {
+  const v = parseFloat($(axis === "x" ? "szXmm" : "szYmm").value.replace(",", ".").replace(/\s/g, ""));
+  if (!Number.isFinite(v)) return;
+  sz()[axis === "x" ? "dx" : "dy"] = v / scaleK();
+  changed();
+}
+on("szXmm", "input", () => typed("x"));
+on("szYmm", "input", () => typed("y"));
+for (const id of ["szXmm", "szYmm"]) {
+  $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); });
+  $(id).addEventListener("blur", () => changed());          // po wyjściu z pola — wartość po przycięciu do zakresu
+}
 on("szX", "dblclick", () => { sz().dx = 0; changed(); });
 on("szY", "dblclick", () => { sz().dy = 0; changed(); });
 // marginesy: puste / tło z krawędzi / odbicie lustrzane — przyciski zamiast pola i listy (Tomasz 24.09)
@@ -151,8 +166,11 @@ export function renderSize() {
       + (k > 1 ? `, na wydruku ${printT}` : "") + ".";
   } else {
     st = "todo"; sum = "";
-    say = `Plik ma <b>${fmtMm(f.w)} × ${fmtMm(f.h)} mm</b>, a wytyczne wymagają <b>${fmtMm(t.w)} × ${fmtMm(t.h)} mm</b>`
-      + (k > 1 ? ` (na wydruku ${printT})` : "") + ". Ustaw, jak projekt ma się zmieścić w formacie.";
+    say = (k > 1
+      ? `Na wydruku plik ma <b>${fmtMm(f.w * k)} × ${fmtMm(f.h * k)} mm</b>, a wytyczne wymagają <b>${printT}</b> `
+        + `(plik w skali 1:${k}: ${fmtMm(f.w)} × ${fmtMm(f.h)} mm zamiast ${fmtMm(t.w)} × ${fmtMm(t.h)} mm)`
+      : `Plik ma <b>${fmtMm(f.w)} × ${fmtMm(f.h)} mm</b>, a wytyczne wymagają <b>${fmtMm(t.w)} × ${fmtMm(t.h)} mm</b>`)
+      + ". Ustaw, jak projekt ma się zmieścić w formacie.";
   }
   chapter("ch-size", st, sum);
   $("szSay").innerHTML = say;
@@ -164,6 +182,7 @@ export function renderSize() {
     setVal("szRange", Math.round(Math.min(500, Math.max(10, s.pct))));
     setVal("szPct", s.pct >= 100 ? Math.round(s.pct) : Math.round(s.pct * 10) / 10);
     $("szRatio").value = s.ratio; $("szRatioVal").textContent = ratioLabel(m);
+    $("szRatioNote").textContent = k > 1 ? `(wytyczne w skali 1:${k} — plik drukuje się ${k}× większy)` : "";
     const pc = (z) => { const p = z / m * 100; return p >= 10 ? Math.round(p) : Math.round(p * 10) / 10; };
     $("szOrig").textContent = `rozmiar pliku (${pc(1)} %)`;
     $("szFill").textContent = `wypełnij format (${pc(c.coverZ)} %)`;
@@ -174,8 +193,8 @@ export function renderSize() {
     $("szX10").classList.toggle("on", x10); $("szD10").classList.toggle("on", d10);
     $("szHint").hidden = !(x10 || d10);
     $("szHint").innerHTML = x10
-      ? `Plik wygląda na zapisany w skali <b>1:1</b>, a wytyczne są w <b>1:10</b> — w skali <b>10:1</b> wymiar zgadza się co do milimetra. Rastry nie zyskają pikseli, więc ppi na wydruku spadnie 10×.`
-      : `Plik wygląda na zapisany w skali <b>1:10</b>, a wytyczne są w <b>1:1</b> — w skali <b>1:10</b> wymiar zgadza się co do milimetra.`;
+      ? `Plik wygląda na zapisany w skali <b>1:1</b>, a wytyczne są w <b>1:10</b> — po przeskalowaniu <b>×10</b> wymiar zgadza się co do milimetra. Rastry nie zyskają pikseli, więc ppi na wydruku spadnie 10×.`
+      : `Plik wygląda na zapisany w skali <b>1:10</b>, a wytyczne są w <b>1:1</b> — po przeskalowaniu <b>÷10</b> wymiar zgadza się co do milimetra.`;
     if ((x10 || d10) && !s.hintShown) { s.hintShown = true; $("szRatioBox").open = true; }
     setVal("szX", Math.round(s.dx / c.rx * 1000)); setVal("szY", Math.round(s.dy / c.ry * 1000));
     // opis na WYDRUKU: ile mm od środka, a gdy krawędź projektu równa się z krawędzią formatu — to
@@ -183,19 +202,22 @@ export function renderSize() {
       if (Math.abs(d) < 0.05) return "środek";
       if (Math.abs(T - P) > 0.1 && Math.abs(pos) < 0.05) return `równo z ${eA} krawędzią`;
       if (Math.abs(T - P) > 0.1 && Math.abs(pos + P - T) < 0.05) return `równo z ${eB} krawędzią`;
-      return `${fmtMm(Math.abs(d) * k)} mm ${d < 0 ? neg : pos_}`;
+      return d < 0 ? neg : pos_;                   // ile mm — w polu obok
     };
+    const mm = (d) => { const v = Math.round(d * k * 10) / 10; return String(Object.is(v, -0) ? 0 : v).replace(".", ","); };
+    setVal("szXmm", mm(s.dx)); setVal("szYmm", mm(s.dy));
     $("szXVal").textContent = where(s.dx, c.left, c.t.w, c.pw, "w lewo", "w prawo", "lewą", "prawą");
     $("szYVal").textContent = where(s.dy, c.top, c.t.h, c.ph, "w górę", "w dół", "górną", "dolną");
     $("szFillBox").hidden = !(c.gap[0] > 0.15 || c.gap[1] > 0.15);        // bez pustych pasów nie ma czego wypełniać
     document.querySelectorAll("#szFillSeg button").forEach((b) =>
       b.classList.toggle("on", b.dataset.v === (s.edge ? s.mode : "none")));
     const parts = [];
-    if (c.cut[0] > 0.2 || c.cut[1] > 0.2) parts.push(`przycięte ${fmtMm(c.cut[0])} mm w poziomie i ${fmtMm(c.cut[1])} mm w pionie`);
+    // opis w mm NA WYDRUKU (przy wytycznych 1:10 mm pliku ×10 — Tomasz 28.09: laik myśli wydrukiem)
+    if (c.cut[0] > 0.2 || c.cut[1] > 0.2) parts.push(`przycięte ${fmtMm(c.cut[0] * k)} mm w poziomie i ${fmtMm(c.cut[1] * k)} mm w pionie`);
     if (c.gap[0] > 0.2 || c.gap[1] > 0.2) parts.push(s.edge
-      ? `margines ${fmtMm(c.gap[0])} × ${fmtMm(c.gap[1])} mm wypełniony ${s.mode === "mirror" ? "odbiciem lustrzanym" : "tłem z krawędzi"}`
-      : `<span class="say warn">puste pasy ${fmtMm(c.gap[0])} × ${fmtMm(c.gap[1])} mm</span>`);
-    $("szDesc").innerHTML = `Projekt w skali <b>${Math.round(c.z * 100)} %</b> ma ${fmtMm(c.pw)} × ${fmtMm(c.ph)} mm — `
+      ? `margines ${fmtMm(c.gap[0] * k)} × ${fmtMm(c.gap[1] * k)} mm wypełniony ${s.mode === "mirror" ? "odbiciem lustrzanym" : "tłem z krawędzi"}`
+      : `<span class="say warn">puste pasy ${fmtMm(c.gap[0] * k)} × ${fmtMm(c.gap[1] * k)} mm</span>`);
+    $("szDesc").innerHTML = `Przy wielkości <b>${Math.round(c.z * 100)} %</b> projekt ma na wydruku ${fmtMm(c.pw * k)} × ${fmtMm(c.ph * k)} mm — `
       + (parts.length ? parts.join(", ") : "wypełnia format dokładnie") + ".";
     const lost = 1 - (c.t.w * c.t.h) / (c.f.w * c.coverZ * c.f.h * c.coverZ);
     $("szWarn").hidden = !(lost > 0.25);
