@@ -290,11 +290,14 @@ function resetReveal() {                                   // nowy plik: nic nie
 // w jego treści. Rozdziały pojawiające się same (np. jakość „sam wektor”, akceptacja) go nie
 // zwijają — wcześniej suwak spłaszczenia znikał, zanim dało się nim poruszyć (Tomasz 28.09).
 // Kliknięcie w NAGŁÓWEK innego rozdziału (tylko rozwija go do obejrzenia) przypięcia nie zdejmuje.
-document.addEventListener("pointerdown", (e) => {
+// Zwalniamy PO kliknięciu (zdarzenie „click” w fazie bąbelkowania — najpierw zadziała przycisk).
+// Wcześniej działo się to już przy wciśnięciu myszy: przypięty rozdział się zwijał, przycisk
+// podjeżdżał do góry i kliknięcie trafiało obok — trzeba było klikać dwa razy (Tomasz 28.09).
+document.addEventListener("click", (e) => {
   const body = e.target.closest?.(".ch-b");
   const ch = body?.closest(".ch");
   if (S.pin && ch && ch.id !== S.pin) { S.pin = null; changed(); }
-}, true);
+});
 
 // ------------------------------------------------------------------ jedna pętla rysowania
 let lastAuto = "";

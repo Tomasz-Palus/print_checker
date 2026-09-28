@@ -132,6 +132,8 @@ select.sel { width: 100%; padding: 7px 8px; border: 1px solid var(--line); borde
 .vprog { margin-right: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600;
   color: var(--accent-2); white-space: nowrap; background: #eef3ff; border: 1px solid #c9d8ff; border-radius: 8px; padding: 6px 10px; }
 .vprog .bar { width: 110px; height: 8px; margin: 0; background: #d6e2ff; border-radius: 4px; }
+.vprog.pulse .bar i { animation: vpulse 1.2s ease-in-out infinite alternate; }
+@keyframes vpulse { from { margin-left: 0; } to { margin-left: 65%; } }
 .vsep { width: 1px; height: 20px; background: var(--line); margin: 0 2px; }
 .vmain { flex: 1; display: flex; min-height: 0; }
 .thumbs { width: 96px; flex: none; overflow-y: auto; border-right: 1px solid var(--line); padding: 8px; display: flex; flex-direction: column; gap: 8px; }

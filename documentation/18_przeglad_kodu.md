@@ -173,6 +173,8 @@ Przegląd całego programu na prośbę Tomasza. Bez zmian w kodzie — to lista 
 - **0.4.8:** A1, A2, A3, A4, A5, A11, A14, B15 — zrobione.
 - **0.4.9:** A6, A7, A8, A9, C21, C22, C26, C27 — zrobione.
 - **0.5:** A10 (obrót, CropBox), A12, A13 — zrobione. UserUnit zostaje.
+- **0.5.3:** z części D — ppi rastra z obu boków, 16-bitowe obrazy szare, ogromny obraz
+  liczony bez tego, co leży nad nim (i bez założenia, że leży prosto) — zrobione.
 - **Zostaje:**
   - B16–B18 — podpis aktualizacji, CI, pliki po odinstalowaniu.
   - C19, C20, C23–C25, C28 i drobne z części D.

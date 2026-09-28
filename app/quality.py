@@ -5,11 +5,12 @@ w NATYWNYCH pikselach i rzutowany na wszystkie swoje miejsca na stronie; raster 
 Tu tylko: którą wersję pliku sprawdzać, z jaką skalą, i złożenie wyniku w werdykt dla osoby
 nietechnicznej (ta sama logika, którą stara wersja miała w przeglądarce — teraz w jednym miejscu).
 
-Która wersja: OSTATNIA PRZED SPŁASZCZENIEM. Po spłaszczeniu cała strona to jeden obraz
-w rozdzielczości spłaszczenia — jego „ppi" nic nie mówi o zdjęciach, które w nim siedzą.
-Wszystkie wcześniejsze poprawki nie zmieniają pikseli obrazów (kolory przeliczane bez strat),
-a dopasowanie wymiaru jest już w położeniu obrazów na stronie — więc skala = tylko skala
-wytycznych (1:1 / 1:10), a obszary leżą dokładnie na stronie, którą widać w podglądzie.
+Która wersja: OSTATNIA PO GEOMETRII (szablon, spady, wymiar), czyli przed zamianą kolorów
+(Tomasz 28.09, propozycja 2). Położenie i wielkość obrazów są wtedy już ostateczne — kolory,
+overprint, fonty i spłaszczenie niczego nie przesuwają — a piksele wciąż oryginalne. Zamiana
+na CMYK zmienia piksele (na pliku testowym obraz powiększony 4× wyglądał po niej na 2×),
+a po spłaszczeniu cała strona to jeden obraz, którego „ppi" nic nie mówi o zdjęciach w nim.
+Wynik pokazujemy na końcu, jak dotąd; obszary leżą dokładnie tam, gdzie w podglądzie.
 """
 from __future__ import annotations
 
@@ -20,10 +21,13 @@ REQUIRED_PPI = detailmap.REQUIRED_PPI      # 120 — sztywny próg z wytycznych
 MIN_AREA_MM = detailmap.MIN_REGION_MM      # 10 mm — mniejszych fragmentów nie zgłaszamy
 
 
+GEOMETRY_STEPS = (None, "", "frames", "trim", "resize")     # None/"" = oryginał
+
+
 def version_for(job):
-    """Wersja do oceny: ostatnia przed spłaszczeniem."""
-    vs = [v for v in job.versions if v.step != "flatten"]
-    return vs[-1]
+    """Wersja do oceny: ostatnia po poprawkach geometrii (przed kolorami)."""
+    vs = [v for v in job.versions if v.step in GEOMETRY_STEPS]
+    return vs[-1] if vs else job.versions[0]
 
 
 def request(job, page: int, k: float, block: int, print_mm: tuple | None) -> dict:
@@ -65,12 +69,14 @@ def verdict_of(r: dict, kind: str, print_mm: tuple | None) -> dict:
     ok — wszystko ≥ 120 ppi; look — pikseli dość, ale gdzieś brak detalu (do obejrzenia);
     bad — za mało pikseli (pewna wada, trzeba wymienić obraz)."""
     base = None
-    if kind == "raster" and print_mm and r.get("page_px"):
-        base = r["page_px"][0] / (print_mm[0] / 25.4)          # natywne ppi obrazu NA WYDRUKU
+    if kind == "raster" and print_mm and r.get("page_px") and print_mm[0] > 0 and print_mm[1] > 0:
+        # natywne ppi obrazu NA WYDRUKU — z obu boków, słabszy wygrywa (obraz rozciągnięty
+        # nierówno ma w jednym kierunku mniej pikseli; wcześniej liczyła się tylko szerokość)
+        base = min(r["page_px"][0] / (print_mm[0] / 25.4), r["page_px"][1] / (print_mm[1] / 25.4))
     areas = []
     for a in r.get("areas") or []:
         a = dict(a)
-        if a.get("ppi") is None and base:
+        if a.get("ppi") is None and base and a.get("reason") != "jpeg":
             a["ppi"] = round(base / (a.get("factor") or 1), 1)
             a["nominal_ppi"] = round(base, 1)
         if not a.get("mm") and print_mm:
@@ -100,10 +106,11 @@ def verdict_of(r: dict, kind: str, print_mm: tuple | None) -> dict:
     groups, by_xref = [], {}
     for i, a in enumerate(areas):
         if a.get("scope") == "element" and a.get("xref") is not None:
-            if a["xref"] in by_xref:
-                groups[by_xref[a["xref"]]]["count"] += 1
+            kx = (a["xref"], a.get("reason") == "jpeg")     # kompresja to osobna sprawa niż za mało pikseli
+            if kx in by_xref:
+                groups[by_xref[kx]]["count"] += 1
                 continue
-            by_xref[a["xref"]] = len(groups)
+            by_xref[kx] = len(groups)
             groups.append({"i": i, "count": 1, "kind": "image"})
             continue
         g = next((g for g in groups if g["kind"] == "facts" and same(areas[g["i"]], a)), None)
@@ -112,8 +119,9 @@ def verdict_of(r: dict, kind: str, print_mm: tuple | None) -> dict:
         else:
             groups.append({"i": i, "count": 1, "kind": "facts"})
     few = [g for g in groups if areas[g["i"]].get("reason") == "lowres"]
+    jpeg = [g for g in groups if areas[g["i"]].get("reason") == "jpeg"]
     verdict = "bad" if few else ("look" if groups else "ok")
     return {"verdict": verdict, "areas": areas[:300], "groups": groups[:60], "few": len(few),
-            "look": len(groups) - len(few), "seconds": r.get("seconds"),
+            "look": len(groups) - len(few) - len(jpeg), "jpeg": len(jpeg), "seconds": r.get("seconds"),
             "objects": r.get("objects"), "placements": r.get("placements"),
             "hidden_skipped": r.get("hidden_skipped", 0), "small_skipped": r.get("small_skipped", 0)}

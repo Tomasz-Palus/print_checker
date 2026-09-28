@@ -226,7 +226,9 @@ $("rConfirm").onclick = async () => {
 
 export function renderRole() {
   const el = $("ch-role");
-  el.hidden = !S.product;
+  // po zmianie strony (także miniaturą) rola czeka, aż strona znów zostanie wybrana — wcześniej
+  // było widać naraz „Stronę” i „Rolę pliku” (Tomasz 28.09)
+  el.hidden = !S.product || !pageSettled();
   if (el.hidden) return;
   const t = template(), k = scaleK();
   $("rErr").hidden = !S.glError;

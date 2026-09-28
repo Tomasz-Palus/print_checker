@@ -111,7 +111,7 @@ export function renderColor() {
     } else {
       const n = colorNeed(a);
       const what = [n.rgb && "<b>RGB</b>", n.lab && "<b>Lab</b>",
-        n.spots.length && `<b>dodatkowe</b> (${esc(n.spots.slice(0, 3).join(", "))}${n.spots.length > 3 ? "…" : ""})`,
+        n.spots.length && `<b>dodatkowe</b> (spot: ${esc(n.spots.slice(0, 3).join(", "))}${n.spots.length > 3 ? "…" : ""})`,
         n.other && "<b>inne</b>"].filter(Boolean);
       say = `W projekcie są kolory ${what.join(" i ")}. Drukujemy w CMYK — lepiej przeliczyć je tutaj `
         + `i zobaczyć wynik, niż zdać się na drukarnię.`;

@@ -176,10 +176,15 @@ export function setScene(sc) {
       l = new Layer(spec);
       // Póki nowa wersja się nie wczyta, pokazujemy to, co leżało na tym miejscu (o ile ma
       // te same proporcje) — zamiast pustego miejsca na kilka sekund.
-      const prev = old[i];
-      if (prev && prev.ovLevel && prev.spec.page === spec.page && Math.abs(prev.spec.rect.w / prev.spec.rect.h - spec.rect.w / spec.rect.h) < 0.002) {
-        l.ov.src = prev.ov.src;
-      }
+      // Najlepiej ta sama wersja i symulacja (np. przejście podgląd ↔ pełna jakość), potem ta sama
+      // wersja, potem to, co leżało na tym miejscu — byle ta sama strona i proporcje. Bez tego nowa
+      // warstwa suwaka przed/po była przez chwilę biała.
+      const fits = (p) => p && p.ovLevel && p.ov.src && p.spec.page === spec.page
+        && Math.abs(p.spec.rect.w / p.spec.rect.h - spec.rect.w / spec.rect.h) < 0.002;
+      const prev = old.find((p) => fits(p) && p.spec.vid === spec.vid && !!p.spec.op === !!spec.op && !!p.spec.pr === !!spec.pr)
+        || old.find((p) => fits(p) && p.spec.vid === spec.vid) || (fits(old[i]) ? old[i] : null)
+        || old.find(fits);
+      if (prev) l.ov.src = prev.ov.src;
       live.set(k, l);
     }
     l.spec = spec;
@@ -447,10 +452,21 @@ export function setZoomAllowed(on) {
 // ------------------------------------------------------------------ postęp i czekanie
 function progress() {
   const el = $("vProg");
-  // pasek tylko dla pełnej piramidy (przy „Jakości wydruku”); sam podgląd całości to chwila
-  const act = [...live.values()].filter((l) => l.full && ["wait", "queued", "run"].includes(l.state));
-  el.hidden = !act.length;
-  if (!act.length) return;
+  const busy = (l) => ["wait", "queued", "run"].includes(l.state);
+  const act = [...live.values()].filter((l) => l.full && busy(l));
+  // poza „Jakością” liczy się sam podgląd całej strony — też to widać (Tomasz 28.09: przy suwakach
+  // przed/po nie było wiadomo, że coś się wczytuje)
+  const prev = [...live.values()].some((l) => !l.full && busy(l));
+  el.hidden = !act.length && !prev;
+  el.classList.toggle("pulse", !act.length && prev);
+  if (!act.length) {
+    if (prev) {
+      el.querySelector("i").style.width = "35%";
+      el.querySelector(".t").textContent = "wczytuję podgląd…";
+      el.title = "Liczę podgląd tej wersji pliku";
+    }
+    return;
+  }
   const done = act.reduce((a, l) => a + l.done, 0), total = act.reduce((a, l) => a + l.total, 0);
   const pct = total ? Math.min(99, Math.round(done / total * 100)) : 0;
   el.querySelector("i").style.width = pct + "%";

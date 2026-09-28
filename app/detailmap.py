@@ -283,6 +283,11 @@ def _raster_bands(path: str, page_index: int, progress):
         except Exception:
             pass
         W, H = im.size
+        # 16-bitowe szare: convert("L") PRZYCINA wartości > 255 (prawie cały obraz robi się biały,
+        # detal znika) — skalujemy sami (przegląd kodu, D). Tryb „I” (32 bity) to w praktyce 16 bitów.
+        deep = im.mode.startswith("I;16") or im.mode == "I"
+        if deep:
+            im = im.convert("I")
         shrink = 1
         if W * H > RASTER_FULL_DECODE_PX:
             shrink = 2
@@ -292,7 +297,11 @@ def _raster_bands(path: str, page_index: int, progress):
         band_h = max(CHUNK_ROWS, (BAND_MAX_PX // max(1, W)) // CHUNK_ROWS * CHUNK_ROWS)
         bands = [(y, min(band_h, H - y)) for y in range(0, H, band_h)]
         for i, (y, bh) in enumerate(bands):
-            g = np.asarray(im.crop((0, y, W, y + bh)).convert("L"))
+            part = im.crop((0, y, W, y + bh))
+            if deep:
+                g = (np.clip(np.asarray(part, dtype=np.int64), 0, 65535) // 257).astype(np.uint8)
+            else:
+                g = np.asarray(part.convert("L"))
             progress(i + 1, len(bands))
             yield y, g, (W, H, shrink)
 
@@ -577,6 +586,16 @@ def build(path: str, kind: str, page_index: int = 0, k: int = 1, progress=lambda
             areas.insert(0, {"fx": 0.0, "fy": 0.0, "fw": 1.0, "fh": 1.0, "blocks": res["blocks_total"],
                              "scope": "element", "reason": "upscaled", "factor": res["baseline"],
                              "ppi": None, "nominal_ppi": None, "step": es})
+    try:
+        with Image.open(path) as im:
+            jq = jpeg_quality_tables(getattr(im, "quantization", None)) if im.format == "JPEG" else None
+    except Exception:
+        jq = None
+    if jq is not None and jq < JPEG_LOW_Q:
+        areas.append({"fx": 0.0, "fy": 0.0, "fw": 1.0, "fh": 1.0, "blocks": res["blocks_total"],
+                      "scope": "element", "reason": "jpeg", "jpeg_q": jq, "factor": None,
+                      "ppi": None, "nominal_ppi": None})
+    res["jpeg_q"] = jq
     res.update({"areas": areas, "areas_total": len(areas), "min_region_mm": MIN_REGION_MM,
                 "small_skipped": 0, "confidence_counts": res.get("confidence_counts", {})})
     res.update({
@@ -598,9 +617,100 @@ def build(path: str, kind: str, page_index: int = 0, k: int = 1, progress=lambda
 # jak ostre krawędzie i przechodzi jako dobre. Natywne piksele obrazu + znane umiejscowienia
 # (analyze.py, CTM) dają wynik niezależny od renderera i automatycznie omijają wektor.
 IMG_MAX_DECODE_PX = 120_000_000
+# Górna granica rozdzielczości analizy NA WYDRUKU (Tomasz 28.09, propozycja 1). Szczegół drobniejszy
+# niż 300 ppi nic nie mówi o progu 120 ppi, a kosztuje: obraz 600 ppi to 4× więcej pikseli.
+# Czemu 300, a nie 240: przy 300 próg 120 ppi wypada dokładnie na stopniu f = 2,5, a próg
+# wyjątków (f ≥ 3) na 100 ppi — tak samo jak dotąd dla obrazów ≤ 300 ppi (a te się nie zmieniają).
+ANALYSIS_CAP_PPI = 300.0
+CAP_MIN_GAIN = 1.1          # zmniejszamy dopiero, gdy obraz ma o ≥ 10 % więcej (inaczej nie warto)
 
 
-def _image_bands(doc, path: str, rec: dict):
+def _unscale(res: dict, d: float) -> dict:
+    """Współczynniki zmierzone na obrazie zmniejszonym d× → względem NATYWNYCH pikseli obrazu
+    (ppi = nominalne / współczynnik, jak dla obrazów analizowanych 1:1)."""
+    if d <= 1.0:
+        return res
+    res = dict(res)
+    if res.get("baseline") is not None:
+        res["baseline"] = round(res["baseline"] * d, 3)
+    res["regions"] = [dict(r, factor=round(r["factor"] * d, 3)) for r in res.get("regions") or []]
+    res["weak"] = res["regions"]
+    res["worst_factor"] = round((res.get("worst_factor") or 0) * d, 3)
+    res["analysis_scale"] = round(d, 3)
+    return res
+
+
+# ----------------------------------------------------------------------------
+# Kompresja JPEG (Tomasz 28.09, propozycja 3): jakość zapisu odczytana z tablic kwantyzacji
+# w nagłówku — to FAKT o pliku, bez zgadywania z pikseli. Tablice porównujemy ze standardowymi
+# tablicami JPEG (IJG, jakość 50) jak ImageMagick/`identify`; Photoshop i Acrobat mają
+# własne tablice, więc wynik jest przybliżony (± kilka punktów), ale bardzo mocną kompresję
+# (kwadraciki 8×8 px, brudne krawędzie) widać od razu.
+# ----------------------------------------------------------------------------
+JPEG_LOW_Q = 50             # poniżej — „mocno skompresowany”, do obejrzenia (nie wada pewna)
+_IJG_LUMA_SUM = sum((16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55,
+                     14, 13, 16, 24, 40, 57, 69, 56, 14, 17, 22, 29, 51, 87, 80, 62,
+                     18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92,
+                     49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99))
+
+
+def jpeg_quality_tables(q: dict | None) -> float | None:
+    """Szacowana jakość JPEG (1–100) z tablic kwantyzacji Pillow ({nr: 64 wartości})."""
+    try:
+        t = list((q or {}).get(0) or [])
+        if len(t) != 64:
+            return None
+        scale = 100.0 * sum(t) / _IJG_LUMA_SUM
+        if scale <= 0:
+            return None
+        qual = (200.0 - scale) / 2.0 if scale <= 100.0 else 5000.0 / scale
+        return round(max(1.0, min(100.0, qual)), 0)
+    except Exception:
+        return None
+
+
+def jpeg_quality_pdf(doc, rec: dict) -> float | None:
+    """Jakość JPEG obrazu w PDF-ie (tylko obrazy zapisane jako sam DCTDecode)."""
+    f = str(rec.get("filter") or "")
+    if "DCTDecode" not in f or "Flate" in f or "LZW" in f or not rec.get("xref"):
+        return None
+    try:
+        raw = doc.xref_stream_raw(rec["xref"])
+        if "ASCII85" in f:                               # [/ASCII85Decode /DCTDecode] — np. z Illustratora
+            txt = b"".join(raw.split())
+            raw = base64.a85decode(txt[:-2] if txt.endswith(b"~>") else txt)
+        with Image.open(io.BytesIO(raw)) as im:          # tylko nagłówek — bez dekodowania pikseli
+            return jpeg_quality_tables(getattr(im, "quantization", None))
+    except Exception:
+        return None
+
+
+def _image_only_pdf(path: str, xref: int, w: int, h: int, out: str) -> float:
+    """Jednostronicowy PDF z SAMYM obrazem (bez maski, bez niczego nad nim), 1 piksel obrazu =
+    `s` pikseli przy 72 dpi. Zwraca px_per_pt do renderu 1:1.
+
+    Po co (Tomasz 28.09, plik 1824): ogromne obrazy (MuPDF ich nie dekoduje) były renderowane
+    ZE STRONY — razem z wektorem, który leży nad obrazem. Napisy w krzywych na gładkim tle
+    wyglądały wtedy dla metryki jak „powiększony fragment obrazu” (≈ 37 ppi w miejscu liter).
+    Poza tym render ze strony zakładał obraz nieobrócony. Tu liczą się tylko piksele obrazu."""
+    import pikepdf
+    s = max(1, math.ceil(max(w, h) / 14000))            # strona PDF-a ≤ 14 400 pt
+    with pikepdf.open(path) as src, pikepdf.new() as pdf:
+        img = pdf.copy_foreign(src.get_object((xref, 0)))
+        for k in ("/SMask", "/Mask", "/Interpolate", "/Alternates", "/OC"):
+            if k in img:
+                del img[k]
+        pw, ph = w / s, h / s
+        page = pdf.make_indirect(pikepdf.Dictionary(
+            Type=pikepdf.Name.Page, MediaBox=[0, 0, pw, ph],
+            Resources=pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im0=img)),
+            Contents=pdf.make_stream(f"q {pw:.4f} 0 0 {ph:.4f} 0 0 cm /Im0 Do Q".encode())))
+        pdf.pages.append(pikepdf.Page(page))
+        pdf.save(out)
+    return float(s)
+
+
+def _image_bands(doc, path: str, rec: dict, tmpdir: str | None = None):
     """Generator (y0, gray) po pasach obrazu w natywnej rozdzielczości; małe obrazy — całość."""
     w, h = rec["width"], rec["height"]
     if w * h <= IMG_MAX_DECODE_PX and rec.get("xref"):
@@ -612,18 +722,61 @@ def _image_bands(doc, path: str, rec: dict):
         g = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width)
         yield 0, g.copy()
         return
-    # ogromny obraz: pasy renderowane ze strony w natywnej rozdzielczości obrazu (bez przepróbkowania)
-    page = doc[rec["page"]]
-    x0, y0, x1, y1 = rec["rect_pdf"]
-    ph = page.mediabox.height if hasattr(page, "mediabox") else page.rect.height
-    top = ph - y1
-    px_per_pt = w / max(1e-6, (x1 - x0))
-    band_h = max(CHUNK_ROWS, (BAND_MAX_PX // w) // CHUNK_ROWS * CHUNK_ROWS)
-    for y in range(0, h, band_h):
-        bh = min(band_h, h - y)
-        clip = (x0, top + y / px_per_pt, x1, top + (y + bh) / px_per_pt)
-        png = render.region_png(path, rec["page"], clip, px_per_pt, smooth=False, max_px=max(w, bh) + 8, gray=True)
-        yield y, np.asarray(Image.open(io.BytesIO(png)).convert("L"))
+    # ogromny obraz: sam obraz w osobnym PDF-ie, renderowany pasami 1:1 (bez przepróbkowania)
+    import tempfile
+    with tempfile.TemporaryDirectory(dir=tmpdir) as td:
+        one = os.path.join(td, "obraz.pdf")
+        px_per_pt = _image_only_pdf(path, rec["xref"], w, h, one)
+        band_h = max(CHUNK_ROWS, (BAND_MAX_PX // w) // CHUNK_ROWS * CHUNK_ROWS)
+        for y in range(0, h, band_h):
+            bh = min(band_h, h - y)
+            clip = (0, y / px_per_pt, w / px_per_pt, (y + bh) / px_per_pt)
+            png = render.region_png(one, 0, clip, px_per_pt, smooth=False, max_px=max(w, bh) + 8, gray=True)
+            g = np.asarray(Image.open(io.BytesIO(png)).convert("L"))
+            if g.shape != (bh, w):                         # zaokrąglenia renderu: ±1 px na brzegu
+                g = np.pad(g[:bh, :w], ((0, max(0, bh - g.shape[0])), (0, max(0, w - g.shape[1]))), mode="edge")
+            yield y, g
+
+
+def _scaled(bands, w: int, h: int, d: float):
+    """Pasy zmniejszone d× (analiza w ANALYSIS_CAP_PPI zamiast natywnej, gdy obraz ma jej więcej).
+    Zwraca generator (y, gray) w pikselach PO zmniejszeniu; d ≤ 1 — bez zmian."""
+    if d <= 1.0:
+        yield from bands
+        return
+    W2, H2 = max(8, round(w / d)), max(8, round(h / d))
+    for y, g in bands:
+        y2 = round(y / d)
+        y2e = H2 if y + g.shape[0] >= h else round((y + g.shape[0]) / d)
+        if y2e <= y2:
+            continue
+        yield y2, np.asarray(Image.fromarray(g).resize((W2, y2e - y2), Image.LANCZOS))
+
+
+def _feed(ex, acc, bands, b: int) -> None:
+    """Pasy → krzywe bloków w procesach. Fragmenty zawsze zaczynają się na granicy bloku
+    (wcześniej fragment 512 wierszy przy bloku 160 px lądował 32 px obok swojego miejsca
+    i nadpisywał sąsiedni rząd bloków)."""
+    ch = max(b, (CHUNK_ROWS // b) * b)
+    buf, pos = None, 0
+    fn = functools.partial(chunk_curves, block=b)
+
+    def run(parts):
+        for (cy, _), cc in zip(parts, ex.map(fn, [p[1] for p in parts], chunksize=1)):
+            acc.place(cc, cy // b, 0)
+
+    for y, g in bands:
+        if buf is None:
+            buf, pos = g, y
+        else:
+            buf = np.concatenate([buf, g], axis=0)
+        n = buf.shape[0] // ch
+        if n:
+            run([(pos + i * ch, buf[i * ch:(i + 1) * ch]) for i in range(n)])
+            buf = buf[n * ch:]
+            pos += n * ch
+    if buf is not None and buf.shape[0]:
+        run([(pos, buf)])
 
 
 # ----------------------------------------------------------------------------
@@ -852,21 +1005,23 @@ def build_pdf_objects(path: str, images: list, page_index: int, k: int, block: i
                 pl = [p for p in rec["placements"] if p.get("page", 0) == page_index]
                 ppi_print_min = min((p["ppi"] for p in pl if p.get("ppi")), default=None)
                 ppi_print_min = ppi_print_min / k if ppi_print_min else None
-                # blok w px obrazu ≈ `block` px przy 240 ppi na wydruku (ten sam rozmiar w mm)
-                b = int(round(block * (ppi_print_min or 240.0) / ANALYSIS_PPI_PRINT))
-                b = max(32, min(512, (b // 16) * 16))   # wielokrotność NOISE_SUB, żeby siatka szumu pasowała do bloków
                 if w < 8 or h < 8:
                     continue
-                keys = _img_keys(doc, rec, b, scope, recs, i, page_index)
+                jq = jpeg_quality_pdf(doc, rec)
+                # obraz gęstszy niż ANALYSIS_CAP_PPI na wydruku analizujemy zmniejszony do tej gęstości
+                d = (ppi_print_min / ANALYSIS_CAP_PPI) if (ppi_print_min and ppi_print_min > ANALYSIS_CAP_PPI * CAP_MIN_GAIN) else 1.0
+                if min(w, h) / d < 64:
+                    d = 1.0
+                aw, ah = (max(8, round(w / d)), max(8, round(h / d))) if d > 1 else (w, h)
+                # blok w px (analizowanych) ≈ `block` px przy 240 ppi na wydruku (ten sam rozmiar w mm)
+                b = int(round(block * min(ppi_print_min or 240.0, ANALYSIS_CAP_PPI) / ANALYSIS_PPI_PRINT))
+                b = max(32, min(512, (b // 16) * 16))   # wielokrotność NOISE_SUB, żeby siatka szumu pasowała do bloków
+                keys = _img_keys(doc, rec, (b, round(d, 3)), scope, recs, i, page_index)
                 res, mine = _img_cache_get(keys)
                 if res is None:
-                    acc = _Acc(w, h, b)
+                    acc = _Acc(aw, ah, b)
                     try:
-                        for y, g in _image_bands(doc, path, rec):
-                            chunks = [(y + cy, g[cy:cy + CHUNK_ROWS]) for cy in range(0, g.shape[0], CHUNK_ROWS)]
-                            for (cy, cc) in zip([c[0] for c in chunks], ex.map(functools.partial(chunk_curves, block=b), [c[1] for c in chunks], chunksize=1)):
-                                acc.place(cc, cy // b, 0)
-                            del g, chunks
+                        _feed(ex, acc, _scaled(_image_bands(doc, path, rec), w, h, d), b)
                     except Exception as e:
                         _img_cache_put(mine, None)
                         per_image.append({"xref": rec["xref"], "error": f"{type(e).__name__}: {e}"})
@@ -874,7 +1029,7 @@ def build_pdf_objects(path: str, images: list, page_index: int, k: int, block: i
                         progress(i + 1, len(recs))
                         continue
                     try:
-                        res = _finish(acc, w, h, b)
+                        res = _unscale(_finish(acc, aw, ah, b), d)
                     except Exception:
                         _img_cache_put(mine, None)       # inni czekający nie mogą wisieć
                         raise
@@ -883,7 +1038,7 @@ def build_pdf_objects(path: str, images: list, page_index: int, k: int, block: i
                     reused += 1
                 blocks_total += res["blocks_total"]
                 base = res.get("baseline")
-                per_image.append({"xref": rec["xref"], "w": w, "h": h, "block": b, "baseline": base,
+                per_image.append({"xref": rec["xref"], "w": w, "h": h, "block": b, "baseline": base, "scale": round(d, 3), "jpeg_q": jq,
                                   "noise": res.get("elem_noise"), "regions": res["regions_total"],
                                   "soft_skipped": res["soft_skipped"], "conf": res.get("confidence_counts"), "invisible": res.get("invisible_skipped", 0),
                                   "placements": len(pl)})
@@ -915,6 +1070,11 @@ def build_pdf_objects(path: str, images: list, page_index: int, k: int, block: i
                             areas.append(dict(box, blocks=res["blocks_total"], scope="element", reason="upscaled",
                                               nominal_ppi=round(nominal, 1), factor=base or 1.0, ppi=real,
                                               step=es))
+                    # (a2) mocna kompresja JPEG — fakt z nagłówka pliku, nie z pomiaru (do obejrzenia)
+                    if jq is not None and jq < JPEG_LOW_Q:
+                        areas.append(dict(box, blocks=res["blocks_total"], scope="element", reason="jpeg",
+                                          jpeg_q=jq, nominal_ppi=round(nominal, 1) if nominal else None,
+                                          factor=None, ppi=None))
                     # (b) WYJĄTKI wewnątrz elementu — tylko wyraźnie gorsze od jego bazy i ≥ MIN_REGION_MM
                     for r0 in res["regions"][:MAX_REGIONS]:
                         r = dict(r0, **region_on_placement(p, r0))   # ułamki prostokąta umiejscowienia (po CTM)

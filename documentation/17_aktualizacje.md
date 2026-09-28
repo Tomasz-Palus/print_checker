@@ -444,3 +444,82 @@ Numery jak w `18_przeglad_kodu.md`.
   - Ten sam błąd był od dawna w pobieraniu jednej strony z pliku wielostronicowego.
   - Poprawione w obu miejscach. Sprawdzone na odtworzonym pliku: dopasowanie (oba tryby marginesu)
     i pobieranie działają, profil zostaje.
+
+## 0.5.3 — widać, że podgląd się wczytuje (Tomasz 28.09)
+
+- **Pytanie Tomasza: przy suwakach przed/po ładuje się pełna jakość czy tylko podgląd?** Tylko
+  podgląd całej strony (`full=0`, `…_ov`) — pełna jakość wyłącznie przy „Jakości wydruku” (0.5.2).
+- **Brakowało informacji, że podgląd się wczytuje** (od 0.5.2 pasek pokazywał tylko pełną
+  jakość). Teraz w tym samym miejscu jest „wczytuję podgląd…” z ruchomym paskiem
+  (`viewer.progress`, `.vprog.pulse`), a przy pełnej jakości — jak dotąd „pełna jakość NN %”.
+- **Biała strona zamiast poprzedniego obrazu** przy przesuwaniu suwaka (plik 1878, overprint).
+  - Nowa warstwa brała zastępczy obraz tylko z warstwy leżącej wcześniej na tym samym miejscu.
+  - Teraz szuka najlepszego z dotychczasowych: ta sama wersja i symulacja, potem ta sama wersja,
+    potem to, co leżało na tym miejscu, potem cokolwiek o tej samej stronie i proporcjach.
+  - Sprawdzone na `spady.pdf` (suwak overprintu): od pierwszej chwili obie warstwy mają obraz,
+    a „wczytuję podgląd…” widać, dopóki nie przyjdzie właściwy.
+- **Przycisk trzeba było klikać dwa razy** (np. „Spłaszcz projekt”, gdy wyżej był przypięty
+  Overprint z suwakiem).
+  - Przyczyna (z 0.5.2): przypięcie puszczało już przy WCIŚNIĘCIU myszy. Przypięty rozdział się
+    zwijał, przycisk podjeżdżał do góry i zwolnienie myszy trafiało obok.
+  - Teraz puszcza po kliknięciu (zdarzenie `click`, faza bąbelkowania — najpierw działa przycisk).
+  - Sprawdzone „ludzkim” kliknięciem (wciśnięcie, 0,35 s, puszczenie): jedno kliknięcie spłaszcza,
+    a Overprint zwija się dopiero potem.
+
+### 0.5.3 — ciąg dalszy: ocena jakości (propozycje 1–4), plik 1824, zmiana strony (Tomasz 28.09)
+
+- **Plik 1824: „słaba jakość” w miejscu napisów** (6 miejsc ≈ 37 ppi na literach „na rynku
+  deweloperskim”).
+  - Przyczyna: obraz 46009 × 19322 px (889 Mpx) jest za duży dla MuPDF-a. Liczyliśmy go więc
+    z renderu STRONY pasami, razem z tym, co leży nad obrazem. Napisy w krzywych nad gładkim
+    gradientem wyglądały dla metryki jak powiększony fragment obrazu.
+  - Sam obraz to czysty szary gradient (104 odcienie) — nie ma w nim czego zgłaszać.
+  - Teraz ogromny obraz idzie przez osobny, jednostronicowy PDF z SAMYM obrazem
+    (`detailmap._image_only_pdf`), bez maski i bez niczego nad nim, renderowany 1:1 pasami.
+  - Przy okazji znika założenie, że obraz leży prosto (przegląd kodu, D: ścieżka ogromnego
+    obrazu przy obrocie).
+  - Wynik na 1824 (oryginał): 0 miejsc (wcześniej 2 na oryginale, 6 po dopasowaniu wymiaru).
+- **Fragmenty obrazu nie trafiały dokładnie w swoje bloki.** Pasy szły po 512 wierszy, a blok
+  bywa np. 160 px. Fragment lądował do 32 px obok i nadpisywał sąsiedni rząd bloków. Teraz pasy
+  są cięte na granicach bloków (`detailmap._feed`).
+- **Propozycja 1 — górna granica rozdzielczości analizy: 300 ppi na wydruku**
+  (`ANALYSIS_CAP_PPI`).
+  - Obraz gęstszy (np. 600 ppi, pliki 1:10) jest przed pomiarem zmniejszany do 300 ppi.
+    Współczynniki są potem przeliczane z powrotem na natywne piksele (`_unscale`).
+  - Czemu 300, a nie 240: przy 300 próg 120 ppi wypada dokładnie na stopniu 2,5, a próg
+    wyjątków (≥ 3×) na 100 ppi — tak samo jak dotąd dla obrazów ≤ 300 ppi. Przy 240
+    fragmenty 80–100 ppi mogłyby przejść niezauważone.
+  - Obrazy ≤ 300 ppi liczą się dokładnie jak wcześniej.
+  - Test (zdjęcie z adFrame_Smart, 600 ppi, wklejony fragment powiększony 6× = 100 ppi):
+    wcześniej nie znaleziony, teraz znaleziony jako 100 ppi, w połowie czasu.
+- **Propozycja 2 — pomiar na wersji przed zamianą kolorów** (`quality.version_for`, w
+  przeglądarce `qualVersion`).
+  - Oceniana jest ostatnia wersja po Szablonie, Spadach i Wymiarze. Położenie obrazów jest wtedy
+    ostateczne, a piksele oryginalne.
+  - Wynik dalej pokazuje się na końcu, w „Jakości wydruku”.
+  - Zamiana na CMYK zmieniała piksele: obraz powiększony 4× wyglądał po niej na 2×.
+- **Propozycja 3 — mocna kompresja JPEG.**
+  - Jakość zapisu odczytywana z tablic kwantyzacji w nagłówku (bez dekodowania pikseli,
+    `detailmap.jpeg_quality_tables`). Obsługuje też `[/ASCII85Decode /DCTDecode]` i pliki JPG.
+  - Poniżej 50/100 — pozycja „mocna kompresja JPEG — obejrzyj”: do obejrzenia, nie pewna wada.
+  - Pomiar na przykładowych plikach: eksport z InDesigna (1878) 91–93, spady/adFrame 99,
+    przykładowy JPG 95. Plik testowy PRINT_CHECKER_TEST (str. 3) ma obraz ≈ 12 — teraz
+    zgłoszony.
+  - Grupy na liście: kompresja i „za mało pikseli” tego samego obrazu to dwie osobne pozycje.
+- **Propozycja 4 — resztki z przeglądu kodu (D).**
+  - 16-bitowe obrazy szare: `convert("L")` przycinał wartości > 255 (średnia jasność gradientu
+    254 zamiast 127, detal znikał). Teraz skalowanie ÷ 257.
+  - Raster: ppi na wydruku liczone z obu boków (słabszy wygrywa), wcześniej tylko z szerokości.
+- **Spot w pliku 1878 (GOLD 2).** Program go wykrywał („kolory dodatkowe (GOLD 2)”). Dla
+  jasności tekst mówi teraz „kolory **dodatkowe** (spot: GOLD 2)”.
+- **Zmiana strony miniaturą psuła rozdziały** (widać było naraz „Stronę” i „Rolę pliku”). Rola
+  pliku czeka teraz, aż strona zostanie znów wybrana („Wybierz tę stronę”).
+- **Akceptacja: „przed poprawkami” ciemniejsze niż „po”** (strony.pdf). To nie błąd podglądu.
+  - Na stronie leży półprzezroczysta (46 %) warstwa jaskrawej zieleni RGB (0,07 / 0,93 / 0) —
+    poza zasięgiem CMYK.
+  - Plik bez zamiany: drukarka miesza przezroczystość w RGB (tak mówi grupa przezroczystości
+    strony) i dopiero wynik przelicza na CMYK. Zieleń zostaje mocna, pudełko wychodzi zielone,
+    jak na ekranie.
+  - Po zamianie: najpierw zieleń jest przycinana do zasięgu CMYK (dużo bledsza), potem mieszana.
+    Całość wychodzi jaśniejsza, a pudełko zostaje złote.
+  - Sprawdzone Ghostscriptem i MuPDF-em — oba renderują tak samo.

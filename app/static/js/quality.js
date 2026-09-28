@@ -9,8 +9,10 @@ import * as viewer from "./viewer.js";
 const REQ = 120;
 
 // ------------------------------------------------------------------ jakość: liczenie
-// Oceniana wersja: ostatnia przed spłaszczeniem (tak samo wybiera serwer — quality.version_for).
-const qualVersion = () => [...S.job.versions].reverse().find((v) => v.step !== "flatten");
+// Oceniana wersja: ostatnia po szablonie / spadach / wymiarze — przed zamianą kolorów (tak samo
+// wybiera serwer — quality.version_for). Położenie obrazów jest już ostateczne, piksele oryginalne.
+const GEOMETRY = ["frames", "trim", "resize"];
+const qualVersion = () => [...S.job.versions].reverse().find((v, i, all) => i === all.length - 1 || GEOMETRY.includes(v.step));
 function qualKey() {
   const pr = printMm();
   return [S.job.job_id, qualVersion().id, S.page, scaleK(), detailBlock(), pr ? `${pr.w.toFixed(1)}x${pr.h.toFixed(1)}` : ""].join("|");
@@ -43,13 +45,17 @@ export function qualitySettled() {
 // ------------------------------------------------------------------ jakość: opis
 const areaShort = (a) => {
   const mm = a.mm ? `${fmtMm(a.mm[0])} × ${fmtMm(a.mm[1])} mm` : "";
+  if (a.reason === "jpeg") return `${a.whole ? "cały obraz" : "obraz"} ${mm} — mocna kompresja JPEG`;
   return a.reason === "lowres" ? `${a.whole ? "cały obraz" : "obraz"} ${mm} — ${Math.round(a.ppi)} ppi zamiast ${REQ}`
                                : `${a.whole ? "cały obraz" : "miejsce"} ${mm} — jak przy ${Math.round(a.ppi)} ppi`;
 };
-const areaPlain = (a) => a.reason === "lowres"
+const areaPlain = (a) => a.reason === "jpeg"
+  ? `Obraz zapisano z mocną kompresją JPEG (jakość ≈ ${Math.round(a.jpeg_q)} na 100) — na wydruku mogą być widoczne kwadraciki i „brudne” krawędzie.`
+  : a.reason === "lowres"
   ? `Obraz${a.px ? ` ${a.px[0]} × ${a.px[1]} px` : ""} rozciągnięty na ${a.mm ? `${fmtMm(a.mm[0])} × ${fmtMm(a.mm[1])} mm` : "ten rozmiar"} — jeden piksel wychodzi ${a.ppi ? fmtMm(25.4 / a.ppi) : "?"} mm na wydruku.`
   : `${a.nominal_ppi != null ? `Obraz ma tu ${Math.round(a.nominal_ppi)} ppi, ale s` : "S"}zczegółu jest tyle, co przy ${Math.round(a.ppi)} ppi — jakby powiększono mniejszy kawałek.`;
-const areaLabel = (a) => a.reason === "lowres"
+const areaLabel = (a) => a.reason === "jpeg" ? "mocna kompresja JPEG — obejrzyj"
+  : a.reason === "lowres"
   ? `≈ ${Math.round(a.ppi)} ppi na wydruku, wymagane ${REQ}`
   : `szczegół jak przy ≈ ${Math.round(a.ppi)} ppi — obejrzyj`;
 
@@ -112,18 +118,26 @@ export function renderQuality() {
     say = `<span class="say ok">Jakość w porządku</span> — każdy obraz ma co najmniej ${REQ} ppi na wydruku.`;
   } else {
     st = S.settle.quality ? "done" : "todo";
-    const g0 = d.areas[d.groups[0].i];
+    // najsłabsze miejsce z POMIARU (kompresja JPEG nie ma ppi)
+    const g0 = d.groups.map((g) => d.areas[g.i]).find((a) => a.reason !== "jpeg") || {};
+    const jp = d.jpeg ? `${d.jpeg} ${plural(d.jpeg, "obraz zapisano", "obrazy zapisano", "obrazów zapisano")} z mocną kompresją JPEG — `
+      + `na wydruku mogą być widoczne kwadraciki. Obejrzyj ${d.jpeg === 1 ? "go" : "je"} na podglądzie.` : "";
     if (d.verdict === "bad") {
       sum = "za mała rozdzielczość";
       say = `<b>${d.few}</b> ${plural(d.few, "obraz ma", "obrazy mają", "obrazów ma")} za mało pikseli na swój rozmiar. `
         + `Najsłabszy wychodzi <b>≈ ${Math.round(g0.ppi)} ppi</b>, a wymagane jest ${REQ} — na wydruku będzie rozmyty `
         + `i schodkowy. Takie obrazy trzeba wymienić na większe.`;
       if (d.look) note = `Do tego ${d.look} ${plural(d.look, "miejsce wygląda", "miejsca wyglądają", "miejsc wygląda")} na powiększone — do obejrzenia.`;
-    } else {
+      if (jp) note += `${note ? " " : ""}${jp}`;
+    } else if (d.look) {
       sum = "do obejrzenia";
       say = `Obrazy mają dość pikseli, ale w <b>${d.look}</b> ${plural(d.look, "miejscu", "miejscach", "miejscach")} `
         + `nie niosą szczegółu — jakby ktoś powiększył mniejszy kawałek (najgorzej ≈ ${Math.round(g0.ppi)} ppi). `
         + `Może to być zwykłe rozmycie ze zdjęcia — obejrzyj i zdecyduj.`;
+      if (jp) note = jp;
+    } else {
+      sum = "do obejrzenia";
+      say = `Obrazy mają dość pikseli, ale ${jp}`;
     }
     if (scaleK() > 1) note += `${note ? " " : ""}Plik w skali 1:10 drukuje się 10× większy — żeby wyszło ${REQ} ppi, w pliku trzeba ${REQ * 10} ppi.`;
   }
