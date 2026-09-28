@@ -31,8 +31,14 @@ def _public(key: str, pl: dict, e: dict) -> dict:
     return {"key": key, "plan": pl, **{k: e[k] for k in ("state", "done", "total", "quick", "err") if k in e}}
 
 
-def request(job, vid: str, src: str, page: int, print_mm: tuple, op: bool, proof: bool, start: bool) -> dict:
-    """Stan widoku; przy `start` — zamawia liczenie (albo je wznawia po błędzie/przerwaniu)."""
+def request(job, vid: str, src: str, page: int, print_mm: tuple, op: bool, proof: bool, start: bool,
+            full: bool = True) -> dict:
+    """Stan widoku; przy `start` — zamawia liczenie (albo je wznawia po błędzie/przerwaniu).
+
+    `full=False` — sam podgląd całej strony (ov.jpg, dłuższy bok 2048 px), bez kafelków do
+    przybliżania. Przybliżać można tylko w „Jakości wydruku” (Tomasz 28.09), więc poza nią pełna
+    piramida (120 ppi wydruku, dla KAŻDEJ wersji i każdej strony suwaka przed/po) liczyła się na
+    darmo — to ją pokazywał pasek „pełna jakość” przy suwakach."""
     pk = (job.id, vid, page, round(print_mm[0], 2), round(print_mm[1], 2))
     pl = _plans.get(pk)
     if pl is None:
@@ -43,7 +49,9 @@ def request(job, vid: str, src: str, page: int, print_mm: tuple, op: bool, proof
             pl = _plans[pk] = render.plan(r.width, r.height, print_mm[0], print_mm[1], native)
         finally:
             doc.close()
-    key = key_of(vid, page, op, proof, pl["w"])
+    if not full:
+        pl = {**pl, "levels": []}                 # render.build: bez poziomów = sam podgląd całości
+    key = key_of(vid, page, op, proof, pl["w"]) + ("" if full else "_ov")
     out = os.path.join(job.dir, "view_" + key)
     with _lock:
         e = _views.get((job.id, key))
@@ -57,7 +65,8 @@ def request(job, vid: str, src: str, page: int, print_mm: tuple, op: bool, proof
         # ma się poddać od razu, żeby nie zajmowała procesora
         same = f"{vid}_p{page}_{int(op)}{int(proof)}_"
         for (jid, k2), old in list(_views.items()):
-            if jid == job.id and k2 != key and k2.startswith(same):
+            # tylko INNA rozdzielczość; podgląd całości i pełna piramida tej samej wersji żyją obok siebie
+            if jid == job.id and k2 != key and k2.startswith(same) and k2.split("_")[3] != str(pl["w"]):
                 old["stop"] = True
                 _views.pop((jid, k2), None)
                 shutil.rmtree(os.path.join(job.dir, "view_" + k2), ignore_errors=True)

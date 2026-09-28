@@ -417,7 +417,8 @@ def download_file(job, page: int, name: str) -> tuple[str, str, str]:
                         out = pikepdf.new()
                         out.pages.append(keep)
                         if "/OutputIntents" in pdf.Root:        # profil kolorystyczny idzie z plikiem
-                            out.Root.OutputIntents = out.copy_foreign(pdf.Root.OutputIntents)
+                            oi = pdf.Root.OutputIntents
+                            out.Root.OutputIntents = out.copy_foreign(oi if oi.is_indirect else pdf.make_indirect(oi))
                         out.save(tmp)
                     os.replace(tmp, path)
     mime = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -453,7 +454,8 @@ def api_view(jid):
         return err("Złe parametry.")
     op, pr = request.args.get("op") == "1", request.args.get("pr") == "1"
     try:
-        return jsonify(views.request(job, v.id, v.path, page, mm, op, pr, request.method == "POST"))
+        return jsonify(views.request(job, v.id, v.path, page, mm, op, pr, request.method == "POST",
+                                     full=request.args.get("full", "1") == "1"))
     except Exception as e:
         return jsonify({"state": "err", "err": f"{type(e).__name__}: {e}"})
 

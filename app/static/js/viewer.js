@@ -37,11 +37,12 @@ const live = new Map();    // klucz → Layer
 const queue = [];
 let inflight = 0;
 
-const layerKey = (s) => `${s.vid}|${s.page}|${Math.round(s.pageMm.w * s.k * 10)}x${Math.round(s.pageMm.h * s.k * 10)}|${s.op ? 1 : 0}${s.pr ? 1 : 0}`;
+// F/O: pełna piramida (tylko przy „Jakości wydruku”, gdzie wolno przybliżać) albo sam podgląd całości
+const layerKey = (s) => `${s.vid}|${s.page}|${Math.round(s.pageMm.w * s.k * 10)}x${Math.round(s.pageMm.h * s.k * 10)}|${s.op ? 1 : 0}${s.pr ? 1 : 0}|${zoomAllowed ? "F" : "O"}`;
 
 class Layer {
   constructor(spec) {
-    this.spec = spec; this.key = layerKey(spec);
+    this.spec = spec; this.key = layerKey(spec); this.full = zoomAllowed;
     this.el = document.createElement("div"); this.el.className = "layer shadow";
     this.ov = document.createElement("img"); this.ov.className = "ov"; this.ov.alt = ""; this.ov.draggable = false;
     this.tilesEl = document.createElement("div"); this.tilesEl.className = "tiles";
@@ -54,7 +55,7 @@ class Layer {
     const s = this.spec;
     return `/api/jobs/${S.job.job_id}/view?v=${s.vid}&page=${s.page}`
       + `&w_mm=${(s.pageMm.w * s.k).toFixed(2)}&h_mm=${(s.pageMm.h * s.k).toFixed(2)}`
-      + `&op=${s.op ? 1 : 0}&pr=${s.pr ? 1 : 0}${extra}`;
+      + `&op=${s.op ? 1 : 0}&pr=${s.pr ? 1 : 0}&full=${this.full ? 1 : 0}${extra}`;
   }
   async poll(start) {
     clearTimeout(this.timer);
@@ -446,7 +447,8 @@ export function setZoomAllowed(on) {
 // ------------------------------------------------------------------ postęp i czekanie
 function progress() {
   const el = $("vProg");
-  const act = [...live.values()].filter((l) => ["wait", "queued", "run"].includes(l.state));
+  // pasek tylko dla pełnej piramidy (przy „Jakości wydruku”); sam podgląd całości to chwila
+  const act = [...live.values()].filter((l) => l.full && ["wait", "queued", "run"].includes(l.state));
   el.hidden = !act.length;
   if (!act.length) return;
   const done = act.reduce((a, l) => a + l.done, 0), total = act.reduce((a, l) => a + l.total, 0);

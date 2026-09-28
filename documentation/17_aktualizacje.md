@@ -414,3 +414,33 @@ Numery jak w `18_przeglad_kodu.md`.
     jest wierniejszy.
   - W samouczku ocena rusza po „Rola pliku”, a rozdział „Jakość” dostaje gotowy wynik po jednym-dwóch
     zapytaniach.
+
+## 0.5.2 — pełna jakość tylko przy „Jakości wydruku”, suwak spłaszczenia, błąd profilu (Tomasz 28.09)
+
+- **Pasek „pełna jakość” przy suwakach przed/po.** To nie ocena jakości, tylko podgląd.
+  - Dla każdej pokazywanej wersji (i każdej strony suwaka: przed, po, ekran, druk) program
+    budował pełną piramidę kafelków do przybliżania (120 ppi wydruku).
+  - Przybliżać można już tylko w „Jakości wydruku”, więc poza nią powstaje sam podgląd całej strony
+    (`views.request(full=False)`: `ov.jpg`, dłuższy bok 2048 px, klucz `…_ov`). Pełna piramida
+    powstaje dopiero w trybie „Jakość” (`viewer`: warstwa `F`/`O` w kluczu, `&full=1`).
+  - Pasek „pełna jakość” pokazuje się tylko dla pełnej piramidy.
+  - Podgląd całości i piramida tej samej wersji nie kasują się nawzajem — przy powrocie do „Jakości”
+    kafelki są od razu.
+  - Sprawdzone na `spady.pdf` (spady, wymiar, CMYK, overprint, fonty, spłaszczenie, wszystkie
+    suwaki): pełna piramida policzona raz, dla wersji ocenianej w „Jakości”. Reszta to podglądy
+    całości.
+- **Suwak spłaszczenia znikał od razu.**
+  - Scenariusz: „Spłaszcz projekt” → „Pokaż, jak wydrukuje”. Jakość (sam wektor) zalicza się
+    sama, pojawia się Akceptacja, a Spłaszczenie się zwijało.
+  - Przyczyna: przypięcie rozdziału (`S.pin`) puszczało, gdy pojawił się nowy rozdział.
+  - Teraz przypięty rozdział zostaje rozwinięty, dopóki użytkownik SAM nie kliknie czegoś w treści
+    innego rozdziału. Kliknięcie w nagłówek (rozwinięcie do obejrzenia) się nie liczy.
+  - Sprawdzone: suwak spłaszczenia widoczny przez cały test. Po kliknięciu „Pokaż na podglądzie”
+    w Jakości Spłaszczenie się zwija.
+- **„Poprawka nie powiodła się: ForeignObjectError: copy_foreign called with direct object
+  handle”** (plik 1878, „Dopasuj wymiar”).
+  - Przyczyna: przenoszenie profilu kolorów (0.5, A13) nie obsługiwało `/OutputIntents` zapisanego
+    bezpośrednio, a nie jako osobny obiekt.
+  - Ten sam błąd był od dawna w pobieraniu jednej strony z pliku wielostronicowego.
+  - Poprawione w obu miejscach. Sprawdzone na odtworzonym pliku: dopasowanie (oba tryby marginesu)
+    i pobieranie działają, profil zostaje.

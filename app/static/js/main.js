@@ -278,17 +278,23 @@ function gateChapters() {
 const everShown = new Set();                                // rozdziały tego pliku widziane choć raz
 function revealed(ch, now) {
   lastReveal = now;
-  // pojawił się PIERWSZY RAZ rozdział dalej niż ten z przypiętym suwakiem — praca poszła naprzód,
-  // więc przypięty rozdział może się już zwinąć (S.pin, niżej). Rozdział, który tylko wraca po
-  // poprawce we wcześniejszym (jakość, akceptacja), przypięcia nie zdejmuje.
-  const pin = S.pin && $(S.pin);
-  if (pin && pin !== ch && !everShown.has(ch.id) && pin.compareDocumentPosition(ch) & Node.DOCUMENT_POSITION_FOLLOWING) S.pin = null;
   everShown.add(ch.id);
 }
 function resetReveal() {                                   // nowy plik: nic nie czeka
   revealQ = []; everShown.clear();
   if (revealTimer) { clearTimeout(revealTimer); revealTimer = null; }
 }
+
+// Przypięty rozdział (S.pin — ten, w którym właśnie kliknięto „Pokaż, jak wydrukuje” albo zrobiono
+// poprawkę) zostaje rozwinięty, dopóki użytkownik SAM nie zajmie się innym rozdziałem: kliknie coś
+// w jego treści. Rozdziały pojawiające się same (np. jakość „sam wektor”, akceptacja) go nie
+// zwijają — wcześniej suwak spłaszczenia znikał, zanim dało się nim poruszyć (Tomasz 28.09).
+// Kliknięcie w NAGŁÓWEK innego rozdziału (tylko rozwija go do obejrzenia) przypięcia nie zdejmuje.
+document.addEventListener("pointerdown", (e) => {
+  const body = e.target.closest?.(".ch-b");
+  const ch = body?.closest(".ch");
+  if (S.pin && ch && ch.id !== S.pin) { S.pin = null; changed(); }
+}, true);
 
 // ------------------------------------------------------------------ jedna pętla rysowania
 let lastAuto = "";

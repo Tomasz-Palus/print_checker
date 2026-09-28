@@ -229,7 +229,9 @@ def _keep_doc_level(src: str, dst: str) -> None:
         if oi is None:
             return
         with pikepdf.open(dst, allow_overwriting_input=True) as d_pdf:
-            d_pdf.Root.OutputIntents = d_pdf.copy_foreign(oi)
+            # copy_foreign przyjmuje tylko obiekt pośredni — tablica /OutputIntents bywa bezpośrednia
+            # (plik 1878: „copy_foreign called with direct object handle”, Tomasz 28.09)
+            d_pdf.Root.OutputIntents = d_pdf.copy_foreign(oi if oi.is_indirect else s_pdf.make_indirect(oi))
             d_pdf.save(dst)
 
 
