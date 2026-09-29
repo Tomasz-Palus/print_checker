@@ -620,3 +620,37 @@ Numery jak w `18_przeglad_kodu.md`.
   - Porównanie wycinka ukośnej krawędzi „/”: q98 wygląda jak render MuPDF-a z pliku
     wektorowego. Rozdzielczość zostaje (150 ppi przy wydruku 1,5–3 m), więc w dużym
     powiększeniu dalej widać piksele — ale równe, bez wcięć.
+
+## 0.5.7 — spłaszczenie zawsze w 120 ppi (Tomasz 29.09)
+
+- **„Poszarpane” krawędzie po spłaszczeniu — wyjaśnione.** Photoshop otwierał spłaszczony PDF
+  w 120 ppi (okno „Import PDF”), a spłaszczenie było w 150 ppi. Przeskalowanie 1,25 : 1 robiło
+  nierówne schodki. Oryginał wektorowy Photoshop rysował od zera w 120 ppi — stąd różnica. Samo
+  spłaszczenie jest równe: ukośna krawędź „/” w 1815 odchyla się od prostej średnio o 0,009 px
+  (MuPDF: 0,003). Kolory CMYK — co do wartości jak w pliku (Tomasz sprawdził w panelu Info).
+- **Decyzja Tomasza: „wszystko drukujemy w 120 ppi — takie są ustalenia z drukarnią”.**
+  Spłaszczenie zawsze w 120 ppi na wydruku (`steps.FLATTEN_PPI`, `flatten_ppi_for`; w przeglądarce
+  `state.flattenPlan`). Wcześniej: 300 ppi do 80 cm, 200 do 1,5 m, 150 do 3 m, 120 wyżej.
+  Obraz w innej rozdzielczości i tak był przeliczany do 120 ppi — w RIP-ie albo w Photoshopie.
+- Pomoc „?” przy Spłaszczeniu: „zawsze 120 ppi na wydruku”.
+
+- **Fonty nieosadzone — pytanie Tomasza: „co, gdy fontu nie ma na komputerze?”**
+  - Liczy się font w PLIKU, nie na komputerze. Osadzony — kształty liter są w pliku. Nieosadzony —
+    przy zamianie na krzywe / spłaszczeniu: tekst niewidoczny pomijany → Google Fonts → fonty
+    systemu → odmowa z prośbą o PDF z osadzonymi fontami (krój zastępczy — nigdy).
+  - **Nowe:** nieosadzonego, WIDOCZNEGO fontu nie da się zostawić — w rozdziale Fonty „Zostaw jak
+    jest” jest nieaktywne, a notatka mówi dlaczego i co zrobić. Analiza strony ma nowe pole
+    `fonts_missing` [{name, visible}] (`analyze._fonts_missing` → `fontfix.missing(path, page)`).
+  - **Nowe:** nad podglądem ostrzeżenie „⚠ brak fontu X — litery w podglądzie zastępcze”
+    (Ghostscript i MuPDF rysują wtedy litery zamiennikiem). Znika po zamianie na krzywe.
+  - **Błąd:** `fontfix` działał na CAŁYM pliku, nie na stronie. Brak fontu na innej stronie
+    blokował zamianę na krzywe (tekst niewidoczny tutaj, widoczny tam), a opis kroku wymieniał
+    fonty z innych stron. Teraz `text_usage` / `missing` / `embed` przyjmują stronę
+    (`steps._prepare_fonts(src, dst, page)`).
+- **Plik testowy fontów** `przykladowe projekty/bledne/Test_fonty_adChecker.pdf` (7 stron
+  1000 × 500 mm, na każdej opis oczekiwanego zachowania): 1 osadzony, 2 nieosadzony z Google Fonts
+  (Roboto Bold), 3 nieosadzony z Windowsa (Arial Bold), 4 nieosadzony nigdzie (FooBar Pro),
+  5 nieosadzony, ale niewidoczny (Tr 3), 6 Helvetica (standardowy PDF), 7 wszystko naraz.
+  - Sprawdzone w sandboksie (zamiana na krzywe): 1, 2, 5, 6 — udane; 4 i 7 — odmowa (FooBar Pro);
+    3 — odmowa tylko dlatego, że sandbox nie ma Ariala (na Windowsie / Macu jest).
+  - Interfejs (Playwright, str. 2): ostrzeżenie nad podglądem, „Zostaw jak jest” nieaktywne.

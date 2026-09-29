@@ -194,6 +194,8 @@ export function renderFonts() {
   if (el.hidden) return;
   const on = hasStep("outline"), a = facts("outline"), c = choice("outline");
   const fonts = a && !a.error ? a.fonts || [] : [];
+  // nieosadzone fonty, którymi na tej stronie coś się DRUKUJE (analiza: fontfix.missing)
+  const miss = a && !a.error ? (a.fonts_missing || []).filter((f) => f.visible).map((f) => f.name.split("+").pop()) : [];
   const any = on || fonts.length > 0;
   let st = "todo", sum = "", say = "", note = "";
   if (!on && !c.act && !a) {
@@ -218,21 +220,22 @@ export function renderFonts() {
     } else {
       say = `Tekst w projekcie jest zapisany fontami (${fonts.length}). Zamiana na krzywe gwarantuje, `
         + `że w drukarni wyjdzie dokładnie ten sam kształt liter.`;
-      const miss = fonts.filter((f) => !f.embedded && !isBase14(f.name)).map((f) => f.name.split("+").pop());
-      if (miss.length) note = `${miss.length === 1 ? "Font" : "Fonty"} ${esc(miss.join(", "))} `
-        + `${miss.length === 1 ? "nie jest osadzony" : "nie są osadzone"} w pliku — program poszuka `
-        + `${miss.length === 1 ? "go" : "ich"} w Google Fonts i w systemie. Kroju zastępczego nie użyje.`;
+      if (miss.length) note = `<span class="say warn">${miss.length === 1 ? "Font" : "Fonty"} ${esc(miss.join(", "))} `
+        + `${miss.length === 1 ? "nie jest osadzony" : "nie są osadzone"} w pliku</span> — w pliku jest tylko nazwa, `
+        + `bez kształtów liter. Zostawić tak się nie da: drukarnia podstawiłaby inny krój. Kliknij `
+        + `<b>Zamień na krzywe</b> — program poszuka ${miss.length === 1 ? "go" : "ich"} w Google Fonts i w systemie `
+        + `(kroju zastępczego nie użyje). Jeśli nie znajdzie — poproś klienta o PDF z osadzonymi fontami.`;
     }
   }
   chapter("ch-fonts", st, sum);
   $("foSay").innerHTML = say;
   $("foNote").innerHTML = note; $("foNote").hidden = !note;
   rowsFor("fo", "outline", any || !!c.act, on);
+  // nieosadzony, WIDOCZNY font nie może zostać (Tomasz 29.09) — „Zostaw jak jest” nieaktywne
+  const keep = $("foAct").querySelector('button[data-v="keep"]');
+  keep.disabled = keep.disabled || (!on && miss.length > 0);
+  keep.title = !on && miss.length ? "Nie da się zostawić — w pliku brakuje fontu, drukarnia podstawiłaby inny krój." : "";
 }
-const BASE14 = new Set(["helvetica", "helvetica-bold", "helvetica-oblique", "helvetica-boldoblique", "times-roman",
-  "times-bold", "times-italic", "times-bolditalic", "courier", "courier-bold", "courier-oblique",
-  "courier-boldoblique", "symbol", "zapfdingbats"]);
-const isBase14 = (n) => BASE14.has((n || "").split("+").pop().toLowerCase().replace(",", "-").replace(/ /g, ""));
 
 // ------------------------------------------------------------------ spłaszczenie
 document.querySelectorAll("#flAct button").forEach((b) => b.addEventListener("click", () => setAct("flatten", b.dataset.v)));

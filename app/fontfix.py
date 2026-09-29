@@ -48,10 +48,10 @@ _WEIGHTS = [  # najdłuższe najpierw — „extrabold" zanim „bold"
 # --------------------------------------------------------------------------------------
 # 1. czy tekst się drukuje
 # --------------------------------------------------------------------------------------
-def text_usage(path: str) -> dict:
+def text_usage(path: str, page: int | None = None) -> dict:
     """{nazwa fontu: {"widoczne": n, "niewidoczne": m}} — liczba operatorów pokazujących
     tekst, z podziałem na tryb widoczny i niewidoczny (Tr 3 = niewidoczny, Tr 7 = tylko
-    maska przycięcia — oba nie zostawiają farby)."""
+    maska przycięcia — oba nie zostawiają farby). `page` — tylko ta strona (None = wszystkie)."""
     out: dict = {}
 
     def walk(container, resources, depth, seen):
@@ -91,8 +91,9 @@ def text_usage(path: str) -> dict:
                 continue
 
     with pikepdf.open(path) as pdf:
-        for pg in pdf.pages:
-            walk(pg, pg.obj.get("/Resources"), 0, frozenset())
+        for i, pg in enumerate(pdf.pages):
+            if page is None or i == page:
+                walk(pg, pg.obj.get("/Resources"), 0, frozenset())
     return out
 
 
@@ -370,10 +371,11 @@ def _used_codes(pdf, target_objgens: set) -> dict:
     return used
 
 
-def missing(path: str) -> list[dict]:
-    """Fonty nieosadzone i niestandardowe: [{name, objgens, widoczny}]."""
+def missing(path: str, page: int | None = None) -> list[dict]:
+    """Fonty nieosadzone i niestandardowe: [{name, objgens, widoczny}]. `page` — tylko fonty,
+    którymi coś napisano na tej stronie (None = cały plik)."""
     from pdfutil import is_base14
-    usage = text_usage(path)
+    usage = text_usage(path, page)
     wynik: dict = {}
     with pikepdf.open(path) as pdf:
         for obj in pdf.objects:
@@ -393,6 +395,8 @@ def missing(path: str) -> list[dict]:
                     desc = None
             if desc is not None and any(k in desc for k in ("/FontFile", "/FontFile2", "/FontFile3")):
                 continue
+            if page is not None and name not in usage:
+                continue                                   # na tej stronie nieużywany
             e = wynik.setdefault(name, {"name": name, "objgens": [], "widoczny": False})
             e["objgens"].append(list(obj.objgen))
             u = usage.get(name) or {}
@@ -400,13 +404,13 @@ def missing(path: str) -> list[dict]:
     return list(wynik.values())
 
 
-def embed(src: str, dst: str, fetcher=fetch) -> dict:
+def embed(src: str, dst: str, fetcher=fetch, page: int | None = None) -> dict:
     """Osadza w pliku pobrane fonty dla wszystkich WIDOCZNYCH nieosadzonych fontów.
     Zwraca {"osadzone": [(nazwa, źródło)], "niewidoczne": [nazwy], "brak": [(nazwa, powód)]}.
     Plik `dst` powstaje tylko wtedy, gdy coś osadzono."""
     from fontTools.ttLib import TTFont
     brak, osadzone, niewidoczne = [], [], []
-    lista = missing(src)
+    lista = missing(src, page)            # `page` — tylko fonty tej strony (inna strona nie idzie do druku)
     if not lista:
         return {"osadzone": [], "niewidoczne": [], "brak": []}
     with pikepdf.open(src) as pdf:

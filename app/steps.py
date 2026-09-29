@@ -605,17 +605,19 @@ def step_overprint(src, dst, p, job) -> dict:
 # ----------------------------------------------------------------------------
 # fonty (krzywe) — wspólne ze spłaszczeniem
 # ----------------------------------------------------------------------------
-def _prepare_fonts(src: str, dst: str) -> tuple[str, dict]:
+def _prepare_fonts(src: str, dst: str, page: int | None = None) -> tuple[str, dict]:
     """Nieosadzone fonty PRZED Ghostscriptem (fontfix.py): tekst niewidoczny pomijamy,
     widoczny — pobieramy prawdziwy font z Google Fonts i osadzamy. Czego się nie da, Ghostscript
     poszuka jeszcze w fontach systemu. Kroju zastępczego nie dopuszczamy (decyzja Tomasza).
     Zwraca (plik dla Ghostscripta, raport)."""
     try:
         import fontfix
-        if not fontfix.missing(src):
+        # tylko fonty strony, która idzie do druku — wcześniej brak fontu na INNEJ stronie potrafił
+        # zablokować zamianę (tekst niewidoczny tu, widoczny tam), a opis wymieniał cudze fonty
+        if not fontfix.missing(src, page):
             return src, {}
         tmp = dst + ".fonts.pdf"
-        r = fontfix.embed(src, tmp)
+        r = fontfix.embed(src, tmp, page=page)
     except Exception as e:                      # np. brak fontTools — zostaje ścieżka systemowa
         print(f"[adChecker] fontfix: {type(e).__name__}: {e}")
         return src, {}
@@ -652,7 +654,7 @@ def step_outline(src, dst, p, job) -> dict:
     before = _page_fonts(src, page)
     if not before:
         raise ValueError("Na tej stronie nie ma tekstu w fontach — nie ma czego zamieniać.")
-    gs_src, finfo = _prepare_fonts(src, dst)
+    gs_src, finfo = _prepare_fonts(src, dst, page)
     args = ["-dSAFER", "-sDEVICE=pdfwrite", "-dNoOutputFonts", *gs.font_path_args(),
             *gs.PDFWRITE_KEEP_IMAGES,                   # obrazy zostają, jakie są
             "-dColorConversionStrategy=/LeaveColorUnchanged"]
@@ -675,7 +677,7 @@ def step_outline(src, dst, p, job) -> dict:
     text = f"tekst zamieniony na krzywe ({len(names)} {'font' if len(names) == 1 else 'fonty' if len(names) < 5 else 'fontów'}: {', '.join(names[:4])})"
     got = [n.split("+")[-1] for n, _ in finfo.get("osadzone", [])]
     if got:
-        text += f"; {', '.join(got[:4])} nie był(y) osadzone — pobrane z Google Fonts"
+        text += f"; {', '.join(got[:4])} nie był(y) osadzone — pobrane z Google Fonts i osadzone"
     if finfo.get("niewidoczne"):
         text += f"; {', '.join(finfo['niewidoczne'][:4])} — tekst niewidoczny, nie drukuje się"
     return {"text": text}
@@ -693,12 +695,15 @@ FLATTEN_MAX_MPX = 400      # sufit; adWall Vario Prosta 600 w 1:10 przy 120 ppi 
 FLATTEN_ZLIB_LEVEL = 3        # zmierzone na zdjęciach 1878: 6 → 40 MB/s, 3 → 89 MB/s (+7 % rozmiaru), 1 → 118 MB/s (+13 %)
 
 
+FLATTEN_PPI = 120           # Tomasz 29.09: „wszystko drukujemy w 120 ppi — takie są ustalenia z drukarnią”
+
+
 def flatten_ppi_for(long_mm: float) -> int:
-    """Rozdzielczość spłaszczenia wg WIELKOŚCI WYDRUKU. 120 ppi to próg dla wielkiego formatu
-    oglądanego z kilku metrów, ale na tabliczce 60 cm robi schodki na literach (Tomasz:
-    „po zripowaniu litery są poszarpane"). Zmierzone na wydruku 616 mm: 120 ppi — schodki,
-    200 — ledwo widoczne, 300 — jak wektor."""
-    return 300 if long_mm <= 800 else 200 if long_mm <= 1500 else 150 if long_mm <= 3000 else 120
+    """Rozdzielczość spłaszczenia NA WYDRUKU: zawsze 120 ppi, jak ustalenia z drukarnią (Tomasz 29.09).
+    Wcześniej rosła dla małych wydruków (300 ppi do 80 cm, 200 do 1,5 m, 150 do 3 m — tabliczka 616 mm
+    w 120 ppi miała po RIP-ie schodki na literach). Obraz w innej rozdzielczości i tak jest przeliczany
+    do 120 ppi — w RIP-ie albo w Photoshopie — i to przeliczenie robiło nierówne krawędzie."""
+    return FLATTEN_PPI
 
 
 def flatten_plan(w_pt: float, h_pt: float, k: float) -> dict:
@@ -813,7 +818,7 @@ def step_flatten(src, dst, p, job) -> dict:
         op = (_page_facts(job, src, page).get("overprint_uses") or 0) > 0
     except Exception:
         op = pdfutil.uses_overprint(src)
-    gs_src, finfo = _prepare_fonts(src, dst)
+    gs_src, finfo = _prepare_fonts(src, dst, page)
     zpath = dst + ".flate"
     # Zawsze nadpróbkowanie 2× (jak podgląd, render.SS): Ghostscript nie wygładza krawędzi gradientu
     # przyciętego kształtem liter (Tomasz 25.09), a przy dużej stronie z overprintem nie wygładza

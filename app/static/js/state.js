@@ -240,8 +240,7 @@ export const flattenSettled = () => settledByChoice("flatten", fontsSettled(), (
 export function flattenPlan() {
   const p = pageMm(), k = scaleK();
   if (!p) return null;
-  const long = Math.max(p.w, p.h) * k;
-  const ppi = long <= 800 ? 300 : long <= 1500 ? 200 : long <= 3000 ? 150 : 120;
+  const ppi = 120;             // jak steps.flatten_ppi_for: zawsze 120 ppi (ustalenia z drukarnią, Tomasz 29.09)
   let dpi = ppi * k;
   const px = (mm) => mm / 25.4 * dpi;
   const mpx = px(p.w) * px(p.h) / 1e6;

@@ -85,8 +85,8 @@ export const HELP = {
     tekst i linie zostają wektorowe, a plik jest mniejszy. Spłaszcz tutaj, gdy drukarnia o to
     prosi albo gdy podgląd pokazuje ślady — szew albo jasną obwódkę tam, gdzie
     przezroczystość spotyka się z kolorem dodatkowym lub overprintem.<br><br>
-    Rozdzielczość zależy od wielkości wydruku: 300 ppi do 80 cm, 200 ppi do 1,5 m, 150 ppi do 3 m,
-    wyżej 120 ppi. Cena: tekst i linie przestają być wektorowe, plik robi się większy.<br><br>
+    Rozdzielczość: zawsze <b>120 ppi na wydruku</b>, jak w ustaleniach z drukarnią. Cena: tekst i linie
+    przestają być wektorowe, plik robi się większy.<br><br>
     Wybierasz <b>Zostaw jak jest</b> albo <b>Spłaszcz projekt</b>. Gdy projekt nie ma
     przezroczystości, wystarczy <b>Zostaw jak jest</b>.`,
   qual: `Program otwiera każdy obraz w projekcie i czyta jego piksele. Sprawdza dwie rzeczy:<br><br>

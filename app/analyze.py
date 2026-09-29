@@ -497,6 +497,18 @@ def _mul(m, n):
 # ----------------------------------------------------------------------------
 # PDF
 # ----------------------------------------------------------------------------
+def _fonts_missing(path: str, page: int | None) -> list:
+    """Fonty NIEOSADZONE (i niestandardowe) użyte na stronie: [{name, visible}]. Widoczny = tekst
+    w nim się drukuje (nie Tr 3/7). Rozdział „Fonty” nie pozwala takiego zostawić, a podgląd
+    mówi, że litery są narysowane krojem zastępczym (Tomasz 29.09)."""
+    try:
+        import fontfix
+        return [{"name": m["name"], "visible": bool(m["widoczny"])} for m in fontfix.missing(path, page)]
+    except Exception as e:
+        print(f"[adChecker] fonts_missing: {type(e).__name__}: {e}")
+        return []
+
+
 def analyze_pdf(path: str, only_page: int | None = None) -> dict:
     """`only_page` — fakty tylko o tej stronie (do druku idzie zawsze jedna strona)."""
     pdf = pikepdf.open(path)
@@ -548,9 +560,11 @@ def analyze_pdf(path: str, only_page: int | None = None) -> dict:
             "creator": str(info.get("/Creator", "") or ""),
             "pdf_version": pdf.pdf_version,
         }
-        return _summarize_pdf(an, pages, intents, meta, coverage, page_sizes)
+        res = _summarize_pdf(an, pages, intents, meta, coverage, page_sizes)
     finally:
         pdf.close()
+    res["fonts_missing"] = _fonts_missing(path, only_page)
+    return res
 
 
 def _summarize_pdf(an: Analyzer, pages, intents, meta, coverage=None, page_sizes=None) -> dict:

@@ -221,7 +221,12 @@ function fileLine() {
     typ = a.kind === "raster" ? `obraz ${a.meta?.format || ""}` : r.has_images ? "wektor + obrazy" : "sam wektor";
   }
   const who = a && a.meta ? [a.meta.creator, a.meta.producer].filter(Boolean).join(" · ") : "";
-  $("vName").innerHTML = `<b>${esc(f.name)}</b>${typ ? ` <small>· ${esc(typ)}</small>` : ""}`;
+  // nieosadzony font: Ghostscript i MuPDF rysują litery ZAMIENNIKIEM — podgląd kłamie (Tomasz 29.09)
+  const miss = a && !a.error ? (a.fonts_missing || []).filter((x) => x.visible).map((x) => x.name.split("+").pop()) : [];
+  const warn = miss.length ? ` <small class="vwarn" title="${esc(`Brak fontu w pliku: ${miss.join(", ")}. `
+    + "Podgląd rysuje te litery innym krojem — prawdziwy zobaczysz po zamianie na krzywe (rozdział Fonty).")}">`
+    + `· ⚠ brak fontu ${esc(miss.slice(0, 2).join(", "))}${miss.length > 2 ? "…" : ""} — litery w podglądzie zastępcze</small>` : "";
+  $("vName").innerHTML = `<b>${esc(f.name)}</b>${typ ? ` <small>· ${esc(typ)}</small>` : ""}${warn}`;
   $("vName").title = [f.name, typ, who].filter(Boolean).join(" · ");
 }
 
