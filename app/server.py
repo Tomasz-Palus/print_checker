@@ -256,7 +256,7 @@ def api_thumb(jid, n):
     job = job_or_404(jid)
     if not 0 <= n < job.info["page_count"]:
         return err("Nie ma takiej strony.", 404)
-    cache = os.path.join(job.dir, f"thumb_{n}.png")
+    cache = os.path.join(job.dir, f"thumb_{job.original.id}_{n}.png")      # po obrocie — nowa miniatura
     if not os.path.exists(cache):
         # przez plik tymczasowy: po błędzie renderu nie zostaje pusty plik, a równoległe
         # zapytanie nie dostaje połowy obrazka (przegląd kodu 27.09, C21)
@@ -369,6 +369,26 @@ def api_frames(jid):
                     "lines": m.get("lines", 0), "lines_total": m.get("lines_total", 0),
                     "texts": texts, "err_mm": m.get("err_mm", 0), "scale": m.get("scale", 1),
                     "known": bool(m.get("known")), "pixels": bool(pixels), "foreign": r["foreign"]})
+
+
+@app.post("/api/jobs/<jid>/rotate")
+def api_rotate(jid):
+    """Obraca cały plik o 90° / 180° (Tomasz 29.09) — nowy punkt wyjścia, poprawki przepadają."""
+    job = job_or_404(jid)
+    body = request.get_json(silent=True) or {}
+    try:
+        deg = int(body.get("deg", 90))
+        quality.forget(job)
+        job.rotate(deg)
+    except ValueError as e:
+        return err(str(e))
+    except Exception as e:
+        return err(f"Nie udało się obrócić pliku: {type(e).__name__}: {e}", 500)
+    try:
+        job.suggestions = suggestions_for(job, int(body.get("page", 0)))
+    except Exception as e:
+        print(f"[propozycje] {type(e).__name__}: {e}")
+    return jsonify(job.to_json())
 
 
 @app.post("/api/jobs/<jid>/steps")

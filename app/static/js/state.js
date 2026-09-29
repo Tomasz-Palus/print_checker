@@ -53,7 +53,7 @@ export function resetJobState() {
   Object.assign(S, {
     settle: {}, choice: {}, stepErr: {}, busy: null,
     fscan: { key: "", data: null, err: "" }, qual: { key: "", data: null, err: "" },
-    accShown: null, pin: null, factsCache: {}, sz: null, sizeEdit: false, cmp: null, sim: null, simMix: 100, cmykProfile: "fogra39",
+    accShown: null, pin: null, factsCache: {}, rotErr: "", sz: null, sizeEdit: false, cmp: null, sim: null, simMix: 100, cmykProfile: "fogra39",
   });
 }
 
@@ -115,6 +115,8 @@ export function roleSettled() {
 // rozdział z suwakiem danej poprawki
 export const STEP_CH = { frames: "ch-frames", trim: "ch-trim", resize: "ch-size", cmyk: "ch-color", black: "ch-color", overprint: "ch-op",
   outline: "ch-fonts", flatten: "ch-flat" };
+// obrót całego pliku (info.rot, stopnie w prawo) — opis dla ludzi
+export const ROT_TXT = { 90: "o 90° w prawo", 180: "o 180°", 270: "o 90° w lewo" };
 export const STEP_ORDER = ["frames", "trim", "resize", "cmyk", "black", "overprint", "outline", "flatten"];
 export const STEP_NAME = { frames: "usunięcie szablonu", trim: "przycięcie spadów", resize: "dopasowanie wymiaru",
   cmyk: "przeliczenie kolorów na CMYK", black: "poprawienie czerni", overprint: "wyłączenie overprintu", outline: "przekształcenie tekstu w krzywe",
@@ -157,7 +159,7 @@ export function trimSettled() {
 }
 export function sizeMatches() {
   const f = pageMm(beforeStep("resize")), t = targetMm();
-  if (!f || !t || !isPdf()) return true;
+  if (!f || !t) return true;                    // obraz bez DPI — nie ma czego porównać
   return Math.abs(f.w - t.w) < 0.5 && Math.abs(f.h - t.h) < 0.5;
 }
 export function sizeSettled() {

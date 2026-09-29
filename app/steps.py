@@ -240,6 +240,8 @@ def step_resize(src, dst, p, job) -> dict:
     """Nowa strona w formacie z wytycznych; projekt wstawiony jako obiekt formy (wektor zostaje
     wektorem, nic nie jest rasteryzowane), w skali i położeniu z suwaków. Margines można
     wypełnić tłem z krawędzi albo odbiciem lustrzanym."""
+    if __import__("render").is_raster(src):
+        return _raster_resize(src, dst, p)
     page = int(p.get("page", 0))
     tw, th = float(p["w_mm"]) / MM, float(p["h_mm"]) / MM
     k = float(p.get("k", 1.0))
@@ -294,6 +296,99 @@ def step_resize(src, dst, p, job) -> dict:
                      if fill and filled else f"PUSTE PASY {_fmt(gap[0])} × {_fmt(gap[1])} mm")
     return {"text": ", ".join(parts),
             "map": {"s": pw / sr.width, "dx": left * MM, "dy": top * MM}}
+
+
+RASTER_MAX_PX = 1_500_000_000     # sufit na obraz po dopasowaniu (pikseli)
+
+
+def _raster_resize(src: str, dst: str, p: dict) -> dict:
+    """Dopasowanie wymiaru OBRAZU (JPG, PNG, TIFF…) — obraz zostaje obrazem (Tomasz 29.09: „chcę
+    dopasowanie wymiaru do wszystkich formatów”). Te same suwaki co przy PDF-ie: wielkość,
+    przesunięcie, margines pusty (biały) / tło z krawędzi / odbicie lustrzane.
+
+    Pikseli nie przybywa ani nie ubywa bez potrzeby: rozdzielczość (DPI) zmienia się razem ze skalą
+    (dpi / wielkość), więc przy 100 % obraz jest tylko przycinany albo dostawiany, bez przeliczania.
+    Przy innej wielkości piksele są przeliczane (Lanczos) tylko o tyle, ile trzeba do całkowitego DPI
+    — JPG zapisuje DPI jako liczbę całkowitą. JPG zostaje JPG-iem (jakość 95), reszta idzie do TIFF-a
+    bez strat. Profil ICC zostaje."""
+    import numpy as np
+    from PIL import Image
+    im = Image.open(src)
+    im.seek(0)
+    info = dict(im.info)
+    d0 = info.get("dpi")
+    if not d0 or not d0[0] or not d0[1]:
+        raise ValueError("Obraz nie ma zapisanej rozdzielczości (DPI), więc nie wiadomo, ile ma milimetrów — "
+                         "ustaw ją w programie graficznym.")
+    d0 = (float(d0[0]), float(d0[1]))
+    jpg = os.path.splitext(src)[1].lower() in (".jpg", ".jpeg")
+    if im.mode not in ("L", "RGB", "RGBA", "CMYK"):
+        im = im.convert("RGBA" if ("A" in im.mode or "transparency" in info) else "RGB")
+    if jpg and im.mode == "RGBA":
+        im = im.convert("RGB")
+    W0, H0 = im.size
+    fw, fh = W0 / d0[0] * 25.4, H0 / d0[1] * 25.4                  # mm obrazu
+    tw, th = float(p["w_mm"]), float(p["h_mm"])
+    k = float(p.get("k", 1.0))
+    z = max(1e-6, float(p.get("scale", 1.0)))
+    left, top, pw, ph = place_rect(fw, fh, tw, th, z, float(p.get("dx_mm", 0.0)), float(p.get("dy_mm", 0.0)))
+    fill, mode = bool(p.get("fill_edges")), ("mirror" if p.get("fill_mode") == "mirror" else "stretch")
+    same = abs(z - 1) < 1e-6
+    dpi = tuple(d if same else d / z for d in d0)
+    if jpg:
+        dpi = tuple(max(1.0, float(round(d))) for d in dpi)
+    CW, CH = max(1, round(tw / 25.4 * dpi[0])), max(1, round(th / 25.4 * dpi[1]))
+    if CW * CH > RASTER_MAX_PX:
+        raise ValueError(f"Obraz po dopasowaniu miałby {CW} × {CH} px — to za dużo. Zmniejsz wielkość projektu.")
+    if same and dpi == d0:                # 100 % — piksele bez zmian, tylko przycięcie / dostawienie
+        nw, nh = W0, H0
+    else:
+        nw, nh = max(1, round(pw / 25.4 * dpi[0])), max(1, round(ph / 25.4 * dpi[1]))
+    if (nw, nh) != (W0, H0):
+        im = im.resize((nw, nh), Image.LANCZOS)
+    x0, y0 = round(left / 25.4 * dpi[0]), round(top / 25.4 * dpi[1])
+    if fill:                              # skrajne piksele z eksportu nie mogą wejść w tło (jak w PDF-ie)
+        c_mm = min(EDGE_TRIM_PX / EDGE_FILL_PPI * 25.4 / max(k, 0.01), fw * 0.02, fh * 0.02) * z
+        cx, cy = round(c_mm / 25.4 * dpi[0]), round(c_mm / 25.4 * dpi[1])
+        if 0 < 2 * cx < nw and 0 < 2 * cy < nh:
+            im = im.crop((cx, cy, nw - cx, nh - cy))
+            x0, y0, nw, nh = x0 + cx, y0 + cy, nw - 2 * cx, nh - 2 * cy
+    # część obrazu, która zostaje na formacie
+    vx0, vy0, vx1, vy1 = max(0, x0), max(0, y0), min(CW, x0 + nw), min(CH, y0 + nh)
+    if vx1 <= vx0 or vy1 <= vy0:
+        raise ValueError("Projekt jest cały poza formatem — przesuń go z powrotem.")
+    vis = im.crop((vx0 - x0, vy0 - y0, vx1 - x0, vy1 - y0))
+    (cx_mm, gx), (cy_mm, gy) = _span(left, pw, tw), _span(top, ph, th)    # z geometrii, nie z zaokrąglonych pikseli
+    gap, cut = [gx, gy], [cx_mm, cy_mm]
+    white = {"L": 255, "RGB": (255, 255, 255), "RGBA": (255, 255, 255, 255), "CMYK": (0, 0, 0, 0)}[vis.mode]
+    filled = fill and max(gap) > 0.2
+    if filled:
+        a = np.asarray(vis)
+        pads = [(vy0, CH - vy1), (vx0, CW - vx1)] + ([(0, 0)] if a.ndim == 3 else [])
+        out_im = Image.fromarray(np.pad(a, pads, mode="symmetric" if mode == "mirror" else "edge"), vis.mode)
+    else:
+        out_im = Image.new(vis.mode, (CW, CH), white)
+        out_im.paste(vis, (vx0, vy0))
+    kw = {"dpi": dpi}
+    if info.get("icc_profile"):
+        kw["icc_profile"] = info["icc_profile"]
+    if jpg:
+        out = os.path.splitext(dst)[0] + ".jpg"
+        out_im.save(out, "JPEG", quality=95, subsampling=0, **kw)
+    else:
+        out = os.path.splitext(dst)[0] + ".tif"
+        out_im.save(out, "TIFF", compression="tiff_lzw", **kw)
+    parts = [f"obraz {_fmt(fw)} × {_fmt(fh)} → {_fmt(tw)} × {_fmt(th)} mm, projekt w skali {round(z * 100)} %"]
+    if max(cut) > 0.2:
+        parts.append(f"przycięte {_fmt(cut[0])} × {_fmt(cut[1])} mm")
+    if max(gap) > 0.2:
+        parts.append((f"margines {_fmt(gap[0])} × {_fmt(gap[1])} mm wypełniony "
+                      + ("odbiciem lustrzanym" if mode == "mirror" else "tłem z krawędzi"))
+                     if filled else f"PUSTE PASY {_fmt(gap[0])} × {_fmt(gap[1])} mm (białe)")
+    parts.append(f"{CW} × {CH} px, {_fmt(dpi[0])} dpi" + (", JPG jakość 95" if jpg else ", TIFF bez strat"))
+    return {"text": ", ".join(parts), "path": out,
+            "pages_mm": [[round(CW / dpi[0] * 25.4, 2), round(CH / dpi[1] * 25.4, 2)]],
+            "map": {"s": z, "dx": left, "dy": top}}
 
 
 # ----------------------------------------------------------------------------

@@ -2,7 +2,7 @@
 // Każda poprawka tworzy na serwerze NOWĄ wersję pliku (v1, v2…); cofnięcie ucina łańcuch
 // przed nią, razem z krokami zrobionymi później.
 import { $, esc, api, post, ask } from "./util.js";
-import { S, changed, STEP_ORDER, STEP_NAME, STEP_CH } from "./state.js";
+import { S, changed, STEP_ORDER, STEP_NAME, STEP_CH, resetJobState } from "./state.js";
 
 // Wyczyść decyzje rozdziałów od `name` w dół (po cofnięciu pliku są nieaktualne).
 function forgetFrom(name) {
@@ -66,13 +66,13 @@ export async function undoStep(name) {
 
 // Zmiana strony, produktu albo roli zmienia format docelowy — poprawki robione pod stary
 // format przestają mieć sens. Pytamy (gdy jakieś są) i zdejmujemy wszystkie.
-export async function resetSteps(title) {
+export async function resetSteps(title, why = "były robione pod obecny format") {
   if (!S.job) return true;
   const vs = S.job.versions;
   if (vs.length > 1) {
     const names = vs.slice(1).map((v) => STEP_NAME[v.step]).join(", ");
-    if (!(await ask(title, `Nałożone poprawki (<b>${esc(names)}</b>) zostaną cofnięte — były robione pod `
-        + `obecny format. Oryginał jest nietknięty, nałożysz je na nowo.`, "Tak, zmieniam", "Zostaw jak jest"))) return false;
+    if (!(await ask(title, `Nałożone poprawki (<b>${esc(names)}</b>) zostaną cofnięte — ${why}. `
+        + `Oryginał jest nietknięty, nałożysz je na nowo.`, "Tak, zmieniam", "Zostaw jak jest"))) return false;
     const jid = S.job.job_id;
     S.busy = "Cofam poprawki…"; changed();
     try {
@@ -88,6 +88,27 @@ export async function resetSteps(title) {
   S.fscan = { key: "", data: null, err: "" };
   changed();
   return true;
+}
+
+// Obrót CAŁEGO pliku o 90° / 180° (Tomasz 29.09). Obrócony plik to nowy punkt wyjścia: poprawki
+// (po pytaniu) i decyzje w rozdziałach przepadają, szablon, spady i wymiar liczą się od nowa.
+// Produkt, rola i strona zostają.
+export async function rotateFile(deg) {
+  if (!S.job || S.busy) return;
+  if (!(await resetSteps("Obrócić plik?", "były robione na pliku przed obrotem"))) return;
+  const jid = S.job.job_id;
+  S.busy = "Obracam plik…"; changed();
+  try {
+    const job = await post(`/api/jobs/${jid}/rotate`, { deg, page: S.page });
+    if (!same(jid)) return;
+    resetJobState();
+    S.job = job; S.analysis = null; S.analysisFor = null; S.fitNext = true; S.rotErr = "";
+  } catch (e) {
+    if (!same(jid)) return;
+    S.rotErr = e.message;
+  }
+  S.busy = null;
+  changed();
 }
 
 // Suwaki w rozdziałach: porównanie stanu tuż przed i tuż po tym kroku.

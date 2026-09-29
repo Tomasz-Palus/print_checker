@@ -201,6 +201,12 @@ const STEPS = [
   { part: PART2, target: ["ch-qual"], title: "Jakość wydruku",
     text: () => !S.qual.data || S.qual.data.status === "running"
       ? `Program ogląda każdy obraz piksel po pikselu — czy na wydruku nie wyjdzie rozmyty. To chwilę potrwa…`
+      : ["ok", "vector"].includes(S.qual.data.verdict)
+      ? `Obrazy mają dość pikseli — jakość jest <b>w porządku</b>.`
+        + (vis("quRisk") ? ` Niżej program pisze jednak o <b>cienkich liniach</b> albo <b>tekście przy krawędzi</b>
+           (poza czerwoną ramką wytycznych) — pokazuje je ramkami na podglądzie.` : "")
+        + `<br><br>Lupki, rzeczywistą wielkość wydruku i nawigator masz w panelu nad podglądem — obejrzyj projekt
+           z bliska, a potem kliknij <b>Rozumiem, dalej</b>.`
       : `Program znalazł miejsca, które na wydruku wyjdą <b>rozmyte</b>.`
         + (vis("quRisk") ? ` Niżej pisze też o <b>cienkich liniach</b> i <b>tekście przy krawędzi</b> (poza czerwoną
            ramką wytycznych) — pokazuje je ramkami na podglądzie.` : "")

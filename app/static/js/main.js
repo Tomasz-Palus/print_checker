@@ -1,11 +1,11 @@
 // Start programu: wgrywanie pliku, jedna pętla rysowania rozdziałów i podglądu, ustawienia.
 import { $, esc, fmtMm, fmtBytes, api, ask, chapter, initChapters, plural, shown, revealChapters } from "./util.js";
-import { S, changed, onChange, resetJobState, head, template, scaleK, printMm, isPdf, sizeSettled, factsKey, STEP_NAME, STEP_CH, stepIndex, fontWarnings, riskMarks, printSettled, geoKey, geoVersion, flattenSettled } from "./state.js";
+import { S, changed, onChange, resetJobState, ROT_TXT, head, template, scaleK, printMm, isPdf, sizeSettled, factsKey, STEP_NAME, STEP_CH, stepIndex, fontWarnings, riskMarks, printSettled, geoKey, geoVersion, flattenSettled } from "./state.js";
 import { HELP } from "./help.js";
 import * as viewer from "./viewer.js";
 import * as product from "./product.js";
 import { initSettings } from "./settings.js";
-import { resetSteps } from "./steps.js";
+import { resetSteps, rotateFile } from "./steps.js";
 import { renderFrames, renderTrim } from "./chapters.js";
 import { renderSize, sizeScene } from "./size.js";
 import { renderPrint, renderColor, renderOverprint, renderFonts, renderFlatten, simLayers } from "./print.js";
@@ -153,11 +153,22 @@ async function loadGeoFacts() {
 }
 
 // ------------------------------------------------------------------ miniatury stron
+// Obrót pliku co 90° (Tomasz 29.09) — w rozdziale Plik, bo obrócony plik to nowy punkt wyjścia.
+document.querySelectorAll("#fileRot button").forEach((b) => b.addEventListener("click", () => rotateFile(+b.dataset.deg)));
+function fileRot() {
+  const box = $("fileRot");
+  box.hidden = !S.job;
+  if (!S.job) return;
+  const r = S.job.file.rot || 0;
+  $("fileRotTxt").textContent = S.rotErr || (S.busy === "Obracam plik…" ? "obracam…" : r ? `obrócony ${ROT_TXT[r]}` : "");
+  box.querySelectorAll("button").forEach((b) => { b.disabled = !!S.busy; });
+}
+
 function thumbs() {
   const f = S.job.file, el = $("thumbs");
   el.hidden = f.page_count < 2;
   el.innerHTML = f.page_count < 2 ? "" : f.pages.map((p) =>
-    `<div class="thumb" data-i="${p.index}"><img src="/api/jobs/${S.job.job_id}/thumb/${p.index}.png" alt="" loading="lazy">str. ${p.index + 1}</div>`).join("");
+    `<div class="thumb" data-i="${p.index}"><img src="/api/jobs/${S.job.job_id}/thumb/${p.index}.png?v=${S.job.versions[0].id}" alt="" loading="lazy">str. ${p.index + 1}</div>`).join("");
   el.querySelectorAll(".thumb").forEach((t) => { t.onclick = () => product.wantPage(+t.dataset.i); });
 }
 
@@ -382,8 +393,11 @@ let lastAuto = "";
 function render() {
   const has = !!S.job;
   $("vEmpty").hidden = has; $("vMain").hidden = !has;
-  chapter("ch-file", has ? "done" : "open", has ? esc(S.job.file.name) : "");
+  const rot = has ? S.job.file.rot || 0 : 0;
+  chapter("ch-file", has ? "done" : "open", has ? esc(S.job.file.name) + (rot ? ` · obrócony ${ROT_TXT[rot]}` : "") : "");
+  if (S.fitNext) { S.fitNext = false; viewer.zoomFit(); thumbs(); }
   if (has) { loadAnalysis(); loadInk(); loadGeoFacts(); fileLine(); }
+  fileRot();
   filePrep();
   product.renderPage();
   product.renderProduct();

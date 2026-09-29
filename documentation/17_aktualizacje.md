@@ -1016,3 +1016,94 @@ Numery jak w `18_przeglad_kodu.md`.
     się odtworzyć — w ramce „tu powinno być zdjęcie” zostaje pusto (MuPDF i Ghostscript; Acrobat
     może pokazać zdjęcie urwane).
   - Dlatego ostrzeżenie „Plik był uszkodzony … obejrzyj dokładnie podgląd” zostaje w rozdziale Plik.
+
+## 0.6.4 — „Usuń szablon” usuwa też napisy o nieczytelnym kodowaniu (Tomasz 29.09)
+
+- **Błąd** (`adFrame_Smart_100x250_ramki_w.pdf`): po „Usuń szablon” na środku zostawały napisy
+  z wytycznych — „1 / 1015 x 2513 [mm] / Wydruk …” — wyświetlane jako krzaczki ⊠.
+  - Przyczyna: font MyriadPro w tym pliku ma zepsutą mapę znaków — każda litera to ten sam kod 0x1F
+    bez odpowiednika. `frames._Walker` zapisywał napis tylko wtedy, gdy po odczycie zostawał jakiś
+    tekst. Tu zostawał pusty, więc napisu „nie było” i nie trafiał do usunięcia.
+  - Teraz blok tekstu z czymkolwiek w `Tj`/`TJ` jest zapisywany zawsze (znaki niedrukowalne
+    odrzucone). Pusty tekst = nieczytelny, więc z szablonem porównujemy go po położeniu i wielkości
+    liter (`_text_like`).
+  - Sprawdzone:
+    - `ramki_w`: ramki + napis usunięte, na stronie nie zostaje tekst;
+    - `ramki_w3` (napis Identity-H z 0.5.9): dalej usuwany;
+    - `ramki_r`: szablonu w wektorze nie ma (ramki w obrazie) — bez zmian.
+
+## 0.6.4 — Jakość zawsze z lupkami, Akceptacja z listą zmian, dopasowanie wymiaru obrazów (Tomasz 29.09)
+
+- **Jakość wydruku czeka na „Rozumiem, dalej” także przy dobrej jakości** (Tomasz: „nawet jak jakość jest
+  w porządku, chciałbym to menu do przybliżania”):
+  - Wcześniej werdykt „w porządku” / „sam wektor” zaliczał rozdział sam. Od razu pojawiała się Akceptacja,
+    a z nią znikały lupki, rzeczywista wielkość i nawigator.
+  - Teraz rozdział zostaje otwarty z panelem narzędzi i notką „Projekt możesz obejrzeć z bliska…”.
+    Dalej idzie się przyciskiem **Rozumiem, dalej** — tym samym, co przy cienkich liniach.
+  - Po powrocie (klik w nagłówek Jakości) narzędzia wracają.
+  - Przy słabych obrazach bez zmian — rozdział zalicza „Pokaż na podglądzie”.
+  - Samouczek ma osobny tekst dla dobrej jakości; pomoc „?” zaktualizowana.
+- **Akceptacja pliku: lista „Co zmieniono w pliku”**:
+  - każda nałożona poprawka z opisem z serwera, np. „Poprawienie czerni — czerń poprawiona
+    w 2 miejscach: C78 M85 Y90 K100”;
+  - „Przy wczytaniu”: warstwy, adnotacje, zdjęte zabezpieczenie, naprawa pliku (`file.prepared`);
+  - „Zostawione bez zmian (Twoja decyzja)”: rozdziały, w których wybrano „Zostaw jak jest”.
+- **Dopasowanie wymiaru także dla obrazów (JPG, PNG, TIFF…)** (Tomasz: „dlaczego przy JPG pisze, że
+  obrazu nie przeskaluje” → „chcę dopasowanie wymiaru do wszystkich formatów”):
+  - Wcześniej obraz był tylko porównywany z wytycznymi („Obrazu nie przeskaluję…”, przycisk „Rozumiem,
+    idę dalej”). Teraz rozdział Wymiar działa jak dla PDF-a: te same suwaki (wielkość, przesunięcie,
+    wypełnij format / cały projekt) i marginesy (puste = białe, tło z krawędzi, odbicie lustrzane),
+    z podglądem formatu.
+  - `steps._raster_resize` (Pillow + numpy). Obraz zostaje obrazem: JPG → JPG (jakość 95,
+    bez podpróbkowania kolorów), reszta → TIFF LZW (bez strat). Profil ICC zostaje.
+  - Pikseli nie przybywa bez potrzeby — DPI zmienia się razem z wielkością (DPI / wielkość):
+    - przy 100 % piksele są nietknięte, obraz jest tylko przycinany albo dostawiany;
+    - przy innej wielkości piksele są przeliczane (Lanczos) tylko o tyle, ile trzeba do całkowitego DPI
+      (JPG zapisuje DPI jako liczbę całkowitą).
+  - Przy wypełnianiu marginesu 3 skrajne piksele wydruku są odcinane, jak w PDF-ie.
+  - Wymiar wyniku liczony z pikseli i DPI (`pages_mm` z poprawki, `jobs.apply`). Przy bardzo niskim
+    DPI może się różnić o ułamek piksela, np. 2839,7 zamiast 2840 mm przy 20 dpi.
+  - Obraz bez zapisanego DPI nie ma wymiaru w mm. Wtedy ostrzeżenie „ustaw DPI w programie graficznym”
+    i „Rozumiem, idę dalej”.
+  - Po dopasowaniu działają dalej CMYK, jakość i pobieranie (plik .jpg / .tif). Pomoc „?” zaktualizowana.
+- Sprawdzone (Playwright):
+  - PDF wektorowy: Jakość czeka z narzędziami, po „Rozumiem, dalej” pojawia się Akceptacja z listą zmian;
+  - JPG 2893 × 2484 mm (20 dpi) przy wytycznych 2840 × 2475 mm:
+    - 100 % → przycięte 53,1 × 9,1 mm, piksele nietknięte;
+    - „cały projekt” 98 % + odbicie lustrzane → 2236 × 1949 px;
+    - dalej CMYK, akceptacja i pobranie JPG CMYK z profilem;
+  - TIFF CMYK 72,5 dpi przy 120 % → TIFF 60,4 dpi, wymiar 900 × 600 mm.
+
+## 0.6.4 — Obracanie pliku co 90° (Tomasz 29.09)
+
+- Tomasz: „mamy w którymś rozdziale możliwość obracania pliku co 90°? Jak nie, dajmy ją w którymś
+  z początkowych rozdziałów”. Wcześniej takiej możliwości nie było.
+- **Rozdział Plik: „Obróć plik: ⟲ 90° w lewo | ⟳ 90° w prawo | 180°”**:
+  - Obraca się cały plik — wszystkie strony PDF-a albo obraz.
+  - Obrót jest w pierwszym rozdziale, bo obrócony plik to nowy punkt wyjścia dla wszystkiego dalej
+    (szablon z wytycznych, spady, wymiar, jakość).
+  - Nagłówek rozdziału pokazuje stan, np. „· obrócony o 90° w prawo”.
+- **Podpowiedź w Wymiarze wydruku**: gdy plik leży bokiem względem formatu (poziomy zamiast pionowego,
+  a po obrocie proporcje pasują lepiej) — „Plik leży bokiem względem formatu — obróć go” z przyciskami
+  ⟳ / ⟲.
+- **Jak to działa** (`Job.rotate`, `POST /api/jobs/<id>/rotate`):
+  - obrócony plik zastępuje wersję v0 i dostaje nowe id (`v0r90…`) — podgląd, analizy i miniatury
+    stron liczą się od nowa;
+  - nałożone poprawki się cofają — program pyta o to wcześniej: „były robione na pliku przed obrotem”;
+  - decyzje w rozdziałach od Szablonu w dół się zerują, produkt, rola i strona zostają;
+  - obrót zawsze od pliku z wgrania (`info["base"]`) z łącznym kątem — JPG przy kilku obrotach nie traci
+    jakości po kilka razy, a powrót do 0° oddaje plik bit w bit;
+  - PDF: `/Rotate` na każdej stronie, potem `render.normalize_geometry` (obrót wpisany w treść, jak przy
+    wgraniu);
+  - obraz: Pillow `transpose` — DPI zamienione między osiami, profil ICC zostaje. JPG zapisuje się na
+    nowo w jakości 95, TIFF bez strat (LZW), PNG bez strat;
+  - wyniki oceny jakości zapamiętane pod numerem zadania są czyszczone (`detailmap.forget`).
+- Akceptacja pliku: na liście „Co zmieniono w pliku” pierwsza pozycja to „Obrócenie — cały plik o 90°
+  w prawo”. Pomoc „?” w rozdziale Plik opisuje obrót.
+- Sprawdzone:
+  - PDF 1000 × 1500 przy formacie 1500 × 1000: podpowiedź → ⟳ → „Wymiar się zgadza: 1500 × 1000 mm”,
+    obrót w prawo poprawny; ⟲ z rozdziału Plik → z powrotem 0°;
+  - JPG: 4 × 90° wraca do pliku z wgrania, DPI zamienione;
+  - PDF 2-stronicowy: obie strony obrócone;
+  - obrót po nałożonym CMYK: pytanie → poprawki cofnięte, rozdziały od Wymiaru w dół od nowa;
+  - cały samouczek przechodzi.

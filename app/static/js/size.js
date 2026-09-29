@@ -1,11 +1,12 @@
 // Rozdział „Wymiar wydruku". Porównujemy wymiar pliku z wytycznymi; „Dopasuj wymiar" buduje
-// nową stronę w docelowym formacie: projekt jako obiekt formy (wektor zostaje wektorem), w skali
+// nową stronę w docelowym formacie (obraz JPG/TIFF — nowy obraz, steps._raster_resize):
+// projekt jako obiekt formy (wektor zostaje wektorem), w skali
 // i położeniu z suwaków, margines pusty albo wypełniony tłem z krawędzi / odbiciem lustrzanym.
 // Póki rozdział jest otwarty, podgląd pokazuje FORMAT (zielona ramka), a projekt skaluje się
 // i przesuwa pod nim — to, co poza ramką, jest przyciemnione (zostanie odcięte).
 import { $, fmtMm, chapter } from "./util.js";
 import { S, changed, pageMm, targetMm, scaleK, hasStep, beforeStep, trimSettled, sizeMatches, isPdf } from "./state.js";
-import { applyStep, undoStep, stepControls } from "./steps.js";
+import { applyStep, undoStep, stepControls, rotateFile } from "./steps.js";
 
 // Skala projektu w dwóch poziomach (ustalenie Tomasza): PRZESKALOWANIE PLIKU (÷10 … bez zmian … ×10,
 // rzadko ruszane, schowane) × WIELKOŚĆ w procentach. Do 0.5.4 pisało się to „Skala projektu 1:1” —
@@ -51,7 +52,7 @@ export function cover() {
 
 // Rozdział jest „w edycji": podgląd pokazuje format i projekt pod nim.
 export function editing() {
-  return !!S.job && trimSettled() && isPdf() && !hasStep("resize") && !S.settle.resize
+  return !!S.job && trimSettled() && !hasStep("resize") && !S.settle.resize
          && (!sizeMatches() || S.sizeEdit) && !!cover();
 }
 
@@ -128,6 +129,10 @@ $("szR11").onclick = () => setRatio(1);
 $("szX10").onclick = () => setRatio(10);
 $("szEditBtn").onclick = () => { S.sizeEdit = true; changed(); };
 $("szUndo").onclick = () => undoStep("resize");
+$("szSay").addEventListener("click", (e) => {                 // „obróć” z podpowiedzi o pliku bokiem
+  const b = e.target.closest("button[data-deg]");
+  if (b) rotateFile(+b.dataset.deg);
+});
 $("szDo").onclick = () => {
   if (!S.job) return;
   if (sizeMatches() && !touched()) { S.settle.resize = "ok"; S.sizeEdit = false; changed(); return; }
@@ -150,16 +155,17 @@ export function renderSize() {
   if (done) {
     st = "done"; sum = `dopasowany — ${printT}`;
     say = `<span class="say ok">Wymiar dopasowany</span> — wydruk ${printT}.`;
-  } else if (ok && !isPdf()) {                 // obrazu nie skalujemy — „rozumiem" to nie „zgadza się"
+  } else if (ok && !f) {                       // obraz bez DPI — „rozumiem" to nie „zgadza się"
     st = "done"; sum = "obraz bez zmian";
-    say = `Obraz zostaje w swoim wymiarze${f ? ` (${fmtMm(f.w)} × ${fmtMm(f.h)} mm)` : ""}; wytyczne: ${printT}.`;
+    say = `Obraz zostaje bez zmian; wytyczne: ${printT}.`;
   } else if (ok) {
     st = "done"; sum = `zgadza się — ${printT}`;
     say = `<span class="say ok">Wymiar się zgadza</span> — wydruk ${printT}.`;
-  } else if (!isPdf()) {
+  } else if (!f) {
+    // obraz bez zapisanej rozdzielczości (DPI) — nie wiadomo, ile ma milimetrów
     st = "todo"; sum = "";
-    say = `Obraz ma ${f ? `${fmtMm(f.w)} × ${fmtMm(f.h)} mm` : "nieznany wymiar"}, wytyczne: ${printT}. `
-      + `Obrazu nie przeskaluję — jeśli wymiar się nie zgadza, trzeba go przygotować w programie graficznym.`;
+    say = `<span class="say warn">Obraz nie ma zapisanej rozdzielczości (DPI)</span>, więc nie wiadomo, ile ma `
+      + `milimetrów — nie da się go porównać z wytycznymi (${printT}) ani dopasować. Ustaw DPI w programie graficznym.`;
   } else if (match) {
     st = "todo"; sum = "";
     say = `<span class="say ok">Wymiar się zgadza</span>: plik ${fmtMm(f.w)} × ${fmtMm(f.h)} mm`
@@ -169,13 +175,22 @@ export function renderSize() {
     say = (k > 1
       ? `Na wydruku plik ma <b>${fmtMm(f.w * k)} × ${fmtMm(f.h * k)} mm</b>, a wytyczne wymagają <b>${printT}</b> `
         + `(plik w skali 1:${k}: ${fmtMm(f.w)} × ${fmtMm(f.h)} mm zamiast ${fmtMm(t.w)} × ${fmtMm(t.h)} mm)`
-      : `Plik ma <b>${fmtMm(f.w)} × ${fmtMm(f.h)} mm</b>, a wytyczne wymagają <b>${fmtMm(t.w)} × ${fmtMm(t.h)} mm</b>`)
+      : `${isPdf() ? "Plik" : "Obraz"} ma <b>${fmtMm(f.w)} × ${fmtMm(f.h)} mm</b>, a wytyczne wymagają <b>${fmtMm(t.w)} × ${fmtMm(t.h)} mm</b>`)
       + ". Ustaw, jak projekt ma się zmieścić w formacie.";
+  }
+  // plik leży bokiem względem formatu (poziomy zamiast pionowego) — obrót pasuje lepiej niż skalowanie
+  if (!done && !ok && f && t && !match) {
+    const land = (a) => a.w > a.h * 1.03, port = (a) => a.h > a.w * 1.03;
+    const e = (w, h) => Math.abs(Math.log((w / h) / (t.w / t.h)));
+    if (((land(f) && port(t)) || (port(f) && land(t))) && e(f.h, f.w) < e(f.w, f.h))
+      say += `<div class="rot-hint">Plik leży <b>bokiem</b> względem formatu — obróć go:`
+        + `<button class="btn" type="button" data-deg="90">⟳ 90° w prawo</button>`
+        + `<button class="btn" type="button" data-deg="-90">⟲ 90° w lewo</button></div>`;
   }
   chapter("ch-size", st, sum);
   $("szSay").innerHTML = say;
   $("szCtl").hidden = !edit;
-  $("szEditBtn").hidden = !(match && !edit && !done && !ok && isPdf());
+  $("szEditBtn").hidden = !(match && f && !edit && !done && !ok);
   const c = cover();
   if (edit && c) {
     const s = sz(), m = RATIOS[s.ratio];
@@ -218,7 +233,11 @@ export function renderSize() {
       ? `margines ${fmtMm(c.gap[0] * k)} × ${fmtMm(c.gap[1] * k)} mm wypełniony ${s.mode === "mirror" ? "odbiciem lustrzanym" : "tłem z krawędzi"}`
       : `<span class="say warn">puste pasy ${fmtMm(c.gap[0] * k)} × ${fmtMm(c.gap[1] * k)} mm</span>`);
     $("szDesc").innerHTML = `Przy wielkości <b>${Math.round(c.z * 100)} %</b> projekt ma na wydruku ${fmtMm(c.pw * k)} × ${fmtMm(c.ph * k)} mm — `
-      + (parts.length ? parts.join(", ") : "wypełnia format dokładnie") + ".";
+      + (parts.length ? parts.join(", ") : "wypełnia format dokładnie") + "."
+      // obraz zostaje obrazem, zapisany na nowo (Tomasz 29.09: dopasowanie wymiaru dla każdego formatu)
+      + (isPdf() ? "" : /\.jpe?g$/i.test(S.job.file.name || "")
+        ? ` <span class="muted">Obraz zostanie zapisany na nowo jako JPG (jakość 95).</span>`
+        : ` <span class="muted">Obraz zostanie zapisany jako TIFF — bez strat.</span>`);
     const lost = 1 - (c.t.w * c.t.h) / (c.f.w * c.coverZ * c.f.h * c.coverZ);
     $("szWarn").hidden = !(lost > 0.25);
     $("szWarn").innerHTML = `Proporcje pliku zupełnie nie pasują do formatu — wypełnienie formatu odcięłoby `
@@ -227,9 +246,8 @@ export function renderSize() {
     $("szWarn").hidden = true;
   }
   stepControls("sz", "resize", {
-    canDo: isPdf() || match,
-    doLabel: match && !touched() ? "Zatwierdź wymiar" : "Dopasuj wymiar",
+    canDo: true,
+    doLabel: !f ? "Rozumiem, idę dalej" : match && !touched() ? "Zatwierdź wymiar" : "Dopasuj wymiar",
   });
   $("szDo").hidden = done || ok;
-  if (!isPdf()) { $("szDo").textContent = "Rozumiem, idę dalej"; $("szDo").disabled = !!S.busy; }
 }

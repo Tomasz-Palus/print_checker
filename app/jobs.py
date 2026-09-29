@@ -73,8 +73,46 @@ class Job:
         return self.head if vid in (None, "", "head") else None
 
     def to_json(self) -> dict:
-        return {"job_id": self.id, "file": self.info, "suggestions": self.suggestions,
+        return {"job_id": self.id, "file": {k: v for k, v in self.info.items() if k != "base"},
+                "suggestions": self.suggestions,
                 "versions": [v.to_json() for v in self.versions]}
+
+    # --- obrót pliku (Tomasz 29.09) ---------------------------------------------------------
+    def rotate(self, deg: int) -> None:
+        """Obraca CAŁY plik o 90° / 180° (w prawo = dodatnio). To nowy punkt wyjścia: obrócony plik
+        zastępuje wersję v0, a nałożone poprawki przepadają (robione były pod starą orientację —
+        frontend pyta o to wcześniej). Zawsze od pliku z wgrania (`info["base"]`), z łącznym kątem:
+        JPG przy kilku obrotach nie traci jakości po kilka razy, a powrót do 0° oddaje go bit w bit."""
+        with self.lock:
+            if deg % 90:
+                raise ValueError("Obrót tylko o wielokrotność 90°.")
+            total = (int(self.info.get("rot", 0)) + int(deg)) % 360
+            if len(self.versions) > 1:
+                self.undo(self.versions[1].step)
+            old = self.versions[0]
+            base = self.info.get("base") or old.path
+            path = base if total == 0 else _rotated_file(base, total, self.dir)
+            info = render.inspect(path, self.info["name"])
+            for k in ("converted", "geometry", "prepared", "base"):
+                if k in self.info:
+                    info[k] = self.info[k]
+            info["base"], info["rot"] = base, total
+            views.drop(self, {old.id})
+            self.analysis.pop(old.id, None)
+            self.images.pop(old.id, None)
+            for k in [k for k in self.ink if k[0] == old.id]:
+                self.ink.pop(k, None)
+            if old.path != base:
+                try:
+                    os.remove(old.path)
+                except OSError:
+                    pass
+            self.info = info
+            # nowy identyfikator: podgląd i analizy w przeglądarce są zapamiętane pod id wersji
+            v0 = Version(f"v0r{total}{uuid.uuid4().hex[:4]}", path)
+            if info.get("kind") == "raster":
+                v0.pages_mm = [[p.get("width_mm"), p.get("height_mm")] for p in info["pages"]]
+            self.versions = [v0]
 
     # --- łańcuch wersji -----------------------------------------------------------------
     def apply(self, step: str, params: dict) -> Version:
@@ -92,11 +130,12 @@ class Job:
             dst = os.path.join(self.dir, vid + ".pdf")
             result = steps.run(step, self.head.path, dst, params, self)
             dst = result.pop("path", dst)          # obraz zostaje obrazem (JPG/TIFF), reszta to PDF
+            mm = result.pop("pages_mm", None)      # obraz po dopasowaniu wymiaru: nowy wymiar z DPI
             if not os.path.exists(dst):
                 raise ValueError(result.get("text") or "Poprawka nic nie zmieniła.")
             v = Version(vid, dst, step, params, result)
             if render.is_raster(dst):              # wymiar obrazu w mm wynika z DPI — jak w oryginale
-                v.pages_mm = self.head.pages_mm
+                v.pages_mm = mm or self.head.pages_mm
             self.versions.append(v)
             return v
 
@@ -119,6 +158,48 @@ class Job:
                         os.remove(p)
                     except OSError:
                         pass      # Windows: plik jeszcze otwarty — zniknie przy sprzątaniu
+
+
+def _rotated_file(base: str, total: int, jdir: str) -> str:
+    """Kopia pliku z wgrania obrócona o `total` stopni w prawo (90 / 180 / 270)."""
+    ext = os.path.splitext(base)[1].lower()
+    out = os.path.join(jdir, f"rot{total}_{uuid.uuid4().hex[:4]}{ext}")
+    if render.is_raster(base):
+        from PIL import Image
+        im = Image.open(base)
+        im.seek(0)
+        info = dict(im.info)
+        r = im.transpose({90: Image.Transpose.ROTATE_270, 180: Image.Transpose.ROTATE_180,
+                          270: Image.Transpose.ROTATE_90}[total])
+        kw = {}
+        if info.get("icc_profile"):
+            kw["icc_profile"] = info["icc_profile"]
+        d = info.get("dpi")
+        if d:
+            kw["dpi"] = (d[1], d[0]) if total in (90, 270) else d
+        fmt = im.format or ("JPEG" if ext in (".jpg", ".jpeg") else "PNG")
+        if fmt == "JPEG":
+            r.save(out, "JPEG", quality=95, subsampling=0, **kw)
+        elif fmt == "TIFF":
+            r.save(out, "TIFF", compression="tiff_lzw", **kw)
+        else:
+            if fmt not in ("PNG", "BMP", "GIF", "WEBP"):
+                fmt = "PNG"
+                out = os.path.splitext(out)[0] + ".png"
+            r.save(out, fmt, **({"lossless": True, **kw} if fmt == "WEBP" else kw))
+        return out
+    import pikepdf
+    with pikepdf.open(base) as pdf:
+        for pg in pdf.pages:
+            pg.obj["/Rotate"] = (int(pg.obj.get("/Rotate", 0)) + total) % 360
+        pdf.save(out)
+    path, _ = render.normalize_geometry(out)   # obrót wpisany w treść — jak przy wgraniu
+    if path != out:
+        try:
+            os.remove(out)
+        except OSError:
+            pass
+    return path
 
 
 # ----------------------------------------------------------------------------
@@ -147,6 +228,7 @@ def create(file_storage) -> Job:
             # warstwy i adnotacje w stanie DO DRUKU (prepare.py) — podgląd = wydruk
             path, baked = prepare.bake_print_state(path)
         info = render.inspect(path, name)
+        info["base"] = path                            # punkt wyjścia do obrotu (Job.rotate)
         if converted:
             info["converted"] = converted
         if geom:                                       # wygląd bez zmian — tylko zapis strony

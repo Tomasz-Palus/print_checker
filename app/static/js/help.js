@@ -9,7 +9,11 @@ export const HELP = {
     „nie drukuj” i niedrukowane komentarze Acrobata usuwa, a drukowane stemple i pola wpisuje w stronę
     (różne drukarnie traktują je różnie). Zdejmuje też hasło do uprawnień i przelicza stronę zapisaną
     w powiększonej jednostce (UserUnit, strony ponad 5 m). Dzieje się to samo, bez pytania.
-    PDF-a z hasłem do otwarcia albo zniszczonego otworzyć się nie da — trzeba poprosić klienta o nowy.`,
+    PDF-a z hasłem do otwarcia albo zniszczonego otworzyć się nie da — trzeba poprosić klienta o nowy.<br><br>
+    <b>Obróć plik</b> obraca cały plik co 90° — gdy projekt przyszedł bokiem. Obrócony plik jest nowym
+    punktem wyjścia: nałożone poprawki się cofają (program zapyta), produkt i rola zostają. Gdy plik leży
+    bokiem względem formatu, rozdział Wymiar wydruku sam podpowiada obrót. Obraz JPG zapisuje się po
+    obrocie na nowo (jakość 95); obrót z powrotem do 0° oddaje go bez zmian.`,
   product: `Program zgaduje produkt z nazwy pliku, z szablonu zostawionego w projekcie albo z wymiaru
     strony — ale zawsze trzeba go <b>potwierdzić</b>. Od produktu zależą wytyczne: wymiar,
     skala (1:1 albo 1:10) i obszar bezpieczny.<br><br>
@@ -49,7 +53,11 @@ export const HELP = {
     <b>Przesuń</b> działa aż do przeciwnej krawędzi formatu. Suwak lekko „przyciąga" do środka
     i do położeń, w których krawędź projektu równa się z krawędzią formatu. Dwuklik na suwaku = środek.
     Dokładną wartość wpiszesz w pole obok: mm na wydruku od środka, plus = w prawo / w dół,
-    minus = w lewo / w górę.`,
+    minus = w lewo / w górę.<br><br>
+    <b>Obraz (JPG, PNG, TIFF)</b> dopasowuje się tak samo i zostaje obrazem. Przy 100 % piksele się nie
+    zmieniają — obraz jest tylko przycinany albo dostawiany. Przy innej wielkości zmienia się rozdzielczość
+    (DPI), a piksele są przeliczane tylko minimalnie. JPG zapisuje się na nowo w jakości 95, reszta jako
+    TIFF bez strat. Obraz bez zapisanego DPI nie ma wymiaru w mm — tego program nie dopasuje.`,
   print: `Od tego rozdziału <b>podgląd pokazuje wydruk</b>, nie ekran: kolory tak, jak przeliczy je
     drukarnia (profilem zapisanym w pliku, np. ISO Coated v2, a gdy plik go nie ma — Coated FOGRA39;
     intencja relatywna kolorymetryczna), i overprint, tak jak zrobi to maszyna. Zdjęcie, które już
@@ -114,7 +122,8 @@ Gdy strona <b>już jest jednym obrazem</b> (np. eksport z Photoshopa), program n
     ale nic w nich nie ma. To trzeba obejrzeć: bywa też zwykłym rozmyciem ze zdjęcia.<br><br>
     „Pokaż na podglądzie" przechodzi po takich miejscach (strzałki ← →) w <b>rzeczywistej
     wielkości wydruku</b>. Wektor (napisy, kształty) nie ma rozdzielczości i nie jest oceniany.
-    Lupki, rzeczywistą wielkość i nawigator masz w panelu nad podglądem — tylko w tym rozdziale.<br><br>
+    Lupki, rzeczywistą wielkość i nawigator masz w panelu nad podglądem — tylko w tym rozdziale,
+    także przy dobrej jakości (rozdział czeka wtedy na <b>Rozumiem, dalej</b>).<br><br>
     Program sprawdza też <b>cienkie linie</b> (cieńsze niż 0,25 mm na wydruku albo „hairline” o grubości 0 —
     mogą się nie wydrukować) i <b>tekst poza obszarem bezpiecznym</b> (wnętrze czerwonej linii z wytycznych — w jej prawdziwym
     kształcie, także z zaokrągleniami i kilkoma strefami; przy krawędzi napis może zostać ucięty albo
@@ -130,6 +139,7 @@ Gdy strona <b>już jest jednym obrazem</b> (np. eksport z Photoshopa), program n
   acc: `Ostatnie spojrzenie przed pobraniem. <b>Pokaż wydruk przed i po</b> porównuje, jak plik
     wydrukowałby się bez poprawek z rozdziałów Kolory, Overprint, Fonty i Spłaszczenie, z tym,
     jak wydrukuje się teraz — oba tak, jak zrobi to drukarnia (kolory z drukarki, overprint).
-    Suwak startuje od „po” — tak, jak plik pójdzie do druku. Gdy wszystko gra — <b>Akceptuję plik</b>. Każda późniejsza zmiana
+    Suwak startuje od „po” — tak, jak plik pójdzie do druku. Nad przyciskiem jest lista tego, co program
+    w pliku zmienił, a co zostawił bez zmian. Gdy wszystko gra — <b>Akceptuję plik</b>. Każda późniejsza zmiana
     pliku zdejmuje akceptację.`,
 };

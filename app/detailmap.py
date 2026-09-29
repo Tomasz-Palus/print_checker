@@ -1159,3 +1159,7 @@ def forget(job_id: str) -> None:
     with _lock:
         for key in [key for key in _tasks if key[0] == job_id]:
             _tasks.pop(key, None)
+    # wyniki obrazów zapamiętane pod numerem zadania (klucz „job”) — po obrocie pliku byłyby nieaktualne
+    with _img_lock:
+        for k in [k for k in _img_cache if k[0] == "job" and k[1] == job_id]:
+            _img_cache.pop(k, None)

@@ -98,7 +98,7 @@ class _Walker:
         stack, fill, stroke, width = [], (0.0,) * 3, (0.0,) * 3, 1.0
         box, nseg, first = None, 0, None
         t_start, t_txt, t_pos, t_size, t_scale = None, [], None, 12.0, 1.0
-        t_dec = None
+        t_dec, t_raw = None, False
 
         def add(x, y):
             nonlocal box
@@ -162,7 +162,7 @@ class _Walker:
                                             "index": first if first is not None else i, "end": i})
                     box, nseg, first = None, 0, None
                 elif o == "BT":
-                    t_start, t_txt, t_pos = i, [], None
+                    t_start, t_txt, t_pos, t_raw = i, [], None, False
                 elif o == "Tf":
                     t_size = float(operands[1])
                     t_dec = self.decoder(resources, operands[0])
@@ -177,9 +177,13 @@ class _Walker:
                 elif o in ("Tj", "TJ", "'", '"'):
                     for x in operands:
                         _text(x, t_txt, t_dec)
+                    t_raw = True
                 elif o == "ET":
-                    txt = "".join(t_txt).strip()
-                    if t_start is not None and txt:
+                    # tekst o nieczytelnym kodowaniu (same kody bez liter — np. font ze zepsutą mapą
+                    # znaków, na ekranie „krzaczki” ⊠) też jest napisem: porównujemy go z szablonem
+                    # po położeniu i wielkości (Tomasz 29.09, adFrame_Smart_100x250_ramki_w)
+                    txt = "".join(ch for ch in "".join(t_txt) if ch.isprintable()).strip()
+                    if t_start is not None and (txt or t_raw):
                         self.texts.append({"tekst": txt, "x": (t_pos or (0, 0))[0], "y": (t_pos or (0, 0))[1],
                                            "size_pt": t_size * t_scale * math.hypot(ctm[0], ctm[1]),
                                            "owner": owner, "index": t_start, "end": i})

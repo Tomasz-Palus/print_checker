@@ -37,6 +37,16 @@
           <div class="bar" id="upBar" hidden><i></i></div>
         </div>
         <div class="box bad" id="fileErr" hidden></div>
+        <!-- obrót całego pliku co 90° (Tomasz 29.09) — nowy punkt wyjścia dla wszystkich rozdziałów -->
+        <div class="rotrow" id="fileRot" hidden>
+          <span>Obróć plik:</span>
+          <div class="seg">
+            <button type="button" data-deg="-90" title="Obróć o 90° w lewo">⟲ 90° w lewo</button><button
+              type="button" data-deg="90" title="Obróć o 90° w prawo">⟳ 90° w prawo</button><button
+              type="button" data-deg="180" title="Obróć o 180°">180°</button>
+          </div>
+          <span class="muted" id="fileRotTxt"></span>
+        </div>
         <div class="box warn" id="filePrep" hidden></div>
         <div class="box info" id="fileNotice">
           <b>Ważne:</b> adChecker pomaga przygotować plik do druku, ale nie zastępuje grafika DTP.
@@ -307,8 +317,8 @@
         <div class="bar" id="quBar" hidden><i></i></div>
         <div class="note" id="quNote"></div>
         <div class="box warn" id="quRisk" hidden></div>
-        <!-- uwagi o cienkich liniach / obszarze bezpiecznym trzeba przeczytać (Tomasz 29.09): bez tego
-             rozdział zaliczał się sam, pojawiała się Akceptacja i ramki znikały -->
+        <!-- „Rozumiem, dalej”: uwagi o cienkich liniach / obszarze bezpiecznym trzeba przeczytać, a przy dobrej
+             jakości rozdział też czeka — zostaje otwarty z lupkami i nawigatorem (Tomasz 29.09) -->
         <div class="row" id="quRiskOk" hidden><button class="btn primary" type="button">Rozumiem, dalej</button></div>
         <div class="box bad" id="quErr" hidden></div>
         <div class="row" id="quRetry" hidden><button class="btn" type="button">Sprawdź jeszcze raz</button></div>
@@ -326,6 +336,7 @@
       <div class="ch-help" hidden></div>
       <div class="ch-b">
         <p class="say" id="acSay"></p>
+        <div class="box" id="acChanges" hidden></div>
         <div class="seg rowsel" id="acShow"><button type="button">Pokaż wydruk przed i po</button></div>
         <div class="mini sim" id="acSimBar" data-sim="final" hidden><span>przed poprawkami</span><input type="range" min="0" max="100" value="100"><span>po</span></div>
         <div class="seg rowsel" id="acOk" hidden><button type="button">Akceptuję plik</button></div>

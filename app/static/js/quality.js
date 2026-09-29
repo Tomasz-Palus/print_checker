@@ -2,7 +2,7 @@
 // Jakość liczy serwer (quality.py → detailmap.py) i oddaje gotowy werdykt; tu tylko pokazanie
 // go po ludzku i nawigacja po słabych miejscach na podglądzie (w rzeczywistej wielkości wydruku).
 import { $, esc, fmtMm, api, chapter, plural } from "./util.js";
-import { S, changed, head, scaleK, printMm, isPdf, flattenSettled, roleSettled, template, STEP_NAME, fontWarnings, inkNow, factsKey, layoutRisks, THIN_PRINT_MM, geoKey } from "./state.js";
+import { S, changed, head, scaleK, printMm, isPdf, flattenSettled, roleSettled, template, STEP_NAME, ROT_TXT, fontWarnings, inkNow, factsKey, layoutRisks, THIN_PRINT_MM, geoKey } from "./state.js";
 import { detailBlock } from "./settings.js";
 import * as viewer from "./viewer.js";
 
@@ -37,11 +37,14 @@ async function poll(key) {
 
 export function qualitySettled() {
   if (!flattenSettled()) return false;
+  if (S.qual.err) return true;
   if (!risksSeen()) return false;
-  if (S.settle.quality || S.qual.err) return true;
+  // także przy dobrej jakości rozdział czeka na „Rozumiem, dalej” — zostaje otwarty razem z lupkami
+  // i nawigatorem, żeby można było obejrzeć projekt z bliska (Tomasz 29.09)
   const d = S.qual.data;
-  return !!d && d.status === "done" && (d.verdict === "ok" || d.verdict === "vector");
+  return !!d && d.status === "done" && !!S.settle.quality;
 }
+const goodVerdict = (d) => !!d && d.status === "done" && (d.verdict === "ok" || d.verdict === "vector");
 // Cienkie linie / tekst poza obszarem bezpiecznym: rozdział czeka na „Rozumiem, dalej” (Tomasz 29.09).
 // Dopóki analiza wersji z ostateczną geometrią się nie wczytała (null) — też czekamy, inaczej
 // Akceptacja pojawiała się i znikała.
@@ -83,6 +86,7 @@ $("quShow").querySelector("button").addEventListener("click", () => {
 
 $("quRiskOk").querySelector("button").addEventListener("click", () => {
   S.settle.quRisk = "seen";
+  if (goodVerdict(S.qual.data)) S.settle.quality = "seen";
   changed();
 });
 
@@ -105,6 +109,8 @@ function prefetch() {
   api(`/api/jobs/${S.job.job_id}/quality?page=${S.page}&k=${isPdf() ? scaleK() : 1}`
     + `&block=${detailBlock()}` + (pr ? `&w_mm=${pr.w}&h_mm=${pr.h}` : "")).catch(() => {});
 }
+
+const LOOK = `Projekt możesz obejrzeć z bliska: lupki, rzeczywista wielkość wydruku i nawigator są w panelu nad podglądem.`;
 
 export function renderQuality() {
   prefetch();
@@ -130,11 +136,13 @@ export function renderQuality() {
     say = `<span class="spin"></span>Sprawdzam jakość obrazów — piksel po pikselu…`;
     if (d?.bands) { bar.hidden = false; bar.firstElementChild.style.width = `${Math.round(d.band / d.bands * 100)}%`; }
   } else if (d.verdict === "vector") {
-    st = "done"; sum = "sam wektor";
+    st = S.settle.quality ? "done" : "todo"; sum = "sam wektor";
     say = `<span class="say ok">Projekt jest w wektorze</span> — rozdzielczość nie ma tu znaczenia.`;
+    note = LOOK;
   } else if (d.verdict === "ok") {
-    st = "done"; sum = "w porządku";
+    st = S.settle.quality ? "done" : "todo"; sum = "w porządku";
     say = `<span class="say ok">Jakość w porządku</span> — każdy obraz ma co najmniej ${REQ} ppi na wydruku.`;
+    note = LOOK;
   } else {
     st = S.settle.quality ? "done" : "todo";
     // najsłabsze miejsce z POMIARU (kompresja JPEG nie ma ppi)
@@ -176,7 +184,7 @@ export function renderQuality() {
       + `w rozdziale Wymiar wydruku albo poproś klienta o poprawkę.`);
   $("quRisk").innerHTML = lr.length ? lr.join("<br>") + ` <span class="muted">(zaznaczone na podglądzie)</span>` : "";
   $("quRisk").hidden = !lr.length;
-  $("quRiskOk").hidden = !lr.length || !!S.settle.quRisk;
+  $("quRiskOk").hidden = !(goodVerdict(d) && !S.settle.quality) && (!lr.length || !!S.settle.quRisk);
   if (lr.length && !S.settle.quRisk && st === "done") { st = "todo"; }
   chapter("ch-qual", st, sum);
   $("quSay").innerHTML = say;
@@ -269,6 +277,26 @@ $("acOk").querySelector("button").addEventListener("click", () => {
   S.sim = null;
   changed();
 });
+// Co program zrobił z plikiem (Tomasz 29.09: „przydałby się opis, co zostało poprawione lub zmienione”):
+// przygotowanie przy wczytaniu, poprawki z rozdziałów (ich własne opisy z serwera) i decyzje „zostaw”.
+const LEFT = [["frames", "elementy szablonu w projekcie"], ["trim", "spady"], ["cmyk", "kolory"],
+  ["overprint", "overprint"], ["outline", "tekst w fontach (bez krzywych)"], ["flatten", "warstwy (bez spłaszczenia)"]];
+const cap = (t) => t ? t[0].toUpperCase() + t.slice(1) : t;
+function changesHtml() {
+  const prep = S.job.file.prepared || [];
+  const vs = S.job.versions.slice(1);
+  const left = LEFT.filter(([n]) => S.settle[n] === "skip").map(([, t]) => t);
+  const li = (t) => `<li>${t}</li>`, rot = S.job.file.rot || 0;
+  let h = "";
+  if (vs.length || rot) h += `<b>Co zmieniono w pliku:</b><ul class="prep">`
+    + (rot ? li(`<b>Obrócenie</b> — cały plik ${ROT_TXT[rot]}`) : "")
+    + vs.map((v) => li(`<b>${esc(cap(STEP_NAME[v.step] || v.step))}</b>${v.text ? ` — ${esc(v.text)}` : ""}`)).join("") + `</ul>`;
+  else h += `<b>Program nie zmieniał pliku</b> — żadna poprawka nie była potrzebna albo wszystko zostało jak było.`;
+  if (prep.length) h += `<div class="acc-sub"><b>Przy wczytaniu:</b><ul class="prep">${prep.map((t) => li(esc(cap(t)))).join("")}</ul></div>`;
+  if (left.length) h += `<div class="acc-sub"><b>Zostawione bez zmian</b> (Twoja decyzja): ${esc(left.join(", "))}.</div>`;
+  return h;
+}
+
 export const acceptSettled = () => qualitySettled() && S.settle.accept === head()?.id;
 
 export function renderAccept() {
@@ -285,6 +313,8 @@ export function renderAccept() {
       + `Obejrzyj go jeszcze raz — tak, jak zrobi to drukarnia — i jeśli wszystko gra, zaakceptuj plik.`
     : `Porównaj, jak plik wydrukowałby się <b>bez poprawek</b> i jak wydrukuje się <b>teraz</b> — `
       + `z kolorami i overprintem tak, jak zrobi to drukarnia. Jeśli wszystko gra, zaakceptuj plik.`;
+  const ch = changesHtml();
+  $("acChanges").innerHTML = ch; $("acChanges").hidden = !ch;
   const b = $("acShow").querySelector("button");
   b.classList.toggle("on", S.sim === "final");
   $("acSimBar").hidden = S.sim !== "final";

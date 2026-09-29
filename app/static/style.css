@@ -90,6 +90,8 @@ a { color: var(--accent); }
 .box.info { background: #eef3ff; color: #1e3a8a; line-height: 1.45; }
 .box ul.prep { margin: 4px 0 0; padding-left: 18px; line-height: 1.4; }
 .box ul.prep li + li { margin-top: 3px; }
+#acChanges { background: #f4f6f9; }
+#acChanges .acc-sub { margin-top: 8px; }
 
 /* plik */
 .drop { border: 2px dashed #c9ced6; border-radius: 10px; padding: 18px; text-align: center; cursor: pointer; color: var(--muted); }
@@ -229,6 +231,10 @@ select.sel.small { width: auto; padding: 4px 8px; margin: 6px 0 0 24px; font-siz
 
 /* wybór jednego z kilku sposobów (przyciski obok siebie) */
 .seg { display: flex; gap: 0; margin: 4px 0 10px; }
+.rotrow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 10px; font-size: 13px; }
+.rotrow .seg { margin: 0; }
+.rot-hint { margin-top: 8px; font-size: 13px; }
+.rot-hint button { margin-left: 6px; }
 .seg button { flex: 1 1 auto; white-space: nowrap; font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); background: #fff;
   color: #3a4452; cursor: pointer; margin-left: -1px; }
 .seg button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
