@@ -248,6 +248,7 @@ select.sel.small { width: auto; padding: 4px 8px; margin: 6px 0 0 24px; font-siz
 /* pobieranie */
 .dlsum { margin: 6px 0 12px; padding-left: 18px; font-size: 13px; color: #3a4452; }
 .dlsum li { margin: 3px 0; }
+.dlsum li.warn { color: #b45309; }
 .btn.big { display: block; text-align: center; font-size: 15px; padding: 11px; text-decoration: none; }
 
 /* --- samouczek (wersja 0.2) ------------------------------------------------------------- */

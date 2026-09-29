@@ -650,7 +650,45 @@ Numery jak w `18_przeglad_kodu.md`.
 - **Plik testowy fontów** `przykladowe projekty/bledne/Test_fonty_adChecker.pdf` (7 stron
   1000 × 500 mm, na każdej opis oczekiwanego zachowania): 1 osadzony, 2 nieosadzony z Google Fonts
   (Roboto Bold), 3 nieosadzony z Windowsa (Arial Bold), 4 nieosadzony nigdzie (FooBar Pro),
-  5 nieosadzony, ale niewidoczny (Tr 3), 6 Helvetica (standardowy PDF), 7 wszystko naraz.
+  5 nieosadzony, ale niewidoczny (Tr 3), 6 Helvetica (standardowy PDF), 7 wszystko naraz,
+  8 nieosadzony font Identity-H (CID, typowy dla Worda / PowerPointa / Canvy) z Google Fonts
+  (Lora Italic), 9 nieosadzony Identity-H, którego nie ma nigdzie (FooBar Sans).
+  - Tomasz 29.09: w Photoshopie widać było wszystkie fonty ze stron 1–7 — Adobe podstawia
+    nieosadzonym fontom prostym (TrueType/Type1 z szerokościami) swój krój Adobe Sans MM, a Arial /
+    Roboto bierze z systemu. Strony 8–9 to przypadek, którego Photoshop nie umie pokazać (same
+    numery znaków, bez kształtów — kropki albo nic). Str. 8 po zamianie na krzywe: prawdziwa Lora
+    Italic; str. 9: odmowa.
   - Sprawdzone w sandboksie (zamiana na krzywe): 1, 2, 5, 6 — udane; 4 i 7 — odmowa (FooBar Pro);
     3 — odmowa tylko dlatego, że sandbox nie ma Ariala (na Windowsie / Macu jest).
   - Interfejs (Playwright, str. 2): ostrzeżenie nad podglądem, „Zostaw jak jest” nieaktywne.
+
+## 0.5.8 — zamiana kolorów nie utrwala już krojów zastępczych (Tomasz 29.09)
+
+- **Błąd znaleziony na pliku testowym fontów (jedna strona 1000 × 2000 mm).** Po „Zamień na CMYK”
+  ostrzeżenie o brakujących fontach znikało, „Zostaw jak jest” w Fontach wracało, a „Zamień na
+  krzywe” się udawało — z krzaczkami w przypadkach 7 i 8.
+  - Przyczyna: zamiana kolorów to Ghostscript (pdfwrite), który przepisuje stronę i brakujący font
+    OSADZA — swoim zamiennikiem. Dla fontu Identity-H (same numery znaków) zamiennik rysuje zupełnie
+    inne znaki. Od tej chwili plik „miał” font, więc dalsze sprawdzenia nic nie widziały.
+  - Teraz `step_cmyk` najpierw szuka prawdziwego fontu (Google Fonts — `_prepare_fonts`, potem
+    fonty systemu — `-sFONTPATH`). Gdy Ghostscript i tak sięga po zamiennik (`gs.substituted`),
+    zamiana idzie drugi raz z `NeverEmbed` dla tych fontów: kolory są zamienione, a brakujące fonty
+    ZOSTAJĄ nieosadzone (jak w oryginale) — program dalej o nich wie i ostrzega. Opis kroku:
+    „UWAGA: brak fontu … — zostaje nieosadzony, drukarnia podstawi swój krój”.
+    (`_gs_page(..., pre=[...])` — parametry pdfwrite wstawiane tuż przed plikiem.)
+  - **Decyzja Tomasza: „wolałbym, żeby dało się przejść dalej i to wydrukować, po prostu info”.**
+    „Zostaw jak jest” w Fontach znów aktywne; przy braku fontu notatka mówi, co się stanie
+    (drukarnia podstawi krój, przy tekście z Worda / Canvy nawet krzaczki), a po wyborze rozdział
+    pokazuje ostrzeżenie. W „Pobierz plik do druku” — pozycja „Brak fontu w pliku: … — drukarnia
+    podstawi swój krój”. Ostrzeżenie nad podglądem — jak dotąd.
+  - Zamiana na krzywe i spłaszczenie przy brakującym foncie dalej odmawiają (utrwaliłyby krój
+    zastępczy na stałe); komunikat dopowiada, że można wybrać „Zostaw jak jest” i iść dalej.
+  - Sprawdzone: strona 1000 × 2000 — kolory zamienione; Roboto i Lora osadzone prawdziwe
+    (Google Fonts), FooBar Pro, FooBar Sans (i w sandboksie Arial) zostały nieosadzone, analiza
+    dalej je zgłasza; krzywe — odmowa z podpowiedzią „Zostaw jak jest”.
+- **Dlaczego przypadki 7 i 8 wyglądały inaczej w Wymiarze i po Symulacji wydruku.** Do Symulacji
+  podgląd rysuje MuPDF (ekran), potem Ghostscript (druk). Font Identity-H bez osadzenia ma w pliku
+  tylko numery znaków. MuPDF odczytuje z ToUnicode, jakie to litery, i rysuje je swoim zapasowym
+  krojem — tekst da się przeczytać. Ghostscript bierze numery wprost do kroju zastępczego —
+  wychodzą krzaczki (tak jak w Photoshopie kropki). Żaden z nich nie pokazuje prawdziwego fontu —
+  dlatego ostrzeżenie nad podglądem.

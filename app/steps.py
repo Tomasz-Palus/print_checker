@@ -298,7 +298,7 @@ def step_resize(src, dst, p, job) -> dict:
 # ----------------------------------------------------------------------------
 # wspólne dla poprawek przez Ghostscripta
 # ----------------------------------------------------------------------------
-def _gs_page(src: str, dst: str, page: int, args: list, what: str, timeout: int = 1800):
+def _gs_page(src: str, dst: str, page: int, args: list, what: str, timeout: int = 1800, pre: list | None = None):
     """Ghostscript (pdfwrite) przepisuje TYLKO wybraną stronę; wynik wklejamy w kopię pliku
     na jej miejsce. Pozostałe strony i wszystko na poziomie dokumentu (profil kolorystyczny,
     metadane) zostają bit w bit — a Ghostscript nie mieli całego wielostronicowego PDF-a
@@ -307,13 +307,13 @@ def _gs_page(src: str, dst: str, page: int, args: list, what: str, timeout: int 
     out = dst + ".gs.pdf"
     args = [*args, *gs.PDFWRITE_NO_ROTATE]           # strona nie może zmienić orientacji
     try:
-        r = gs.run(args + [f"-sPageList={page + 1}", "-o", gs.arg_path(out), gs.arg_path(src)], timeout)
+        r = gs.run(args + [f"-sPageList={page + 1}", "-o", gs.arg_path(out), *(pre or []), gs.arg_path(src)], timeout)
         if r.returncode != 0 or not os.path.exists(out):
             # druga próba bez -dSAFER: pliki, które czyta, to nasze kopie profili — bywa,
             # że tylko tak Ghostscript je otwiera (Windows)
             if "-dSAFER" in args:
                 r = gs.run([a for a in args if a != "-dSAFER"]
-                           + [f"-sPageList={page + 1}", "-o", gs.arg_path(out), gs.arg_path(src)], timeout)
+                           + [f"-sPageList={page + 1}", "-o", gs.arg_path(out), *(pre or []), gs.arg_path(src)], timeout)
             if r.returncode != 0 or not os.path.exists(out):
                 raise ValueError(f"Ghostscript nie dał rady ({what}). Komunikat: {gs.log_of(r)}")
         return r, out
@@ -503,12 +503,34 @@ def step_cmyk(src, dst, p, job) -> dict:
             "-dRenderIntent=1", "-dBlackPtComp=1",       # relatywna kolorymetryczna + BPC
             *gs.PDFWRITE_KEEP_IMAGES,
             "-dPassThroughJPEGImages=false"]             # obrazy też mają przejść na CMYK (bez strat)
+    # FONTY (Tomasz 29.09, plik testowy fontów): Ghostscript przepisuje stronę i brakujący font
+    # OSADZA — swoim zamiennikiem. Po zamianie kolorów „brak fontu” znikał, a krój zastępczy (przy
+    # Identity-H — krzaczki) zostawał w pliku na stałe. Dlatego jak przy krzywych: najpierw prawdziwy
+    # font (Google Fonts), potem fonty systemu; zamiennik = odmowa.
+    fsrc, finfo = _prepare_fonts(src, dst, page)
+    args = [*args, *gs.font_path_args()]
     reg = dst + ".reg.pdf"
-    gs_src = reg if _rename_registration(src, reg) else src
+    gs_src = reg if _rename_registration(fsrc, reg) else fsrc
     try:
         r, out = _gs_page(gs_src, dst, page, args, "zamiana kolorów na CMYK", 900)
     finally:
-        _rm(reg if gs_src != src else None)
+        _rm(reg if gs_src != fsrc else None)
+        _rm(fsrc if fsrc != src else None)
+    subs = gs.substituted((r.stdout or "") + "\n" + (r.stderr or ""), finfo.get("niewidoczne", []))
+    if subs:
+        # Fontu nie ma nigdzie. Decyzja Tomasza (29.09): da się iść dalej i drukować, ma być tylko
+        # informacja. Zamieniamy kolory jeszcze raz, ale te fonty zostają NIEOSADZONE (jak były) —
+        # drukarnia podstawi swój krój, a program dalej o tym wie i ostrzega.
+        _rm(out)
+        ne = "[" + " ".join("/" + n.split("+")[-1] for n in subs) + "]"
+        fsrc2, _ = _prepare_fonts(src, dst, page)
+        gs_src = reg if _rename_registration(fsrc2, reg) else fsrc2
+        try:
+            r, out = _gs_page(gs_src, dst, page, args, "zamiana kolorów na CMYK", 900,
+                              pre=["-c", f"<< /NeverEmbed {ne} >> setdistillerparams", "-f"])
+        finally:
+            _rm(reg if gs_src != fsrc2 else None)
+            _rm(fsrc2 if fsrc2 != src else None)
     try:
         if profile == PROFILE_KEEP:
             doc_fn = None                              # deklaracja z pliku zostaje, jaka była
@@ -526,6 +548,9 @@ def step_cmyk(src, dst, p, job) -> dict:
         text = f"kolory zamienione na CMYK przez profil {name}"
     text += {PROFILE_KEEP: "; profil kolorystyczny z pliku zostaje",
              PROFILE_NONE: "; plik bez deklaracji profilu"}.get(profile, f"; profil pliku: {name}")
+    if subs:
+        text += ("; UWAGA: brak fontu " + ", ".join(n.split("+")[-1] for n in subs[:4])
+                 + " — zostaje nieosadzony, drukarnia podstawi swój krój")
     return {"text": text}
 
 
@@ -631,8 +656,9 @@ def _font_refusal(what: str, names: list, info: dict) -> str:
     return (f"Nie {what}: w pliku brakuje fontu {', '.join(n.split('+')[-1] for n in names[:6])}. "
             "Nie ma go w pliku (nie jest osadzony), w systemie ani w Google Fonts, a krój zastępczy "
             "zmieniłby tekst." + (f" ({det})" if det else "")
-            + " Poproś klienta o PDF z osadzonymi fontami — w Illustratorze / InDesignie: Zapisz jako / "
-              "Eksportuj → Adobe PDF, ustawienie „Wysoka jakość druku”.")
+            + " Najlepiej poproś klienta o PDF z osadzonymi fontami — w Illustratorze / InDesignie: Zapisz "
+              "jako / Eksportuj → Adobe PDF, ustawienie „Wysoka jakość druku”. Możesz też kliknąć "
+              "„Zostaw jak jest” i iść dalej — wtedy drukarnia podstawi swój krój.")
 
 
 def _page_fonts(path: str, page: int) -> list[str]:

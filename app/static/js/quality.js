@@ -280,7 +280,11 @@ export function renderDownload() {
   $("dlSay").innerHTML = bad
     ? `<span class="say warn">Plik można pobrać, ale obrazy są za małe</span> — na wydruku będą rozmyte.`
     : `<span class="say ok">Plik gotowy do druku.</span>`;
-  $("dlSum").innerHTML = (done.length ? `<li>Zrobione: ${esc(done.join(", "))}.</li>` : `<li>Bez poprawek.</li>`)
+  // brak fontu (Tomasz 29.09): można drukować, ale ma być o tym informacja
+  const hf = S.analysisFor && S.analysis && !S.analysis.error ? (S.analysis.fonts_missing || []).filter((f) => f.visible) : [];
+  $("dlSum").innerHTML = (hf.length ? `<li class="warn">Brak fontu w pliku: <b>${esc(hf.map((f) => f.name.split("+").pop()).join(", "))}</b> — `
+      + `drukarnia podstawi swój krój, litery wyjdą inne.</li>` : "")
+    + (done.length ? `<li>Zrobione: ${esc(done.join(", "))}.</li>` : `<li>Bez poprawek.</li>`)
     + (left.length ? `<li>Zostawione jak były: ${esc(left.join(", "))}.</li>` : "")
     + (S.job.file.page_count > 1 ? `<li>Tylko strona ${S.page + 1} z ${S.job.file.page_count}.</li>` : "");
   const name = fileName();

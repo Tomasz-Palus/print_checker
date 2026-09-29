@@ -222,19 +222,23 @@ export function renderFonts() {
         + `że w drukarni wyjdzie dokładnie ten sam kształt liter.`;
       if (miss.length) note = `<span class="say warn">${miss.length === 1 ? "Font" : "Fonty"} ${esc(miss.join(", "))} `
         + `${miss.length === 1 ? "nie jest osadzony" : "nie są osadzone"} w pliku</span> — w pliku jest tylko nazwa, `
-        + `bez kształtów liter. Zostawić tak się nie da: drukarnia podstawiłaby inny krój. Kliknij `
-        + `<b>Zamień na krzywe</b> — program poszuka ${miss.length === 1 ? "go" : "ich"} w Google Fonts i w systemie `
-        + `(kroju zastępczego nie użyje). Jeśli nie znajdzie — poproś klienta o PDF z osadzonymi fontami.`;
+        + `bez kształtów liter. <b>Zamień na krzywe</b> — program poszuka ${miss.length === 1 ? "go" : "ich"} w Google Fonts `
+        + `i w systemie (kroju zastępczego nie użyje). Jeśli nie znajdzie, najlepiej poproś klienta o PDF z osadzonymi `
+        + `fontami. <b>Zostaw jak jest</b> też możesz wybrać — wtedy drukarnia podstawi swój krój: litery wyjdą inne, `
+        + `a przy niektórych plikach (tekst z Worda, Canvy) nawet krzaczki.`;
     }
   }
   chapter("ch-fonts", st, sum);
   $("foSay").innerHTML = say;
   $("foNote").innerHTML = note; $("foNote").hidden = !note;
   rowsFor("fo", "outline", any || !!c.act, on);
-  // nieosadzony, WIDOCZNY font nie może zostać (Tomasz 29.09) — „Zostaw jak jest” nieaktywne
-  const keep = $("foAct").querySelector('button[data-v="keep"]');
-  keep.disabled = keep.disabled || (!on && miss.length > 0);
-  keep.title = !on && miss.length ? "Nie da się zostawić — w pliku brakuje fontu, drukarnia podstawiłaby inny krój." : "";
+  // nieosadzony, WIDOCZNY font: można zostawić (Tomasz 29.09: „da się przejść dalej i wydrukować,
+  // po prostu info”) — ostrzeżenie zostaje przy decyzji, nad podglądem i przy pobieraniu
+  if (!on && miss.length && c.act === "keep") {
+    $("foSay").innerHTML = `<span class="say warn">Tekst zostaje w fontach, ale ${miss.length === 1 ? "font" : "fonty"} `
+      + `${esc(miss.join(", "))} nie ${miss.length === 1 ? "jest" : "są"} w pliku</span> — drukarnia podstawi swój krój.`;
+    $("foNote").hidden = true;
+  }
 }
 
 // ------------------------------------------------------------------ spłaszczenie
