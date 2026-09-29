@@ -2,7 +2,7 @@
 // Jakość liczy serwer (quality.py → detailmap.py) i oddaje gotowy werdykt; tu tylko pokazanie
 // go po ludzku i nawigacja po słabych miejscach na podglądzie (w rzeczywistej wielkości wydruku).
 import { $, esc, fmtMm, api, chapter, plural } from "./util.js";
-import { S, changed, head, scaleK, printMm, isPdf, flattenSettled, roleSettled, template, STEP_NAME, fontWarnings, inkNow, factsKey } from "./state.js";
+import { S, changed, head, scaleK, printMm, isPdf, flattenSettled, roleSettled, template, STEP_NAME, fontWarnings, inkNow, factsKey, layoutRisks, THIN_PRINT_MM } from "./state.js";
 import { detailBlock } from "./settings.js";
 import * as viewer from "./viewer.js";
 
@@ -142,6 +142,22 @@ export function renderQuality() {
     if (scaleK() > 1) note += `${note ? " " : ""}Plik w skali 1:10 drukuje się 10× większy — żeby wyszło ${REQ} ppi, w pliku trzeba ${REQ * 10} ppi.`;
   }
   chapter("ch-qual", st, sum);
+  // cienkie linie i tekst przy krawędzi (Tomasz 29.09 — „edge cases”): tylko informacja, poprawia się
+  // w rozdziale Wymiar (przesunięcie, wielkość) albo u klienta
+  const L = layoutRisks(), lr = [];
+  if (L?.thin.length) {
+    const hair = L.thin.some((x) => x.w === 0), mn = Math.min(...L.thin.map((x) => x.w));
+    lr.push(`<b>Cienkie linie</b> (${L.thin.length} ${plural(L.thin.length, "miejsce", "miejsca", "miejsc")}): `
+      + (hair ? `część ma grubość 0 (hairline) — wydrukuje się najcieńszą kreską, jaką da maszyna, albo wcale. `
+        : `najcieńsza ma ${mn.toFixed(2).replace(".", ",")} mm na wydruku. `)
+      + `Kreski cieńsze niż ${String(THIN_PRINT_MM).replace(".", ",")} mm mogą się nie wydrukować.`);
+  }
+  if (L?.unsafe.length)
+    lr.push(`<b>Tekst poza obszarem bezpiecznym</b> (${L.unsafe.length} ${plural(L.unsafe.length, "wiersz", "wiersze", "wierszy")}): `
+      + `za blisko krawędzi — przy montażu może zostać ucięty albo schowany w ramie. Przesuń albo zmniejsz projekt `
+      + `w rozdziale Wymiar wydruku albo poproś klienta o poprawkę.`);
+  $("quRisk").innerHTML = lr.length ? lr.join("<br>") + ` <span class="muted">(zaznaczone na podglądzie)</span>` : "";
+  $("quRisk").hidden = !lr.length;
   $("quSay").innerHTML = say;
   $("quNote").innerHTML = note; $("quNote").hidden = !note;
   $("quErr").hidden = true;
@@ -283,14 +299,16 @@ export function renderDownload() {
   // brak fontu (Tomasz 29.09): można drukować, ale ma być o tym informacja
   const fw = fontWarnings(), fb = fw.filter((f) => f.baked), fl = fw.filter((f) => !f.baked);
   const ha = S.analysisFor === factsKey() && S.analysis && !S.analysis.error ? S.analysis : null;
-  const wo = (ha?.white_overprint || []).length, ink = inkNow();
+  const wo = (ha?.white_overprint || []).length, ink = inkNow(), lrk = layoutRisks();
   const nm = (l) => esc(l.map((f) => f.name).join(", "));
   $("dlSum").innerHTML = (fl.length ? `<li class="warn">Brak fontu w pliku: <b>${nm(fl)}</b> — `
       + `drukarnia podstawi swój krój, litery wyjdą inne.</li>` : "")
     + (fb.length ? `<li class="warn">Krój zastępczy utrwalony (krzywe / spłaszczenie): <b>${nm(fb)}</b> — `
       + `te litery wyjdą innym krojem niż w projekcie.</li>` : "")
-    + (wo ? `<li class="warn">Biel z overprintem (${wo} ${plural(wo, "miejsce", "miejsca", "miejsc")}) — w druku zniknie.</li>` : "")
+    + (wo ? `<li class="warn">Biel z overprintem (${wo} ${plural(wo, "miejsce", "miejsca", "miejsc")}) — może w druku zniknąć.</li>` : "")
     + (ink?.boxes?.length ? `<li class="warn">Za dużo farby: do ${ink.max} % (limit ${ink.limit} %) — może się rozmazać.</li>` : "")
+    + (lrk?.thin.length ? `<li class="warn">Cienkie linie: ${lrk.thin.length} — mogą się nie wydrukować.</li>` : "")
+    + (lrk?.unsafe.length ? `<li class="warn">Tekst poza obszarem bezpiecznym: ${lrk.unsafe.length} ${plural(lrk.unsafe.length, "wiersz", "wiersze", "wierszy")}.</li>` : "")
     + (done.length ? `<li>Zrobione: ${esc(done.join(", "))}.</li>` : `<li>Bez poprawek.</li>`)
     + (left.length ? `<li>Zostawione jak były: ${esc(left.join(", "))}.</li>` : "")
     + (S.job.file.page_count > 1 ? `<li>Tylko strona ${S.page + 1} z ${S.job.file.page_count}.</li>` : "");

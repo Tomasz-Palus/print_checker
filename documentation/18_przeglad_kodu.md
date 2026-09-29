@@ -175,6 +175,9 @@ Przegląd całego programu na prośbę Tomasza. Bez zmian w kodzie — to lista 
 - **0.5:** A10 (obrót, CropBox), A12, A13 — zrobione. UserUnit — zrobione w 0.5.9 (`normalize_geometry`, przy pobraniu wraca).
 - **0.5.3:** z części D — ppi rastra z obu boków, 16-bitowe obrazy szare, ogromny obraz
   liczony bez tego, co leży nad nim (i bez założenia, że leży prosto) — zrobione.
+- **0.6.0:** B16 (podpis aktualizacji — czeka na klucz Tomasza), B18, C19, C20, C28 — zrobione;
+  B17 i C24 częściowo (uprawnienia, persist-credentials, concurrency, numer wersji, /LOG).
 - **Zostaje:**
-  - B16–B18 — podpis aktualizacji, CI, pliki po odinstalowaniu.
-  - C19, C20, C23–C25, C28 i drobne z części D.
+  - B17 — sumy kontrolne Ghostscripta i zależności, wersja Inno Setup.
+  - C23 (Mac — na prawdziwym Macu), C25 (do sprawdzenia
+    po przejściu spłaszczenia na zapis bezstratny) i drobne z części D.

@@ -1,6 +1,6 @@
 // Start programu: wgrywanie pliku, jedna pętla rysowania rozdziałów i podglądu, ustawienia.
 import { $, esc, fmtMm, fmtBytes, api, ask, chapter, initChapters, plural, shown, revealChapters } from "./util.js";
-import { S, changed, onChange, resetJobState, head, template, scaleK, printMm, isPdf, sizeSettled, factsKey, STEP_NAME, STEP_CH, stepIndex, fontWarnings, printRisks, printSettled } from "./state.js";
+import { S, changed, onChange, resetJobState, head, template, scaleK, printMm, isPdf, sizeSettled, factsKey, STEP_NAME, STEP_CH, stepIndex, fontWarnings, riskMarks, printSettled, geoKey, geoVersion, flattenSettled } from "./state.js";
 import { HELP } from "./help.js";
 import * as viewer from "./viewer.js";
 import * as product from "./product.js";
@@ -136,6 +136,22 @@ async function loadInk() {
   changed();
 }
 
+// Analiza wersji z ostateczną geometrią (cienkie linie, obszar bezpieczny — state.layoutRisks).
+// Zwykle już jest w pamięci (była ostatnią wersją); gdy nie — dociągamy ją raz.
+let geoBusy = "";
+async function loadGeoFacts() {
+  const key = geoKey(), v = geoVersion();
+  if (!isPdf() || !flattenSettled() || !key || S.factsCache[key] || geoBusy === key) return;
+  geoBusy = key;
+  try {
+    S.factsCache[key] = await api(`/api/jobs/${S.job.job_id}/analysis?v=${v.id}&page=${S.page}`);
+  } catch (e) {
+    S.factsCache[key] = { error: e.message };
+  }
+  if (geoBusy === key) geoBusy = "";
+  changed();
+}
+
 // ------------------------------------------------------------------ miniatury stron
 function thumbs() {
   const f = S.job.file, el = $("thumbs");
@@ -177,13 +193,33 @@ function printFlags() {
   return { pr, op: pr && isPdf() };
 }
 
+// Rozdział, nad którym się teraz pracuje: ręcznie rozwinięty nagłówkiem (S.viewCh), przypięty
+// (S.pin) albo ostatni widoczny. Od niego zależą ramki na podglądzie (state.riskMarks).
+let lastCh = "";
+function currentChapter() {
+  const chs = [...document.querySelectorAll(".ch:not([hidden])")];
+  const last = chs[chs.length - 1]?.id || "";
+  if (last !== lastCh) { lastCh = last; S.viewCh = null; }         // doszedł nowy rozdział — wracamy do niego
+  if (S.viewCh && chs.some((c) => c.id === S.viewCh && c.classList.contains("open"))) return S.viewCh;
+  return (S.pin && chs.some((c) => c.id === S.pin)) ? S.pin : last;
+}
+// rozwinięcie rozdziału nagłówkiem (myszą albo klawiaturą) = oglądamy właśnie ten rozdział
+function viewHeader(e) {
+  const h = e.target.closest?.(".ch-h");
+  if (!h || e.target.closest(".ch-q")) return;
+  if (e.type === "keydown" && e.key !== "Enter" && e.key !== " ") return;
+  const ch = h.closest(".ch");
+  setTimeout(() => { S.viewCh = ch.classList.contains("open") ? ch.id : null; changed(); }, 0);
+}
+document.addEventListener("click", viewHeader);
+document.addEventListener("keydown", viewHeader);
+
 function scene() {
   const sc = sceneBase();
   if (sc && !sizeScene()) {
     const pm = pageMmOf(head());
     const r = (b) => ({ x: b[0] * pm.w, y: b[1] * pm.h, w: b[2] * pm.w, h: b[3] * pm.h });
-    sc.marks = fontWarnings().flatMap((f) => f.boxes.map((b) => ({ r: r(b), label: `${f.name} — krój zastępczy` })))
-      .concat(printRisks().map((x) => ({ r: r(x.box), label: x.label, tone: x.tone })));
+    sc.marks = riskMarks(currentChapter()).map((x) => ({ r: r(x.box), label: x.label, tone: x.tone }));
   }
   return sc;
 }
@@ -241,14 +277,14 @@ function kOf(v) {
   return pr ? Math.max(pr.w, pr.h) / Math.max(pm.w, pm.h) : scaleK();
 }
 
-// Co program zmienił w pliku przy wgraniu (prepare.py): warstwy, adnotacje, hasło, UserUnit,
-// naprawiony plik — żeby laik wiedział, że podgląd pokazuje plik „jak do druku” (Tomasz 29.09)
+// Co program zmienił w pliku przy wgraniu (prepare.py) — warstwy, adnotacje, hasło, UserUnit —
+// dzieje się po cichu (Tomasz 29.09: „ten tekst w rozdziale 1 jest niepotrzebny”; opis jest pod „?”).
+// Zostaje tylko ostrzeżenie o pliku NAPRAWIONYM przy otwarciu — wtedy trzeba obejrzeć podgląd.
 function filePrep() {
-  const box = $("filePrep"), list = S.job?.file?.prepared || [];
-  box.hidden = !list.length;
-  if (!list.length) return;
-  box.innerHTML = `<b>Przygotowane przy wczytaniu</b> — podgląd pokazuje plik tak, jak się wydrukuje:`
-    + `<ul class="prep">${list.map((t) => `<li>${esc(t[0].toUpperCase() + t.slice(1))}.</li>`).join("")}</ul>`;
+  const box = $("filePrep");
+  const bad = (S.job?.file?.prepared || []).find((t) => t.startsWith("plik był uszkodzony"));
+  box.hidden = !bad;
+  if (bad) box.innerHTML = `<b>Plik był uszkodzony</b> i program go naprawił — obejrzyj dokładnie podgląd, czy niczego nie brakuje.`;
 }
 
 function fileLine() {
@@ -343,7 +379,7 @@ function render() {
   const has = !!S.job;
   $("vEmpty").hidden = has; $("vMain").hidden = !has;
   chapter("ch-file", has ? "done" : "open", has ? esc(S.job.file.name) : "");
-  if (has) { loadAnalysis(); loadInk(); fileLine(); }
+  if (has) { loadAnalysis(); loadInk(); loadGeoFacts(); fileLine(); }
   filePrep();
   product.renderPage();
   product.renderProduct();

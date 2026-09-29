@@ -178,16 +178,16 @@ export function renderOverprint() {
     } else if (c.act === "keep") {
       sum = "zostawiony";
       say = "Overprint zostaje — podgląd pokazuje, jak to wyjdzie z drukarki.";
-      if (white) say = `<span class="say warn">Overprint zostaje, a ${whiteTxt} w druku zniknie</span> `
+      if (white) say = `<span class="say warn">Overprint zostaje, a ${whiteTxt} może w druku zniknąć</span> `
         + `(pomarańczowe ramki na podglądzie).`;
     } else {
       say = `W projekcie jest <b>overprint</b> (nadruk): farba kładzie się na tło zamiast je zakryć, `
         + `więc w druku część elementów wychodzi inaczej niż na ekranie — podgląd pokazuje już, jak. `
         + `Wytyczne go nie dopuszczają.`;
       // biel z overprintem nie zakrywa tła — znika zupełnie (Tomasz 29.09, „edge cases”)
-      if (white) note = `<span class="say warn">Uwaga: ${whiteTxt} w druku zniknie</span> `
-        + `(pomarańczowe ramki na podglądzie). Na ekranie go widać, na wydruku nie. <b>Wyłącz overprint</b>, `
-        + `żeby się wydrukował.`;
+      if (white) note = `<span class="say warn">Uwaga: ${whiteTxt} może w druku zniknąć</span> `
+        + `(pomarańczowe ramki na podglądzie). Na ekranie jest biały, a w druku białej farby nie ma — `
+        + `z overprintem zostaje tło. <b>Wyłącz overprint</b>, żeby na pewno się wydrukował.`;
     }
   }
   chapter("ch-op", st, sum);

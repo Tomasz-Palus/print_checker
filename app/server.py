@@ -562,6 +562,12 @@ def api_alive():
 
 # ----------------------------------------------------------------------------
 def main():
+    # przy reloaderze Flaska ten sam kod startuje dwa razy (proces nadzorcy i proces serwera) —
+    # blokadę bierze tylko serwujący; drugi run.bat nie skasuje plików działającego (C19)
+    import instance
+    if not (instance.acquire() if os.environ.get("WERKZEUG_RUN_MAIN") == "true" else not instance.busy()):
+        print("[adChecker] już działa w innym oknie — zamknij je najpierw.")
+        sys.exit(1)
     jobs.clean_work_dir()
     st = products.load_products()
     print(f"[adChecker] produkty: {st['count']} (źródło: {st['source']})"

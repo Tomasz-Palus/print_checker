@@ -35,7 +35,7 @@ import pymupdf
 
 from products import requirements_url
 
-PARSER_VERSION = 4
+PARSER_VERSION = 5          # 5: safe_mm — obszar bezpieczny (czerwona ramka)
 import paths
 from version import UA
 
@@ -293,6 +293,17 @@ def parse_template_page(page, index: int) -> dict:
 
     svg, counts = drawings_to_svg(page)
     r = page.rect
+    # obszar bezpieczny: czerwone ramki co najmniej na 20 % boku strony (mm strony wytycznych, y od góry)
+    safe = []
+    for dr in page.get_drawings():
+        typ = dr.get("type", "")
+        if _color_class(dr.get("fill") if "f" in typ else dr.get("color")) != "safe":
+            continue
+        q = dr["rect"]
+        if q.width >= 0.2 * r.width and q.height >= 0.2 * r.height:
+            box = [round(q.x0 * MM_PER_PT, 2), round(q.y0 * MM_PER_PT, 2), round(q.x1 * MM_PER_PT, 2), round(q.y1 * MM_PER_PT, 2)]
+            if box not in safe:
+                safe.append(box)
     # „0 x 0 [mm]” = wytyczne-zaślepka dla produktów o zmiennym wymiarze (np. adFrame LMD do 3mb):
     # strona PDF ma wtedy umowny rozmiar, a wymiar wydruku trzeba podać ręcznie
     dims_missing = dims is not None and (dims[0] <= 0 or dims[1] <= 0)
@@ -308,6 +319,7 @@ def parse_template_page(page, index: int) -> dict:
         "page_height_pt": round(r.height, 3),
         "svg": svg,
         "layers": counts,
+        "safe_mm": safe[:8],
     }
 
 

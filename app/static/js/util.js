@@ -30,7 +30,18 @@ export function ask(title, html, yes = "Tak", no = "Anuluj") {
     $("askT").textContent = title; $("askX").innerHTML = html;
     $("askYes").textContent = yes; $("askNo").textContent = no;
     const done = (v) => { m.hidden = true; document.removeEventListener("keydown", key); resolve(v); };
-    const key = (e) => { if (e.key === "Escape") done(false); if (e.key === "Enter") done(true); };
+    // Enter i spacja działają na przycisk, który ma fokus (zaznaczony) — wcześniej Enter zawsze
+    // potwierdzał, nawet przy zaznaczonym „Zostaw” (przegląd kodu 27.09, C28). Fokus nie wychodzi
+    // z okna (Tab krąży między dwoma przyciskami).
+    const key = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); done(false); return; }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        (document.activeElement === $("askYes") ? $("askNo") : $("askYes")).focus();
+        return;
+      }
+      if (e.key === "Enter" && !e.target.closest?.("#ask button")) { e.preventDefault(); done(true); }
+    };
     $("askYes").onclick = () => done(true);
     $("askNo").onclick = () => done(false);
     m.onclick = (e) => { if (e.target === m) done(false); };
@@ -105,9 +116,19 @@ export function initChapters(HELP) {
         q.classList.toggle("on", !help.hidden);
       };
     }
-    ch.querySelector(".ch-h")?.addEventListener("click", () => {
-      if (ch.dataset.st === "done") ch.classList.toggle("open");
-    });
+    // nagłówek rozdziału: klik, Enter albo spacja rozwija / zwija (C28 — dawniej tylko myszą)
+    const h = ch.querySelector(".ch-h");
+    if (h) {
+      h.tabIndex = 0; h.setAttribute("role", "button");
+      h.addEventListener("click", () => {
+        if (ch.dataset.st === "done") ch.classList.toggle("open");
+      });
+      h.addEventListener("keydown", (e) => {
+        if (e.target !== h || (e.key !== "Enter" && e.key !== " ")) return;
+        e.preventDefault();
+        if (ch.dataset.st === "done") ch.classList.toggle("open");
+      });
+    }
   });
 }
 

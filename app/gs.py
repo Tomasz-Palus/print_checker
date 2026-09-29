@@ -231,10 +231,101 @@ def substituted(log: str, ignore=()) -> list[str]:
     return out
 
 
+# ----------------------------------------------------------------------------
+# działające procesy Ghostscripta — kończą się razem z programem (przegląd kodu 27.09, C20)
+# ----------------------------------------------------------------------------
+# Zamknięcie okna kończy program przez os._exit, a Ghostscript liczący duże spłaszczenie albo
+# podgląd pracował dalej nawet kilkanaście minut (bez okna, zajmując procesor i pliki w work/).
+# Każdy proces trafia do rejestru (kill_all przy zamknięciu), a na Windowsie dodatkowo do „zadania”
+# systemu (Job Object) z KILL_ON_JOB_CLOSE — Windows zabija go sam, nawet gdy program padnie.
+_procs: set = set()
+_procs_lock = threading.Lock()
+_win_job = None
+
+
+def _job_handle():
+    global _win_job
+    if _win_job is not None or sys.platform != "win32":
+        return _win_job
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _Basic(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                        ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD),
+                        ("SchedulingClass", wintypes.DWORD)]
+
+        class _Io(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_uint64) for n in ("R", "W", "O", "RT", "WT", "OT")]
+
+        class _Ext(ctypes.Structure):
+            _fields_ = [("Basic", _Basic), ("Io", _Io), ("ProcessMemoryLimit", ctypes.c_size_t),
+                        ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                        ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateJobObjectW.restype = wintypes.HANDLE
+        k32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        k32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        h = k32.CreateJobObjectW(None, None)
+        info = _Ext()
+        info.Basic.LimitFlags = 0x2000                     # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if h and k32.SetInformationJobObject(h, 9, ctypes.byref(info), ctypes.sizeof(info)):
+            _win_job = (k32, h)
+    except Exception as e:
+        print(f"[adChecker] Job Object: {type(e).__name__}: {e}")
+        _win_job = False
+    return _win_job
+
+
+def _track(p: subprocess.Popen) -> None:
+    with _procs_lock:
+        _procs.add(p)
+    j = _job_handle()
+    if j:
+        try:
+            j[0].AssignProcessToJobObject(j[1], int(p._handle))
+        except Exception:
+            pass
+
+
+def _untrack(p: subprocess.Popen) -> None:
+    with _procs_lock:
+        _procs.discard(p)
+
+
+def kill_all() -> int:
+    """Zabija wszystkie działające procesy Ghostscripta (zamknięcie programu). Zwraca ich liczbę."""
+    with _procs_lock:
+        ps = [p for p in _procs if p.poll() is None]
+        _procs.clear()
+    for p in ps:
+        try:
+            p.kill()
+        except Exception:
+            pass
+    return len(ps)
+
+
 def run(args: list, timeout: int = 900) -> subprocess.CompletedProcess:
     """Ghostscript z listą argumentów (bez nazwy programu). Tekst wyjścia zawsze czytelny."""
-    return subprocess.run([exe(), "-dNOPAUSE", "-dBATCH", *args], capture_output=True, text=True, **NO_WINDOW,
-                          encoding="utf-8", errors="replace", timeout=timeout)
+    cmd = [exe(), "-dNOPAUSE", "-dBATCH", *args]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         encoding="utf-8", errors="replace", **NO_WINDOW)
+    _track(p)
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+        raise
+    finally:
+        _untrack(p)
+    return subprocess.CompletedProcess(cmd, p.returncode, out, err)
 
 
 def log_of(r: subprocess.CompletedProcess, n: int = 400) -> str:
@@ -252,6 +343,7 @@ def stream(args: list, quiet: bool = True) -> subprocess.Popen:
     head = ["-q"] if quiet else ["-sstdout=%stderr"]
     p = subprocess.Popen([exe(), *head, "-dNOPAUSE", "-dBATCH", *args],
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=1 << 20, **NO_WINDOW)
+    _track(p)
     p.err_tail = b""
     p.err_all = bytearray()          # cały dziennik (do 2 MB) — np. zamienione fonty przy spłaszczaniu
 
@@ -263,5 +355,10 @@ def stream(args: list, quiet: bool = True) -> subprocess.Popen:
                     p.err_all += chunk
         except Exception:
             pass
+        try:
+            p.wait()
+        except Exception:
+            pass
+        _untrack(p)                  # koniec procesu (stderr zamknięty) — zdejmujemy z rejestru
     threading.Thread(target=drain, daemon=True).start()
     return p

@@ -579,6 +579,10 @@ window.addEventListener("mouseup", () => {
 });
 window.addEventListener("keydown", (e) => {
   if (e.target.matches("input, select, textarea")) return;
+  // spacja na przycisku / nagłówku rozdziału / w oknie pytania ma go kliknąć, a nie przełączyć
+  // przesuwanie podglądu (przegląd kodu 27.09, C28)
+  const ui = e.target.closest?.("button, a, [role=button], [tabindex]:not(#vStage), .modal, #ask");
+  if (e.code === "Space" && ui) return;
   if (e.code === "Space" && !space) { space = true; stage.classList.add("space"); if (scene) e.preventDefault(); }
   if (e.key === "Escape" && tool) setTool(tool);
   if (e.code === "KeyZ" && !e.ctrlKey && !e.metaKey && zoomAllowed) setTool(e.altKey ? "out" : "in");

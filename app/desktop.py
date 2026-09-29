@@ -6,7 +6,7 @@
   okna kończy program. Gdy okna nie da się otworzyć — zwykła przeglądarka, a program kończy
   się sam kilka minut po zamknięciu karty.
 - Drugie uruchomienie nie startuje drugiego serwera (skasowałby pliki robocze pierwszego) —
-  otwiera działający program w przeglądarce.
+  otwiera działający program w przeglądarce. Rozstrzyga blokada pliku (instance.py).
 - Dziennik: adchecker.log w folderze użytkownika (paths.LOG).
 """
 from __future__ import annotations
@@ -142,8 +142,13 @@ def main() -> None:
 
     port = PORT
     url = f"http://{HOST}:{port}/"
-    if _running(url):
-        webbrowser.open(url)
+    # jeden program naraz — rozstrzyga blokada pliku, nie odpowiedź serwera (C19): zajęty albo
+    # powolny pierwszy program nie może skończyć się skasowaniem jego plików roboczych
+    import instance
+    if not instance.acquire():
+        other = f"http://{HOST}:{instance.running_port(PORT)}/"
+        print(f"adChecker już działa ({other}) — otwieram go, nic nie czyszczę")
+        webbrowser.open(other)
         return
     if not _port_free(port):                  # port zajęty przez coś innego — bierzemy wolny
         with socket.socket() as s:
@@ -155,6 +160,7 @@ def main() -> None:
     import products
     import server
     from version import VERSION
+    instance.save_port(port)
     jobs.clean_work_dir()
     shutil.rmtree(os.path.join(paths.USER_DIR, "update"), ignore_errors=True)   # instalator po aktualizacji
     st = products.load_products()
@@ -185,7 +191,26 @@ def main() -> None:
         while time.time() - server.last_seen["t"] < IDLE_EXIT_S:
             time.sleep(5)
         print("nikt nie używa programu — koniec")
+    _shutdown()
     os._exit(0)                               # wątek serwera i procesy liczące kończą się razem z nami
+
+
+def _shutdown() -> None:
+    """Przed os._exit: Ghostscript i procesy oceny jakości nie mogą liczyć dalej bez okna
+    (przegląd kodu 27.09, C20)."""
+    try:
+        import gs
+        n = gs.kill_all()
+        if n:
+            print(f"zatrzymano Ghostscript: {n}")
+    except Exception as e:
+        print(f"zamykanie Ghostscripta: {type(e).__name__}: {e}")
+    try:
+        for ch in multiprocessing.active_children():
+            ch.kill()
+    except Exception:
+        pass
+    sys.stdout.flush()
 
 
 if __name__ == "__main__":

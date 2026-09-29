@@ -273,13 +273,56 @@ export function inkNow() {
   return S.ink.key === factsKey() && S.ink.data && !S.ink.data.skip ? S.ink.data : null;
 }
 
-// Miejsca, które znikną albo są ryzykowne w druku — ramki na podglądzie obok brakujących fontów:
-// biel z overprintem (analiza ostatniej wersji) i za dużo farby (ink.py).
-export function printRisks() {
+// Wersja z ostateczną geometrią (po szablonie / spadach / wymiarze) — jak w ocenie jakości.
+// Krzywe i spłaszczenie zmieniają tekst i kreski w obraz / kształty, więc je sprawdzamy tutaj.
+const GEO_STEPS = ["frames", "trim", "resize"];
+export const geoVersion = () => S.job ? [...S.job.versions].reverse().find((v, i, all) => i === all.length - 1 || GEO_STEPS.includes(v.step)) : null;
+export const geoKey = () => (S.job && geoVersion() ? `${S.job.job_id}:${geoVersion().id}:${S.page}` : "");
+
+export const THIN_PRINT_MM = 0.25;   // cieńsza kreska na wydruku może się nie wydrukować (120 ppi = 0,21 mm na piksel)
+
+// Cienkie linie i tekst poza obszarem bezpiecznym (Tomasz 29.09 — „edge cases”). Liczone na wersji
+// z ostateczną geometrią; ramki w ułamkach strony. null — jeszcze nie wiadomo.
+export function layoutRisks() {
+  const a = S.factsCache[geoKey()];
+  if (!a || a.error || !S.job) return null;
+  const k = scaleK();
+  const thin = (a.thin_lines || []).filter((b) => b[4] === 0 || b[4] * k < THIN_PRINT_MM)
+    .map((b) => ({ box: b, w: b[4] * k }));
+  // obszar bezpieczny z wytycznych (czerwona ramka) — szablon leży na środku strony, jak na podglądzie
+  const t = template(), v = geoVersion(), pm = v?.pages_mm?.[S.page];
+  let unsafe = [], safeKnown = false;
+  if (t && t.safe_mm?.length && pm && !t.dims_missing) {
+    safeKnown = true;
+    const tw = t.page_width_pt * 25.4 / 72, th = t.page_height_pt * 25.4 / 72;
+    const ox = (pm[0] - tw) / 2, oy = (pm[1] - th) / 2, tol = 0.5;
+    const rects = t.safe_mm.map((r) => [r[0] + ox - tol, r[1] + oy - tol, r[2] + ox + tol, r[3] + oy + tol]);
+    unsafe = (a.text_boxes || []).filter((b) => {
+      const x0 = b[0] * pm[0], y0 = b[1] * pm[1], x1 = x0 + b[2] * pm[0], y1 = y0 + b[3] * pm[1];
+      if (x1 <= 0 || y1 <= 0 || x0 >= pm[0] || y0 >= pm[1]) return false;      // poza stroną — i tak się nie drukuje
+      return !rects.some((r) => x0 >= r[0] && y0 >= r[1] && x1 <= r[2] && y1 <= r[3]);
+    }).map((b) => ({ box: b }));
+  }
+  return { thin, unsafe, safeKnown };
+}
+
+// Ramki na podglądzie — każdy rodzaj tylko w SWOIM rozdziale (Tomasz 29.09: „ramki informacyjne
+// powinny się pojawiać tylko w danej kategorii”); który rozdział — main.currentChapter.
+export function riskMarks(ch) {
   const out = [];
   const a = S.analysisFor === factsKey() ? S.analysis : null;
-  for (const b of (a && !a.error ? a.white_overprint || [] : []).slice(0, 40))
-    out.push({ box: b, label: "biel z overprintem — zniknie" });
-  for (const b of inkNow()?.boxes || []) out.push({ box: b, label: `farba ${b[4]} %`, tone: "red" });
+  if (ch === "ch-fonts" || ch === "ch-flat")        // litery krojem zastępczym (krzywe i spłaszczenie je utrwalają)
+    for (const f of fontWarnings()) for (const b of f.boxes) out.push({ box: b, label: `${f.name} — krój zastępczy` });
+  if (ch === "ch-op")
+    for (const b of (a && !a.error ? a.white_overprint || [] : []).slice(0, 40))
+      out.push({ box: b, label: "biel z overprintem — może zniknąć" });
+  if (ch === "ch-color")
+    for (const b of inkNow()?.boxes || []) out.push({ box: b, label: `farba ${b[4]} %`, tone: "red" });
+  if (ch === "ch-qual") {                            // geometria jest już ostateczna
+    const L = layoutRisks();
+    for (const x of (L?.unsafe || []).slice(0, 30)) out.push({ box: x.box, label: "poza obszarem bezpiecznym" });
+    for (const x of (L?.thin || []).slice(0, 30))
+      out.push({ box: x.box, label: x.w === 0 ? "linia 0 mm (hairline)" : `linia ${x.w.toFixed(2).replace(".", ",")} mm` });
+  }
   return out;
 }

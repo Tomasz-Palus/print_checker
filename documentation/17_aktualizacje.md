@@ -811,3 +811,84 @@ Numery jak w `18_przeglad_kodu.md`.
     różnica 0.
   - Różnica widoczna w Photoshopie wynika więc z tego, jak Photoshop otwiera (rasteryzuje) każdy
     z PDF-ów, a nie z danych do druku.
+
+## 0.6.0 — po kolei z listy „co jeszcze do zrobienia” (Tomasz 29.09: „leć dalej po kolei”)
+
+- **C28 — klawiatura:**
+  - Okno pytania (`util.ask`): Enter i spacja działają na zaznaczony przycisk. Dawniej Enter zawsze
+    potwierdzał, nawet przy zaznaczonym „Zostaw” — można było tak stracić poprawki. Tab krąży
+    między dwoma przyciskami, Escape = „Zostaw”.
+  - Spacja na przycisku, linku, nagłówku rozdziału i w oknie pytania klika, a nie przełącza
+    przesuwania podglądu (`viewer.js`).
+  - Nagłówek rozdziału ma fokus (Tab) i rozwija się / zwija Enterem albo spacją; widoczna
+    obwódka fokusu.
+  - Sprawdzone (Playwright): Enter → Tak, Tab+Enter → Zostaw, Tab+spacja → Zostaw, Escape →
+    Zostaw, Enter na nagłówku rozwija rozdział.
+- **C20 — Ghostscript po zamknięciu okna:** każdy proces Ghostscripta trafia do rejestru
+  (`gs._track`), a przed `os._exit` `desktop._shutdown` zabija je (`gs.kill_all`) i procesy oceny
+  jakości. Na Windowsie procesy są też w „zadaniu” systemu (Job Object, KILL_ON_JOB_CLOSE) —
+  Windows zabija je sam, nawet gdy program padnie. `gs.run` przepisane na Popen (rejestr).
+  Sprawdzone: render w toku → `kill_all` → proces zakończony.
+- **C19 — jeden program naraz:** decyduje blokada pliku `adchecker.lock` w folderze użytkownika
+  (`instance.py`: `msvcrt.locking` / `fcntl.flock`, system zdejmuje ją sam po zakończeniu procesu),
+  a nie odpowiedź serwera w 1,5 s.
+  - Drugie uruchomienie otwiera działający program (port z `adchecker.port`) i niczego nie czyści.
+  - `python server.py` (run.bat) odmawia startu, gdy inny działa.
+  - Sprawdzone: drugi `server.py` → „już działa w innym oknie”, `work/` nietknięte.
+- **B18 (część):**
+  - Odinstalowanie usuwa `%LOCALAPPDATA%\adChecker` — pliki klientów z ostatniej sesji, pobrane
+    fonty i wytyczne, pamięć okna, dziennik (`adchecker.iss`, [UninstallDelete]). Aktualizacja nie
+    odinstalowuje, więc ustawienia przy aktualizacji zostają.
+  - `.gitignore`: `app/webview/`, `app/adchecker.lock`, `.port`, `.log*`.
+- **Cienkie linie i obszar bezpieczny** (rozdział Jakość wydruku, ramka `#quRisk`):
+  - `analyze.py` zbiera kreski cieńsze niż 0,25 mm w pliku (grubość × skala macierzy; „hairline”
+    0 zawsze) — `thin_lines`. Kreski w kolorach linii wytycznych są pomijane. Interfejs liczy
+    grubość na wydruku (× skala 1:10) i ostrzega poniżej 0,25 mm (`THIN_PRINT_MM`).
+  - Obszar bezpieczny: `guidelines.parse_template_page` zapisuje czerwone ramki (`safe_mm`,
+    PARSER_VERSION 5 — wytyczne parsują się na nowo). `analyze._text_boxes` daje wiersze
+    widocznego tekstu. `state.layoutRisks` sprawdza, czy każdy wiersz leży w obszarze bezpiecznym
+    (szablon na środku strony, jak na podglądzie). Liczone na wersji z ostateczną geometrią
+    (po Wymiarze, przed krzywymi i spłaszczeniem) — `geoVersion`, `loadGeoFacts`.
+  - Ramki na podglądzie („linia 0,10 mm”, „poza obszarem bezpiecznym”) i pozycje w „Pobierz”.
+    Tylko informacja — poprawia się w Wymiarze albo u klienta.
+  - Sprawdzone (Playwright, `Test_edge_linie_i_krawedz_adFrame_Smart_100x250.pdf`): 2 cienkie
+    linie (0,1 mm i hairline; 1 mm i 0,3 mm bez ostrzeżenia), 2 wiersze poza obszarem
+    bezpiecznym (15 mm od lewej, 20 mm od dołu), wiersze w środku bez ostrzeżenia.
+- **B16 — podpis aktualizacji:**
+  - `ed25519.py`: Ed25519 w czystym Pythonie, bez nowych bibliotek; zgodny z wektorem RFC 8032
+    i z biblioteką `cryptography`; weryfikacja ok. 5 ms.
+  - GitHub (`build.yml`) podpisuje SHA256SUMS.txt sekretem `ADCHECKER_SIGN_KEY` →
+    `SHA256SUMS.txt.sig`.
+  - Program z kluczem publicznym (`app/update_key.py`) instaluje tylko wydanie z poprawnym
+    podpisem. Klucz pusty = jak dotąd (tylko SHA-256).
+  - Zabezpieczenie przed zablokowaniem aktualizacji: gdy program ma klucz, a GitHub nie ma
+    sekretu (albo sekret nie pasuje) — wydanie się przerywa.
+  - Klucz tworzy Tomasz sam: `py packaging\klucz_aktualizacji.py` (klucz prywatny tylko na
+    ekranie → sekret na GitHubie + menedżer haseł). Na razie klucz jest PUSTY — podpis zadziała
+    od wersji, w której Tomasz go wpisze.
+  - Sprawdzone: podpis poprawny → przechodzi; podmieniony plik sum → „podpis się nie zgadza”;
+    brak podpisu → „nie jest podpisane”.
+- **B17 / C24 (część):**
+  - `build.yml`: domyślnie `contents: read`, zapis tylko w zadaniu „wydanie”;
+    `persist-credentials: false`.
+  - `concurrency` — dwa szybkie wypchnięcia czekają na siebie.
+  - Numer wersji z literami przerywa wydanie.
+  - Cicha instalacja aktualizacji pisze dziennik: `%LOCALAPPDATA%\adChecker\instalacja.log`
+    (`/LOG`).
+  - Zostaje: sumy kontrolne Ghostscripta i zależności, wersja Inno Setup.
+- **Rozdział Plik bez listy „Przygotowane przy wczytaniu”** (Tomasz 29.09: „ten tekst w rozdziale 1
+  jest niepotrzebny”). Warstwy, adnotacje, hasło do uprawnień i UserUnit program ustawia po cichu
+  (opis jest pod „?”). Zostaje tylko ostrzeżenie o pliku uszkodzonym i naprawionym przy otwarciu —
+  wtedy trzeba obejrzeć podgląd. `info.prepared` z serwera zostaje (do dziennika i na przyszłość).
+- **Ramki na podglądzie tylko w swoim rozdziale** (Tomasz 29.09: „ramki informacyjne powinny się
+  pojawiać tylko w danej kategorii … po przejściu do kolejnego rozdziału powinny znikać, a jak wracam
+  do danego rozdziału, mogą się znowu pojawiać”).
+  - `state.riskMarks(rozdział)`: fonty → Fonty i Spłaszczenie; biel z overprintem → Overprint;
+    za dużo farby → Kolory; cienkie linie i obszar bezpieczny → Jakość wydruku.
+  - `main.currentChapter()`: rozdział ręcznie rozwinięty nagłówkiem (`S.viewCh`, myszą albo
+    klawiaturą), przypięty (`S.pin`) albo ostatni widoczny. Nowy rozdział na końcu zeruje `S.viewCh`.
+  - Biel z overprintem: „może zniknąć” zamiast „zniknie”. Biel CMYK 0/0/0/0 znika na podglądzie;
+    biel w skali szarości Ghostscript drukuje, choć część RIP-ów kładzie ją tylko na kanał K —
+    pewne jest tylko „Wyłącz overprint”.
+  - Sprawdzone (Playwright): Kolory → „farba 400 %”, Overprint → tylko biel, Fonty → nic,
+    rozwinięcie Kolorów nagłówkiem → znowu farba, zwinięcie → nic.

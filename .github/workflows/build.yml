@@ -10,8 +10,14 @@ on:
     paths: ["app/**", "packaging/**", ".github/workflows/**"]
   workflow_dispatch:
 
+# Domyślnie tylko odczyt; zapis (wydanie) ma wyłącznie zadanie „wydanie” (przegląd kodu B17).
 permissions:
-  contents: write
+  contents: read
+
+# Dwa szybkie wypchnięcia nie mogą się wyprzedzić — drugie czeka, aż pierwsze skończy (C24).
+concurrency:
+  group: instalatory-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   GS_VERSION: "10.07.1"
@@ -23,6 +29,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -85,6 +93,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -121,8 +131,12 @@ jobs:
   wydanie:
     needs: [windows, macos]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           path: out
@@ -131,13 +145,41 @@ jobs:
       - name: Wydanie na GitHubie (tylko nowa wersja)
         env:
           GH_TOKEN: ${{ github.token }}
+          SIGN_KEY: ${{ secrets.ADCHECKER_SIGN_KEY }}
         run: |
           V=$(python3 -c "import re;print(re.search(r'VERSION\s*=\s*\"([^\"]+)\"',open('app/version.py',encoding='utf-8').read()).group(1))")
           if gh release view "v$V" >/dev/null 2>&1; then
             echo "Wersja $V jest już wydana — ta zmiana to TEST (instalatory w Artifacts tego przebiegu)."
             exit 0
           fi
+          # numer z literami (np. 0.6-rc1) po cichu zablokowałby aktualizacje na zawsze (C24)
+          if ! echo "$V" | grep -Eq '^[0-9]+(\.[0-9]+)*$'; then
+            echo "Numer wersji „$V” musi mieć same cyfry i kropki (np. 0.6.1)."; exit 1
+          fi
           mkdir -p rel && cp out/windows/*.exe out/macos/*.dmg rel/
           (cd rel && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          # Podpis pliku sum (B16): klucz prywatny tylko w sekretach GitHuba (ADCHECKER_SIGN_KEY),
+          # publiczny w programie (app/update_key.py). Program z kluczem nie zainstaluje wydania bez
+          # podpisu, więc gdy klucz jest w programie, a sekretu brak — przerywamy, zanim coś wyjdzie.
+          python3 - <<'PY'
+          import base64, os, sys
+          sys.path.insert(0, "app")
+          import ed25519, update_key
+          seed = os.environ.get("SIGN_KEY", "").strip()
+          pub = update_key.PUBLIC_KEY.strip()
+          if not seed:
+              if pub:
+                  sys.exit("Program ma klucz aktualizacji, a GitHub nie ma sekretu ADCHECKER_SIGN_KEY — wydanie bez podpisu zablokowałoby aktualizacje.")
+              print("Bez podpisu (brak klucza w programie i w sekretach).")
+              sys.exit(0)
+          seed = base64.b64decode(seed)
+          data = open("rel/SHA256SUMS.txt", "rb").read()
+          sig = ed25519.sign(seed, data)
+          if pub and ed25519.public_key(seed).hex() != pub:
+              sys.exit("Sekret ADCHECKER_SIGN_KEY nie pasuje do klucza w app/update_key.py.")
+          assert ed25519.verify(ed25519.public_key(seed), data, sig)
+          open("rel/SHA256SUMS.txt.sig", "wb").write(base64.b64encode(sig) + b"\n")
+          print("Podpisano SHA256SUMS.txt")
+          PY
           gh release create "v$V" --title "adChecker $V" --target "$GITHUB_SHA" \
             --notes-file packaging/INSTRUKCJA.md rel/*

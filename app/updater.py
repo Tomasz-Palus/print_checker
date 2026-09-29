@@ -3,7 +3,8 @@
 1. Raz na 6 h (i przy starcie) pytamy GitHuba o najnowsze wydanie (`version.REPO`).
 2. Gdy jest nowsze, a program jest ZAINSTALOWANY (paczka PyInstallera), w tle pobieramy
    instalator dla tego systemu i sprawdzamy jego sumę SHA-256 z pliku SHA256SUMS.txt w wydaniu —
-   uszkodzony albo podmieniony plik nie zostanie uruchomiony.
+   uszkodzony plik nie zostanie uruchomiony. Gdy program ma klucz (update_key.py), plik sum
+   musi mieć jeszcze poprawny podpis Ed25519 (SHA256SUMS.txt.sig) — podmieniony nie przejdzie.
 3. Nagłówek pokazuje przycisk „Zaktualizuj do X”. Kliknięcie: program uruchamia instalację
    i sam się zamyka; po instalacji nowa wersja startuje sama.
    - Windows: instalator Inno Setup po cichu (/VERYSILENT); uruchomienie po instalacji robi
@@ -74,6 +75,7 @@ def _check() -> None:
         _st["latest"], _st["url"] = latest, d.get("html_url")
         _st["asset"] = next(((n, u) for n, u in assets.items() if suffix and n.endswith(suffix)), None)
         _st["sums"] = assets.get("SHA256SUMS.txt")
+        _st["sig"] = assets.get("SHA256SUMS.txt.sig")
         go = can_self_update() and _newer(latest, VERSION) and _st["asset"] and _st["status"] in ("idle", "error")
         if go:
             _st.update(status="downloading", progress=0, error=None)
@@ -90,12 +92,14 @@ def _download() -> None:
         want = None
         if _st["sums"]:
             with _get(_st["sums"]) as r:
-                for line in r.read().decode("utf-8", "replace").splitlines():
+                _st["sums_raw"] = r.read()
+                for line in _st["sums_raw"].decode("utf-8", "replace").splitlines():
                     parts = line.split()
                     if len(parts) == 2 and parts[1].lstrip("*") == name:
                         want = parts[0].lower()
         if not want:
             raise RuntimeError("wydanie nie ma sumy kontrolnej instalatora")
+        _check_signature()
         h = hashlib.sha256()
         with _get(url, 60) as r, open(dst + ".part", "wb") as f:
             total = int(r.headers.get("Content-Length") or 0)
@@ -121,6 +125,26 @@ def _download() -> None:
         print(f"[aktualizacja] błąd pobierania: {e}")
 
 
+def _check_signature() -> None:
+    """Podpis pliku sum (SHA256SUMS.txt.sig, Ed25519) kluczem wpisanym w program (B16).
+    Suma SHA-256 sama chroni tylko przed uszkodzeniem: plik sum leży w tym samym wydaniu co
+    instalator, więc ten, kto przejmie konto GitHuba, podmieniłby oba. Podpisu bez klucza
+    prywatnego (sekret w GitHubie, nie w repozytorium) nie podrobi."""
+    import base64
+    import ed25519
+    import update_key
+    if not update_key.PUBLIC_KEY:
+        print("[aktualizacja] program nie ma klucza — sprawdzam tylko sumę SHA-256")
+        return
+    if not _st.get("sig"):
+        raise RuntimeError("wydanie nie jest podpisane — nie instaluję")
+    with _get(_st["sig"]) as r:
+        sig = base64.b64decode(r.read().strip())
+    if not ed25519.verify(bytes.fromhex(update_key.PUBLIC_KEY), _st.get("sums_raw") or b"", sig):
+        raise RuntimeError("podpis wydania się nie zgadza — nie instaluję")
+    print("[aktualizacja] podpis wydania poprawny")
+
+
 def state() -> dict:
     """Stan dla nagłówka (/api/version). Przy okazji — raz na 6 h — sprawdzenie w tle."""
     if time.time() - _st["checked"] > CHECK_EVERY_S:
@@ -142,7 +166,10 @@ def install() -> str | None:
     try:
         if sys.platform == "win32":
             flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-            subprocess.Popen([f, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"], creationflags=flags,
+            # dziennik instalacji obok dziennika programu — nieudana cicha instalacja (np. antywirus)
+            # nie może zostawić zepsutego programu bez śladu (przegląd kodu C24)
+            log = os.path.join(paths.USER_DIR, "instalacja.log")
+            subprocess.Popen([f, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", f"/LOG={log}"], creationflags=flags,
                              close_fds=True)
             return None
         if sys.platform == "darwin":

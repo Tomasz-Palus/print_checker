@@ -53,3 +53,7 @@ Filename: "{app}\adChecker.exe"; Flags: nowait skipifnotsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
+; pliki użytkownika: work\ (pliki klientów z ostatniej sesji), pobrane fonty i wytyczne, pamięć okna
+; z podglądami, dziennik — po odinstalowaniu nic z plików klientów nie zostaje (przegląd kodu B18).
+; Aktualizacja nie odinstalowuje, więc ustawienia przy aktualizacji zostają.
+Type: filesandordirs; Name: "{localappdata}\adChecker"

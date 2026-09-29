@@ -8,7 +8,7 @@ export const HELP = {
     Przy wczytaniu program ustawia plik tak, jak się <b>wydrukuje</b>: warstwy ukryte albo oznaczone
     „nie drukuj” i niedrukowane komentarze Acrobata usuwa, a drukowane stemple i pola wpisuje w stronę
     (różne drukarnie traktują je różnie). Zdejmuje też hasło do uprawnień i przelicza stronę zapisaną
-    w powiększonej jednostce (UserUnit, strony ponad 5 m). Co zmienił — pisze pod plikiem.
+    w powiększonej jednostce (UserUnit, strony ponad 5 m). Dzieje się to samo, bez pytania.
     PDF-a z hasłem do otwarcia albo zniszczonego otworzyć się nie da — trzeba poprosić klienta o nowy.`,
   product: `Program zgaduje produkt z nazwy pliku, z szablonu zostawionego w projekcie albo z wymiaru
     strony — ale zawsze trzeba go <b>potwierdzić</b>. Od produktu zależą wytyczne: wymiar,
@@ -80,8 +80,8 @@ export const HELP = {
     Wytyczne Adsystem overprintu nie dopuszczają. „Wyłącz overprint" sprawia, że wydrukuje się
     to, co widać w projekcie; suwak porówna wydruk przed i po. „Zostaw jak jest" zostawia
     overprint.<br><br>
-    <b>Biel z overprintem</b> w druku znika zupełnie (biała farba nie istnieje — biel to brak farby,
-    a overprint każe nie zakrywać tła). Program zaznacza takie miejsca na podglądzie.`,
+    <b>Biel z overprintem</b> w druku może zniknąć zupełnie (biała farba nie istnieje — biel to brak farby,
+    a overprint każe nie zakrywać tła). Program zaznacza takie miejsca na podglądzie (ramki widać w tym rozdziale).`,
   fonts: `Tekst zapisany fontem drukarnia musi „złożyć" swoim programem — gdy fontu brakuje albo
     jest inna wersja, litery się zmieniają. <b>Krzywe</b> to gotowe kształty liter: wyglądają
     identycznie, tylko nie da się ich już edytować jako tekstu.<br><br>
@@ -110,6 +110,10 @@ export const HELP = {
     „Pokaż na podglądzie" przechodzi po takich miejscach (strzałki ← →) w <b>rzeczywistej
     wielkości wydruku</b>. Wektor (napisy, kształty) nie ma rozdzielczości i nie jest oceniany.
     Lupki, rzeczywistą wielkość i nawigator masz w panelu nad podglądem — tylko w tym rozdziale.<br><br>
+    Program sprawdza też <b>cienkie linie</b> (cieńsze niż 0,25 mm na wydruku albo „hairline” o grubości 0 —
+    mogą się nie wydrukować) i <b>tekst poza obszarem bezpiecznym</b> (czerwona ramka z wytycznych — przy
+    krawędzi napis może zostać ucięty albo schowany w ramie). Zaznacza je na podglądzie; poprawić można
+    w rozdziale Wymiar wydruku (przesunięcie, wielkość) albo u klienta.<br><br>
     <b>Uwaga:</b> ocena jest automatyczna i orientacyjna. Program może ocenić niektóre obrazy
     inaczej niż grafik i nie wychwyci każdego problemu — w razie wątpliwości poproś grafika
     o sprawdzenie.`,

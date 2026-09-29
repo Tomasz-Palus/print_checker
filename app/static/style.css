@@ -74,6 +74,8 @@ a { color: var(--accent); }
 .ch.past .rowsel, .ch.past .mini, .ch.past .now-only { display: none !important; }
 @media (prefers-reduced-motion: reduce) { .ch-b, .ch.enter { transition: none !important; animation: none !important; } }
 .ch[data-st="done"] .ch-h { cursor: pointer; }
+.ch-h:focus { outline: none; }
+.ch-h:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: -2px; border-radius: 10px; }
 .ch[data-st="done"] .ch-ico { background: var(--ok-bg); color: var(--ok); }
 .ch[data-st="todo"] .ch-ico { background: var(--warn-bg); color: var(--warn); }
 .ch[data-st="open"] .ch-ico, .ch[data-st="todo"] { }

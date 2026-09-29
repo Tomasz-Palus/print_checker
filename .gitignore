@@ -16,3 +16,8 @@
 /app/data/*.tmp
 __pycache__/
 *.pyc
+# pliki, które program zapisuje obok siebie przy uruchomieniu z repozytorium (przegląd kodu B18, C19)
+/app/webview/
+/app/adchecker.lock
+/app/adchecker.port
+/app/adchecker.log*
