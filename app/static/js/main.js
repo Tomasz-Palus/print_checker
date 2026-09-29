@@ -1,6 +1,6 @@
 // Start programu: wgrywanie pliku, jedna pętla rysowania rozdziałów i podglądu, ustawienia.
 import { $, esc, fmtMm, fmtBytes, api, ask, chapter, initChapters, plural, shown, revealChapters } from "./util.js";
-import { S, changed, onChange, resetJobState, head, template, scaleK, printMm, isPdf, sizeSettled, factsKey, STEP_NAME, STEP_CH, stepIndex } from "./state.js";
+import { S, changed, onChange, resetJobState, head, template, scaleK, printMm, isPdf, sizeSettled, factsKey, STEP_NAME, STEP_CH, stepIndex, fontWarnings, printRisks, printSettled } from "./state.js";
 import { HELP } from "./help.js";
 import * as viewer from "./viewer.js";
 import * as product from "./product.js";
@@ -118,6 +118,24 @@ async function loadAnalysis() {
   changed();
 }
 
+// Suma farb (ink.py): od Symulacji wydruku, dla ostatniej wersji — render Ghostscripta, więc
+// dopiero gdy podgląd i tak pokazuje wydruk (Tomasz 29.09, „edge cases”).
+let inkBusy = "";
+async function loadInk() {
+  const key = factsKey();
+  if (!isPdf() || !printSettled() || !key || S.ink.key === key || inkBusy === key) return;
+  inkBusy = key;
+  const v = head();
+  try {
+    const d = await api(`/api/jobs/${S.job.job_id}/ink?v=${v.id}&page=${S.page}`);
+    if (factsKey() === key) S.ink = { key, data: d, err: "" };
+  } catch (e) {
+    if (factsKey() === key) S.ink = { key, data: null, err: e.message };
+  }
+  if (inkBusy === key) inkBusy = "";
+  changed();
+}
+
 // ------------------------------------------------------------------ miniatury stron
 function thumbs() {
   const f = S.job.file, el = $("thumbs");
@@ -160,6 +178,16 @@ function printFlags() {
 }
 
 function scene() {
+  const sc = sceneBase();
+  if (sc && !sizeScene()) {
+    const pm = pageMmOf(head());
+    const r = (b) => ({ x: b[0] * pm.w, y: b[1] * pm.h, w: b[2] * pm.w, h: b[3] * pm.h });
+    sc.marks = fontWarnings().flatMap((f) => f.boxes.map((b) => ({ r: r(b), label: `${f.name} — krój zastępczy` })))
+      .concat(printRisks().map((x) => ({ r: r(x.box), label: x.label, tone: x.tone })));
+  }
+  return sc;
+}
+function sceneBase() {
   if (!S.job) return null;
   const vs = S.job.versions, hi = vs.length - 1;
   const t = template();
@@ -213,6 +241,16 @@ function kOf(v) {
   return pr ? Math.max(pr.w, pr.h) / Math.max(pm.w, pm.h) : scaleK();
 }
 
+// Co program zmienił w pliku przy wgraniu (prepare.py): warstwy, adnotacje, hasło, UserUnit,
+// naprawiony plik — żeby laik wiedział, że podgląd pokazuje plik „jak do druku” (Tomasz 29.09)
+function filePrep() {
+  const box = $("filePrep"), list = S.job?.file?.prepared || [];
+  box.hidden = !list.length;
+  if (!list.length) return;
+  box.innerHTML = `<b>Przygotowane przy wczytaniu</b> — podgląd pokazuje plik tak, jak się wydrukuje:`
+    + `<ul class="prep">${list.map((t) => `<li>${esc(t[0].toUpperCase() + t.slice(1))}.</li>`).join("")}</ul>`;
+}
+
 function fileLine() {
   const f = S.job.file, a = S.analysis;
   let typ = "";
@@ -221,11 +259,12 @@ function fileLine() {
     typ = a.kind === "raster" ? `obraz ${a.meta?.format || ""}` : r.has_images ? "wektor + obrazy" : "sam wektor";
   }
   const who = a && a.meta ? [a.meta.creator, a.meta.producer].filter(Boolean).join(" · ") : "";
-  // nieosadzony font: Ghostscript i MuPDF rysują litery ZAMIENNIKIEM — podgląd kłamie (Tomasz 29.09)
-  const miss = a && !a.error ? (a.fonts_missing || []).filter((x) => x.visible).map((x) => x.name.split("+").pop()) : [];
+  // nieosadzony font: litery rysuje (i wydrukuje) krój ZASTĘPCZY — ostrzeżenie + ramki na podglądzie (Tomasz 29.09)
+  const fw = fontWarnings(), miss = fw.map((x) => x.name);
   const warn = miss.length ? ` <small class="vwarn" title="${esc(`Brak fontu w pliku: ${miss.join(", ")}. `
-    + "Podgląd rysuje te litery innym krojem — prawdziwy zobaczysz po zamianie na krzywe (rozdział Fonty).")}">`
-    + `· ⚠ brak fontu ${esc(miss.slice(0, 2).join(", "))}${miss.length > 2 ? "…" : ""} — litery w podglądzie zastępcze</small>` : "";
+    + "Te litery są narysowane krojem zastępczym (zaznaczone na podglądzie) — na wydruku wyjdą inne niż w projekcie, "
+    + "a przy niektórych plikach nawet krzaczki.")}">`
+    + `· ⚠ brak fontu ${esc(miss.slice(0, 2).join(", "))}${miss.length > 2 ? "…" : ""} — krój zastępczy</small>` : "";
   $("vName").innerHTML = `<b>${esc(f.name)}</b>${typ ? ` <small>· ${esc(typ)}</small>` : ""}${warn}`;
   $("vName").title = [f.name, typ, who].filter(Boolean).join(" · ");
 }
@@ -304,7 +343,8 @@ function render() {
   const has = !!S.job;
   $("vEmpty").hidden = has; $("vMain").hidden = !has;
   chapter("ch-file", has ? "done" : "open", has ? esc(S.job.file.name) : "");
-  if (has) { loadAnalysis(); fileLine(); }
+  if (has) { loadAnalysis(); loadInk(); fileLine(); }
+  filePrep();
   product.renderPage();
   product.renderProduct();
   product.renderRole();

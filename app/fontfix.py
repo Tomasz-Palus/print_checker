@@ -4,7 +4,8 @@ Ustalenie Tomasza (24.09): program ma pozwolić osobie nietechnicznej przygotowa
 druku bez grafika DTP. Font OSADZONY nie jest problemem — kształty liter są w pliku (tak samo
 korzysta z nich Photoshop). Problemem jest font NIEOSADZONY: w pliku jest tylko nazwa,
 bez kształtów. Test w Photoshopie (pliki `Test_font_*.pdf`): osadzony Lora Italic → poprawny,
-nieosadzony → same kropki. Krój zastępczy jest wykluczony.
+nieosadzony → same kropki. Krój zastępczy — tylko w ostateczności, z ostrzeżeniem
+(od 29.09: krzywe i spłaszczenie idą dalej, podgląd zaznacza takie litery).
 
 Co robimy, po kolei:
   1. `text_usage` — czy tekst w tym foncie w ogóle się DRUKUJE. Tekst w trybie niewidocznym

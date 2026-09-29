@@ -123,7 +123,7 @@ def _mat_mul(m, n):
 
 
 def normalize_geometry(path: str) -> tuple[str, list]:
-    """Strona z /Rotate albo z CropBoxem mniejszym od MediaBoxa → zwykła strona: MediaBox od (0, 0)
+    """Strona z /Rotate, z CropBoxem mniejszym od MediaBoxa albo z UserUnit → zwykła strona: MediaBox od (0, 0)
     równy temu, co widać, bez /Rotate. Wygląd strony (i wydruk) się nie zmienia.
 
     Po co: MuPDF liczy stronę z obrotem i CropBoxem, a pikepdf, Ghostscript i nasze obliczenia
@@ -156,7 +156,15 @@ def normalize_geometry(path: str) -> tuple[str, list]:
             if rot % 90:
                 rot = 0
             cropped = any(abs(a - b) > 0.01 for a, b in zip(v, mb))
-            if not rot and not cropped:
+            # UserUnit (strony ponad 5 m z Illustratora / Acrobata): jednostka strony = U punktów.
+            # MuPDF i Ghostscript ją uwzględniają, pikepdf i nasze obliczenia (spady, szablon,
+            # przeskalowanie) — nie, więc wymiar wychodził U razy za mały. Wpisujemy ją w treść.
+            try:
+                uu = float(o.get("/UserUnit", 1) or 1)
+            except Exception:
+                uu = 1.0
+            uu = uu if 0.01 < uu < 1000 and abs(uu - 1) > 1e-6 else 1.0
+            if not rot and not cropped and uu == 1.0:
                 continue
             x0, y0, x1, y1 = v
             w, h = x1 - x0, y1 - y0
@@ -168,6 +176,8 @@ def normalize_geometry(path: str) -> tuple[str, list]:
                 m, W, H = [0, 1, -1, 0, y1, -x0], h, w
             else:
                 m, W, H = [1, 0, 0, 1, -x0, -y0], w, h
+            if uu != 1.0:
+                m, W, H = _mat_mul(m, [uu, 0, 0, uu, 0, 0]), W * uu, H * uu
             cmd = ("q " + " ".join(f"{x:.6f}".rstrip("0").rstrip(".") or "0" for x in m) + " cm\n").encode()
             page.contents_add(pdf.make_stream(cmd), prepend=True)
             page.contents_add(pdf.make_stream(b"\nQ\n"), prepend=False)
@@ -196,7 +206,7 @@ def normalize_geometry(path: str) -> tuple[str, list]:
                 if b:
                     o[key] = pikepdf.Array(_map_box(m, b, W, H))
             o["/MediaBox"] = pikepdf.Array([0, 0, W, H])
-            for key in ("/CropBox", "/Rotate"):
+            for key in ("/CropBox", "/Rotate", "/UserUnit"):
                 if key in o:
                     del o[key]
             # adnotacje: nowe położenie; wygląd obrócony razem ze stroną
@@ -220,7 +230,8 @@ def normalize_geometry(path: str) -> tuple[str, list]:
                 except Exception:
                     pass
             notes.append(f"str. {i + 1}: " + ", ".join(
-                ([f"obrót {rot}° wpisany w stronę"] if rot else []) + (["przycięta do CropBox"] if cropped else [])))
+                ([f"obrót {rot}° wpisany w stronę"] if rot else []) + (["przycięta do CropBox"] if cropped else [])
+                + ([f"UserUnit {uu:g} wpisany w stronę"] if uu != 1.0 else [])))
         if not notes:
             return path, []
         out = os.path.splitext(path)[0] + "_geom.pdf"

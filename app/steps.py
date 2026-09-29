@@ -633,8 +633,8 @@ def step_overprint(src, dst, p, job) -> dict:
 def _prepare_fonts(src: str, dst: str, page: int | None = None) -> tuple[str, dict]:
     """Nieosadzone fonty PRZED Ghostscriptem (fontfix.py): tekst niewidoczny pomijamy,
     widoczny — pobieramy prawdziwy font z Google Fonts i osadzamy. Czego się nie da, Ghostscript
-    poszuka jeszcze w fontach systemu. Kroju zastępczego nie dopuszczamy (decyzja Tomasza).
-    Zwraca (plik dla Ghostscripta, raport)."""
+    poszuka jeszcze w fontach systemu. Gdy i tam nie ma, bierze krój zastępczy — kroki to
+    zgłaszają (`fonts_subst`, ostrzeżenie + ramki na podglądzie; Tomasz 29.09). Zwraca (plik dla Ghostscripta, raport)."""
     try:
         import fontfix
         # tylko fonty strony, która idzie do druku — wcześniej brak fontu na INNEJ stronie potrafił
@@ -649,16 +649,16 @@ def _prepare_fonts(src: str, dst: str, page: int | None = None) -> tuple[str, di
     return (tmp if r.get("osadzone") else src), r
 
 
-def _font_refusal(what: str, names: list, info: dict) -> str:
-    """Komunikat dla osoby nietechnicznej: czego brakuje i o co poprosić klienta."""
-    why = {n.split("+")[-1]: p for n, p in (info or {}).get("brak", [])}
-    det = "; ".join(f"{n}: {why[n]}" for n in (x.split("+")[-1] for x in names) if n in why)
-    return (f"Nie {what}: w pliku brakuje fontu {', '.join(n.split('+')[-1] for n in names[:6])}. "
-            "Nie ma go w pliku (nie jest osadzony), w systemie ani w Google Fonts, a krój zastępczy "
-            "zmieniłby tekst." + (f" ({det})" if det else "")
-            + " Najlepiej poproś klienta o PDF z osadzonymi fontami — w Illustratorze / InDesignie: Zapisz "
-              "jako / Eksportuj → Adobe PDF, ustawienie „Wysoka jakość druku”. Możesz też kliknąć "
-              "„Zostaw jak jest” i iść dalej — wtedy drukarnia podstawi swój krój.")
+def _subst_report(src: str, page: int, subs: list) -> list:
+    """Fonty, za które Ghostscript wziął krój zastępczy: [{name, boxes}] — boxes = gdzie na stronie
+    stoi tekst w tym foncie (ułamki strony). Idzie do wyniku kroku, żeby podgląd i „Pobierz” mogły
+    ostrzegać także PO zamianie (w pliku nie ma już wtedy fontu, więc analiza nic by nie widziała)."""
+    if not subs:
+        return []
+    import analyze
+    names = [n.split("+")[-1] for n in subs]
+    boxes = analyze.font_boxes(src, page, names)
+    return [{"name": n, "boxes": boxes.get(analyze._fkey(n), [])} for n in names]
 
 
 def _page_fonts(path: str, page: int) -> list[str]:
@@ -675,7 +675,8 @@ def step_outline(src, dst, p, job) -> dict:
     Kształty liter biorą się z fontu OSADZONEGO W PLIKU, więc wynik jest identyczny z
     oryginałem także wtedy, gdy nikt nie ma tego fontu zainstalowanego (zmierzone: różnica
     0,002–0,07 % pikseli, tyle co wygładzanie krawędzi liter). Font NIEOSADZONY: najpierw
-    Google Fonts, potem fonty systemu; krój zastępczy = odmowa (utrwalilibyśmy przypadkowy font)."""
+    Google Fonts, potem fonty systemu; gdy nigdzie go nie ma — krój zastępczy z ostrzeżeniem
+    (`fonts_subst`; Tomasz 29.09: ma się dać, ale widocznie)."""
     page = int(p.get("page", 0))
     before = _page_fonts(src, page)
     if not before:
@@ -690,8 +691,9 @@ def step_outline(src, dst, p, job) -> dict:
         _rm(gs_src if gs_src != src else None)
     try:
         subs = gs.substituted((r.stdout or "") + "\n" + (r.stderr or ""), finfo.get("niewidoczne", []))
-        if subs:
-            raise ValueError(_font_refusal("zamieniam na krzywe", subs, finfo))
+        # Decyzja Tomasza (29.09): zamiana ma się udać także bez fontu — z ostrzeżeniem i zaznaczeniem
+        # na podglądzie, które litery mają kształt kroju zastępczego (wcześniej: odmowa)
+        warn = _subst_report(src, page, subs)
         left = _page_fonts(out, 0)
         if left:
             raise ValueError("Po zamianie na stronie dalej są fonty (" + ", ".join(left[:4])
@@ -706,7 +708,10 @@ def step_outline(src, dst, p, job) -> dict:
         text += f"; {', '.join(got[:4])} nie był(y) osadzone — pobrane z Google Fonts i osadzone"
     if finfo.get("niewidoczne"):
         text += f"; {', '.join(finfo['niewidoczne'][:4])} — tekst niewidoczny, nie drukuje się"
-    return {"text": text}
+    if warn:
+        text += ("; UWAGA: " + ", ".join(w["name"] for w in warn[:4])
+                 + " nie było w pliku ani nigdzie indziej — te litery mają kształt kroju zastępczego")
+    return {"text": text, "fonts_subst": warn}
 
 
 # ----------------------------------------------------------------------------
@@ -867,8 +872,7 @@ def step_flatten(src, dst, p, job) -> dict:
         if err:
             raise ValueError("Ghostscript nie dał rady spłaszczyć strony. Komunikat: " + err)
         subs = gs.substituted(log, finfo.get("niewidoczne", []))
-        if subs:
-            raise ValueError(_font_refusal("spłaszczam", subs, finfo))
+        warn = _subst_report(src, page, subs)       # jak przy krzywych: ostrzeżenie zamiast odmowy
         with open(zpath, "rb") as fh:
             raw = fh.read()
         px = (pw_, ph_)
@@ -895,7 +899,10 @@ def step_flatten(src, dst, p, job) -> dict:
     if plan["cut"]:
         text += (f" — strona jest tak duża, że zamiast {plan['want_ppi']} ppi wyszło {plan['ppi']} ppi "
                  f"(sufit {FLATTEN_MAX_MPX} megapikseli)")
-    return {"text": text}
+    if warn:
+        text += ("; UWAGA: " + ", ".join(w["name"] for w in warn[:4])
+                 + " nie było w pliku ani nigdzie indziej — te litery mają kształt kroju zastępczego")
+    return {"text": text, "fonts_subst": warn}
 
 
 STEPS = {"frames": step_frames, "trim": step_trim, "resize": step_resize, "cmyk": step_cmyk,

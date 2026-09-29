@@ -28,6 +28,7 @@ export const S = {
   choice: {},              // wybór w rzędach (Kolory, Overprint): {act, profile, seen}
   fscan: { key: "", data: null, err: "" },   // wynik szukania szablonu z wytycznych
   qual: { key: "", data: null, err: "" },    // ocena jakości wydruku (etap 4)
+  ink: { key: "", data: null, err: "" },     // suma farb na wydruku (ink.py) — ostatnia wersja
   accShown: null,          // wersja, dla której w „Akceptacji" obejrzano wydruk przed i po
   sz: null,                // ustawienia rozdziału „Wymiar" (suwaki)
   sizeEdit: false,         // wymiar się zgadza, ale użytkownik chce poprawić kadr
@@ -215,6 +216,24 @@ export function transparencyKinds(a = facts()) {
   return [...out];
 }
 
+// Litery bez fontu (Tomasz 29.09: „da się iść dalej, ale ma być ostrzeżenie i widać to na podglądzie”):
+// [{name, boxes:[[fx,fy,fw,fh]], baked}] — `baked` = krój zastępczy już utrwalony (krzywe / spłaszczenie
+// — wynik kroku `fonts_subst`), inaczej font dalej brakuje (analiza ostatniej wersji `fonts_missing`).
+export function fontWarnings() {
+  if (!S.job) return [];
+  const out = [], seen = new Set();
+  for (const v of S.job.versions) for (const f of v.fonts_subst || []) {
+    const n = f.name.split("+").pop();
+    if (!seen.has(n)) { seen.add(n); out.push({ name: n, boxes: f.boxes || [], baked: true }); }
+  }
+  const a = S.analysisFor === factsKey() ? S.analysis : null;
+  for (const f of (a && !a.error ? a.fonts_missing || [] : [])) {
+    const n = f.name.split("+").pop();
+    if (f.visible && !seen.has(n)) { seen.add(n); out.push({ name: n, boxes: f.boxes || [], baked: false }); }
+  }
+  return out;
+}
+
 // „Symulacja wydruku” (Tomasz 28.09): od tego rozdziału podgląd pokazuje WYDRUK (kolory z drukarki
 // i overprint), a każdy dalszy suwak porównuje wydruk przed krokiem z wydrukiem po nim. Domknięty
 // przyciskiem „Rozumiem, dalej” — laik ma to przeczytać, a nie przelecieć.
@@ -247,4 +266,20 @@ export function flattenPlan() {
   const cut = mpx > 400;
   if (cut) dpi *= Math.sqrt(400 / mpx);
   return { ppi: Math.round(dpi / k), want: ppi, cut, px: [Math.round(p.w / 25.4 * dpi), Math.round(p.h / 25.4 * dpi)] };
+}
+
+// Suma farb ostatniej wersji (ink.py) albo null, gdy jeszcze nie policzona / nieaktualna.
+export function inkNow() {
+  return S.ink.key === factsKey() && S.ink.data && !S.ink.data.skip ? S.ink.data : null;
+}
+
+// Miejsca, które znikną albo są ryzykowne w druku — ramki na podglądzie obok brakujących fontów:
+// biel z overprintem (analiza ostatniej wersji) i za dużo farby (ink.py).
+export function printRisks() {
+  const out = [];
+  const a = S.analysisFor === factsKey() ? S.analysis : null;
+  for (const b of (a && !a.error ? a.white_overprint || [] : []).slice(0, 40))
+    out.push({ box: b, label: "biel z overprintem — zniknie" });
+  for (const b of inkNow()?.boxes || []) out.push({ box: b, label: `farba ${b[4]} %`, tone: "red" });
+  return out;
 }

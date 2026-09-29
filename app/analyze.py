@@ -87,6 +87,8 @@ class Analyzer:
         self.images = []                # dicty obrazów (po xref, z listą umiejscowień)
         self._img_by_xref: dict[int, dict] = {}
         self.overprint_uses = 0
+        self.white_op = []              # biały z overprintem — w druku znika: [x0,y0,x1,y1] w pt strony
+        self._ov_in = {}                # stan overprintu przekazywany do formy
         self.transparency = Counter()   # rodzaj -> liczba
         self.inline_images = 0
         self.unknown_ops = 0
@@ -207,6 +209,17 @@ class Analyzer:
             g = gsd[name]
             if bool(g.get("/OP", False)) or bool(g.get("/op", False)):
                 self.overprint_uses += 1
+            ov = {}
+            if "/OP" in g:
+                ov["OP"] = bool(g.get("/OP"))
+                ov["op"] = bool(g.get("/OP"))           # bez /op obowiązuje /OP (PDF 1.7, 8.4.5)
+            if "/op" in g:
+                ov["op"] = bool(g.get("/op"))
+            if "/OPM" in g:
+                try:
+                    ov["OPM"] = int(g.get("/OPM"))
+                except Exception:
+                    pass
             ca, CA = g.get("/ca", 1), g.get("/CA", 1)
             try:
                 if float(ca) < 1 or float(CA) < 1:
@@ -219,8 +232,38 @@ class Analyzer:
             sm = g.get("/SMask")
             if sm is not None and not (isinstance(sm, pikepdf.Name) and str(sm) == "/None"):
                 self.transparency["maska miękka (ExtGState)"] += 1
+            return ov
         except Exception:
             pass
+        return {}
+
+    # --- biały z overprintem
+    def _white_hit(self, box):
+        if box and len(self.white_op) < 200:
+            self.white_op.append([round(v, 2) for v in box])
+
+    @staticmethod
+    def _text_box(operands, ctm, tm, size):
+        """Przybliżony prostokąt napisu (wystarczy do ramki na podglądzie)."""
+        n = 0
+        for x in operands:
+            try:
+                for y in x:
+                    try:
+                        n += len(bytes(y))
+                    except Exception:
+                        pass
+            except TypeError:
+                try:
+                    n += len(bytes(x))
+                except Exception:
+                    pass
+        w, h = max(n, 1) * size * 0.55, size
+        m = _mul(tm, ctm)
+        pts = [(0, -0.2 * h), (w, -0.2 * h), (0, h), (w, h)]
+        xs = [m[0] * x + m[2] * y + m[4] for x, y in pts]
+        ys = [m[1] * x + m[3] * y + m[5] for x, y in pts]
+        return [min(xs), min(ys), max(xs), max(ys)]
 
     # --- obrazy
     def _image(self, xobj, ctm, resources, name, inline=False):
@@ -299,39 +342,77 @@ class Analyzer:
         fill_cs = {"family": "Gray"}   # domyślnie DeviceGray
         stroke_cs = {"family": "Gray"}
         fill_pattern_cs = None
+        # biały z overprintem (Tomasz 29.09 — „edge cases”): stan overprintu, kolor i obrys ścieżki
+        ov = dict(self._ov_in)
+        fill_v, stroke_v, tr = [0.0], [0.0], 0
+        tm, tsize = [1, 0, 0, 1, 0, 0], 12.0
+        pbox = None
         for operands, op in ops:
             o = str(op)
             try:
+                if o in ("m", "l", "c", "v", "y", "re"):
+                    vals = [float(x) for x in operands]
+                    if o == "re":
+                        x, y, w, h = vals
+                        vals = [x, y, x + w, y + h]
+                    for j in range(0, len(vals) - 1, 2):
+                        px, py = ctm[0] * vals[j] + ctm[2] * vals[j + 1] + ctm[4], ctm[1] * vals[j] + ctm[3] * vals[j + 1] + ctm[5]
+                        pbox = [px, py, px, py] if pbox is None else [min(pbox[0], px), min(pbox[1], py),
+                                                                      max(pbox[2], px), max(pbox[3], py)]
+                    continue
+                if o in ("f", "F", "f*", "B", "B*", "b", "b*", "S", "s", "n"):
+                    if pbox is not None and o != "n":
+                        if o not in ("S", "s") and ov.get("op") and _white(fill_cs, fill_v, ov.get("OPM", 0)):
+                            self._white_hit(pbox)
+                        elif o not in ("f", "F", "f*") and ov.get("OP") and _white(stroke_cs, stroke_v, ov.get("OPM", 0)):
+                            self._white_hit(pbox)
+                    pbox = None
+                    continue
+                if o in ("Tj", "TJ", "'", '"') and tr not in (3, 7) and ov.get("op" if tr in (0, 2, 4, 6) else "OP"):
+                    cs_, v_ = (fill_cs, fill_v) if tr in (0, 2, 4, 6) else (stroke_cs, stroke_v)
+                    if _white(cs_, v_, ov.get("OPM", 0)):
+                        self._white_hit(self._text_box(operands, ctm, tm, tsize))
+                if o == "Tr":
+                    tr = int(operands[0])
+                elif o == "BT":
+                    tm = [1, 0, 0, 1, 0, 0]
+                elif o == "Tm":
+                    tm = [float(x) for x in operands]
+                elif o in ("Td", "TD"):
+                    tm = [tm[0], tm[1], tm[2], tm[3], tm[4] + float(operands[0]) * tm[0] + float(operands[1]) * tm[2],
+                          tm[5] + float(operands[0]) * tm[1] + float(operands[1]) * tm[3]]
                 if o == "q":
-                    stack.append((ctm, fill_cs, stroke_cs))
+                    stack.append((ctm, fill_cs, stroke_cs, dict(ov), fill_v, stroke_v))
                 elif o == "Q":
                     if stack:
-                        ctm, fill_cs, stroke_cs = stack.pop()
+                        ctm, fill_cs, stroke_cs, ov, fill_v, stroke_v = stack.pop()
                 elif o == "cm":
                     m = [float(x) for x in operands]
                     ctm = _mul(m, ctm)
                 elif o == "g":
-                    fill_cs = {"family": "Gray"}; self._record(fill_cs, "fill")
+                    fill_cs = {"family": "Gray"}; self._record(fill_cs, "fill"); fill_v = _nums(operands)
                 elif o == "G":
-                    stroke_cs = {"family": "Gray"}; self._record(stroke_cs, "stroke")
+                    stroke_cs = {"family": "Gray"}; self._record(stroke_cs, "stroke"); stroke_v = _nums(operands)
                 elif o == "rg":
-                    fill_cs = {"family": "RGB"}; self._record(fill_cs, "fill")
+                    fill_cs = {"family": "RGB"}; self._record(fill_cs, "fill"); fill_v = _nums(operands)
                 elif o == "RG":
-                    stroke_cs = {"family": "RGB"}; self._record(stroke_cs, "stroke")
+                    stroke_cs = {"family": "RGB"}; self._record(stroke_cs, "stroke"); stroke_v = _nums(operands)
                 elif o == "k":
-                    fill_cs = {"family": "CMYK"}; self._record(fill_cs, "fill")
+                    fill_cs = {"family": "CMYK"}; self._record(fill_cs, "fill"); fill_v = _nums(operands)
                 elif o == "K":
-                    stroke_cs = {"family": "CMYK"}; self._record(stroke_cs, "stroke")
+                    stroke_cs = {"family": "CMYK"}; self._record(stroke_cs, "stroke"); stroke_v = _nums(operands)
                 elif o == "cs":
-                    fill_cs = self.classify(operands[0], resources)
+                    fill_cs = self.classify(operands[0], resources); fill_v = [0.0]
                 elif o == "CS":
-                    stroke_cs = self.classify(operands[0], resources)
+                    stroke_cs = self.classify(operands[0], resources); stroke_v = [0.0]
                 elif o in ("sc", "scn"):
+                    fill_v = _nums(operands)
                     if fill_cs.get("family") == "Pattern":
                         self._pattern(operands, resources, base_ctm, "fill", depth)
                     else:
                         self._record(fill_cs, "fill")
                 elif o in ("SC", "SCN"):
+                    stroke_v = _nums(operands)
                     if stroke_cs.get("family") == "Pattern":
                         self._pattern(operands, resources, base_ctm, "stroke", depth)
                     else:
@@ -341,8 +422,9 @@ class Analyzer:
                     if shd is not None and operands[0] in shd:
                         self._record(self.classify(shd[operands[0]].get("/ColorSpace"), resources), "shading")
                 elif o == "gs":
-                    self._extgstate(operands[0], resources)
+                    ov.update(self._extgstate(operands[0], resources))
                 elif o == "Tf":
+                    tsize = float(operands[1])
                     self._font(operands[0], resources)
                 elif o in ("BI", "INLINE IMAGE"):   # pikepdf: „INLINE IMAGE” (przegląd kodu 27.09, A6)
                     self.inline_images += 1
@@ -360,7 +442,11 @@ class Analyzer:
                     if st == "/Image":
                         self._image(xo, ctm, resources, operands[0])
                     elif st == "/Form":
-                        self._form(xo, ctm, resources, depth)
+                        self._ov_in = dict(ov)          # forma dziedziczy stan overprintu
+                        try:
+                            self._form(xo, ctm, resources, depth)
+                        finally:
+                            self._ov_in = {}
             except Exception:
                 self.unknown_ops += 1
 
@@ -448,6 +534,31 @@ class Analyzer:
             pass
 
 
+def _nums(operands) -> list:
+    out = []
+    for x in operands:
+        try:
+            out.append(float(x))
+        except Exception:
+            pass
+    return out or [0.0]
+
+
+def _white(cs: dict, v: list, opm: int) -> bool:
+    """Czy farba to BIEL, która z overprintem zniknie. CMYK 0/0/0/0 znika tylko przy OPM 1
+    (zera nie zakrywają tła — tak zapisuje Illustrator); biel w skali szarości maluje tylko
+    kanał K, więc kolorowe tło pod nią zostaje; biel RGB znika po zamianie na CMYK. Kolor
+    dodatkowy („White” do druku białą farbą) jest celowy — nie liczymy."""
+    fam = cs.get("family")
+    if fam == "Gray":
+        return len(v) >= 1 and v[0] >= 0.999
+    if fam == "RGB":
+        return len(v) >= 3 and min(v[:3]) >= 0.999
+    if fam == "CMYK":
+        return len(v) >= 4 and max(v[:4]) <= 0.001 and opm == 1
+    return False
+
+
 class _InlineDict:
     """Słownik obrazu inline z pełnymi nazwami kluczy (w BI…ID wolno skróty: /W, /CS, /BPC…)."""
     ABBR = {"/Width": "/W", "/Height": "/H", "/ColorSpace": "/CS", "/BitsPerComponent": "/BPC",
@@ -503,10 +614,54 @@ def _fonts_missing(path: str, page: int | None) -> list:
     mówi, że litery są narysowane krojem zastępczym (Tomasz 29.09)."""
     try:
         import fontfix
-        return [{"name": m["name"], "visible": bool(m["widoczny"])} for m in fontfix.missing(path, page)]
+        out = [{"name": m["name"], "visible": bool(m["widoczny"])} for m in fontfix.missing(path, page)]
     except Exception as e:
         print(f"[adChecker] fonts_missing: {type(e).__name__}: {e}")
         return []
+    if out and page is not None:
+        boxes = font_boxes(path, page, [m["name"] for m in out if m["visible"]])
+        for m in out:
+            m["boxes"] = boxes.get(_fkey(m["name"]), []) if m["visible"] else []
+    return out
+
+
+def _fkey(name: str) -> str:
+    return (name or "").split("+")[-1].replace(" ", "").replace("-", "").replace(",", "").lower()
+
+
+def font_boxes(path: str, page: int, names: list, limit: int = 80) -> dict:
+    """Gdzie na stronie stoi WIDOCZNY tekst w podanych fontach: {klucz fontu: [[fx, fy, fw, fh]]}
+    (ułamki strony, y od góry; jedna ramka na wiersz). Do zaznaczenia na podglądzie liter, które
+    wyjdą krojem zastępczym (Tomasz 29.09)."""
+    import pymupdf
+    want = {_fkey(n) for n in names}
+    out: dict = {}
+    if not want:
+        return out
+    try:
+        d = pymupdf.open(path)
+        try:
+            pg = d[page]
+            W, H = pg.rect.width or 1, pg.rect.height or 1
+            for b in pg.get_text("dict")["blocks"]:
+                for ln in b.get("lines", []):
+                    rows: dict = {}
+                    for sp in ln.get("spans", []):
+                        k = _fkey(sp.get("font", ""))
+                        if k not in want or sp.get("alpha", 255) == 0 or not sp.get("text", "").strip():
+                            continue
+                        x0, y0, x1, y1 = sp["bbox"]
+                        r = rows.setdefault(k, [x0, y0, x1, y1])
+                        r[0], r[1], r[2], r[3] = min(r[0], x0), min(r[1], y0), max(r[2], x1), max(r[3], y1)
+                    for k, (x0, y0, x1, y1) in rows.items():
+                        lst = out.setdefault(k, [])
+                        if len(lst) < limit:
+                            lst.append([round(x0 / W, 5), round(y0 / H, 5), round((x1 - x0) / W, 5), round((y1 - y0) / H, 5)])
+        finally:
+            d.close()
+    except Exception as e:
+        print(f"[adChecker] font_boxes: {type(e).__name__}: {e}")
+    return out
 
 
 def analyze_pdf(path: str, only_page: int | None = None) -> dict:
@@ -532,9 +687,16 @@ def analyze_pdf(path: str, only_page: int | None = None) -> dict:
             if only_page is not None and i != only_page:
                 pages.append({"index": i, "images": 0})
                 continue
+            w0 = len(an.white_op)
             an.walk(page, res, [1, 0, 0, 1, 0, 0])
             an.annotations(page)
             pages.append({"index": i, "images": len(an.images) - before_imgs})
+            # biały z overprintem → ułamki strony (y od góry), do ramek na podglądzie
+            bx0, by0, bx1, by1 = an.page_box
+            pw, ph = (bx1 - bx0) or 1, (by1 - by0) or 1
+            an.white_boxes = getattr(an, "white_boxes", []) + [
+                [round((b[0] - bx0) / pw, 5), round((by1 - b[3]) / ph, 5),
+                 round((b[2] - b[0]) / pw, 5), round((b[3] - b[1]) / ph, 5)] for b in an.white_op[w0:]]
 
         # Realny detal obrazów liczy detailmap.py (rozdział „Jakość wydruku") — tu tylko fakty.
         coverage = {}
@@ -635,6 +797,7 @@ def _summarize_pdf(an: Analyzer, pages, intents, meta, coverage=None, page_sizes
             "page_sizes_mm": page_sizes or [],
         },
         "overprint_uses": an.overprint_uses,
+        "white_overprint": getattr(an, "white_boxes", []),
         "transparency": dict(an.transparency),
         "fonts": [{"name": n, "embedded": e, "uses": c} for (n, e), c in an.fonts.most_common()],
         "parse_warnings": an.unknown_ops + (1 if an.truncated else 0),

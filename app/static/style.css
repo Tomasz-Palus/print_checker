@@ -86,6 +86,8 @@ a { color: var(--accent); }
 .box.bad { background: var(--bad-bg); color: #7f1d1d; }
 .box.ok { background: var(--ok-bg); color: #14532d; }
 .box.info { background: #eef3ff; color: #1e3a8a; line-height: 1.45; }
+.box ul.prep { margin: 4px 0 0; padding-left: 18px; line-height: 1.4; }
+.box ul.prep li + li { margin-top: 3px; }
 
 /* plik */
 .drop { border: 2px dashed #c9ced6; border-radius: 10px; padding: 18px; text-align: center; cursor: pointer; color: var(--muted); }
@@ -163,6 +165,12 @@ select.sel { width: 100%; padding: 7px 8px; border: 1px solid var(--line); borde
               padding: 1px 6px; border-radius: 4px 4px 0 0; white-space: nowrap; }
 .veil { position: absolute; z-index: 2; pointer-events: none; }
 .dim { position: absolute; z-index: 4; pointer-events: none; box-shadow: 0 0 0 100000px rgba(30,35,45,.45); }
+.fmarks { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
+.fmarks > div { position: absolute; border: 2px dashed #d97706; border-radius: 3px; background: rgba(245, 158, 11, .08); }
+.fmarks > div span { position: absolute; left: -2px; bottom: 100%; background: #d97706; color: #fff; font-size: 11px;
+  padding: 1px 6px; white-space: nowrap; border-radius: 3px 3px 0 0; }
+.fmarks > div.red { border-color: #dc2626; background: rgba(220, 38, 38, .08); }
+.fmarks > div.red span { background: #dc2626; }
 .hilite { position: absolute; z-index: 7; pointer-events: none; border: 3px solid #f43f5e; border-radius: 3px;
           box-shadow: 0 0 0 2px #fff; }
 .hilite span { position: absolute; left: -3px; top: 100%; background: #f43f5e; color: #fff; font-size: 12px; padding: 2px 7px; white-space: nowrap; }

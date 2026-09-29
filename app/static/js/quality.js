@@ -2,7 +2,7 @@
 // Jakość liczy serwer (quality.py → detailmap.py) i oddaje gotowy werdykt; tu tylko pokazanie
 // go po ludzku i nawigacja po słabych miejscach na podglądzie (w rzeczywistej wielkości wydruku).
 import { $, esc, fmtMm, api, chapter, plural } from "./util.js";
-import { S, changed, head, scaleK, printMm, isPdf, flattenSettled, roleSettled, template, STEP_NAME } from "./state.js";
+import { S, changed, head, scaleK, printMm, isPdf, flattenSettled, roleSettled, template, STEP_NAME, fontWarnings, inkNow, factsKey } from "./state.js";
 import { detailBlock } from "./settings.js";
 import * as viewer from "./viewer.js";
 
@@ -281,9 +281,16 @@ export function renderDownload() {
     ? `<span class="say warn">Plik można pobrać, ale obrazy są za małe</span> — na wydruku będą rozmyte.`
     : `<span class="say ok">Plik gotowy do druku.</span>`;
   // brak fontu (Tomasz 29.09): można drukować, ale ma być o tym informacja
-  const hf = S.analysisFor && S.analysis && !S.analysis.error ? (S.analysis.fonts_missing || []).filter((f) => f.visible) : [];
-  $("dlSum").innerHTML = (hf.length ? `<li class="warn">Brak fontu w pliku: <b>${esc(hf.map((f) => f.name.split("+").pop()).join(", "))}</b> — `
+  const fw = fontWarnings(), fb = fw.filter((f) => f.baked), fl = fw.filter((f) => !f.baked);
+  const ha = S.analysisFor === factsKey() && S.analysis && !S.analysis.error ? S.analysis : null;
+  const wo = (ha?.white_overprint || []).length, ink = inkNow();
+  const nm = (l) => esc(l.map((f) => f.name).join(", "));
+  $("dlSum").innerHTML = (fl.length ? `<li class="warn">Brak fontu w pliku: <b>${nm(fl)}</b> — `
       + `drukarnia podstawi swój krój, litery wyjdą inne.</li>` : "")
+    + (fb.length ? `<li class="warn">Krój zastępczy utrwalony (krzywe / spłaszczenie): <b>${nm(fb)}</b> — `
+      + `te litery wyjdą innym krojem niż w projekcie.</li>` : "")
+    + (wo ? `<li class="warn">Biel z overprintem (${wo} ${plural(wo, "miejsce", "miejsca", "miejsc")}) — w druku zniknie.</li>` : "")
+    + (ink?.boxes?.length ? `<li class="warn">Za dużo farby: do ${ink.max} % (limit ${ink.limit} %) — może się rozmazać.</li>` : "")
     + (done.length ? `<li>Zrobione: ${esc(done.join(", "))}.</li>` : `<li>Bez poprawek.</li>`)
     + (left.length ? `<li>Zostawione jak były: ${esc(left.join(", "))}.</li>` : "")
     + (S.job.file.page_count > 1 ? `<li>Tylko strona ${S.page + 1} z ${S.job.file.page_count}.</li>` : "");

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 import shutil
 import threading
 import time
@@ -41,7 +42,7 @@ class Version:
     def to_json(self) -> dict:
         r = self.result
         return {"id": self.id, "step": self.step, "text": r.get("text", ""), "note": r.get("note", ""),
-                "pages_mm": self.pages_mm, "map": r.get("map")}
+                "pages_mm": self.pages_mm, "map": r.get("map"), "fonts_subst": r.get("fonts_subst") or []}
 
 
 class Job:
@@ -54,6 +55,7 @@ class Job:
             self.versions[0].pages_mm = [[p.get("width_mm"), p.get("height_mm")] for p in info["pages"]]
         self.analysis: dict = {}         # id wersji -> wynik analyze.analyze
         self.images: dict = {}           # id wersji -> pełne rekordy obrazów (mapa detalu)
+        self.ink: dict = {}              # (id wersji, strona) -> suma farb (ink.py)
         self.lock = threading.RLock()    # jedna poprawka naraz
 
     @property
@@ -110,6 +112,8 @@ class Job:
             for v in gone:
                 self.analysis.pop(v.id, None)
                 self.images.pop(v.id, None)
+                for k in [k for k in self.ink if k[0] == v.id]:
+                    self.ink.pop(k, None)
                 for p in [v.path, *glob.glob(os.path.splitext(v.path)[0] + "_p*_krzywe.pdf")]:
                     try:
                         os.remove(p)
@@ -132,15 +136,26 @@ def create(file_storage) -> Job:
     path = os.path.join(jdir, "original" + ext)            # ścieżka ASCII (Ghostscript)
     file_storage.save(path)
     try:
+        import prepare
+        opened = []
+        if ext == ".pdf" or (ext == ".ai" and prepare.looks_pdf(path)):
+            path, opened = prepare.check_open(path)   # hasło, uszkodzenie (Tomasz 29.09)
         path, converted = render.canonicalize(path)
-        geom = []
+        geom, baked = [], []
         if not render.is_raster(name):
             path, geom = render.normalize_geometry(path)
+            # warstwy i adnotacje w stanie DO DRUKU (prepare.py) — podgląd = wydruk
+            path, baked = prepare.bake_print_state(path)
         info = render.inspect(path, name)
         if converted:
             info["converted"] = converted
         if geom:                                       # wygląd bez zmian — tylko zapis strony
             info["geometry"] = geom
+        # to, co program zmienił w pliku przy wgraniu — pokazane w rozdziale Plik
+        uu = sorted({m for g in geom for m in re.findall(r"UserUnit ([\d.]+)", g)})
+        info["prepared"] = opened + ([f"strona zapisana w powiększonej jednostce (UserUnit {', '.join(uu)} — "
+                                      "tak Illustrator i Acrobat zapisują strony ponad 5 m); wymiar przeliczony na "
+                                      "prawdziwy (plik do druku ponad 5 m dostanie ją z powrotem przy pobraniu)"] if uu else []) + baked
         job = Job(jid, jdir, path, info)
     except Exception:
         shutil.rmtree(jdir, ignore_errors=True)

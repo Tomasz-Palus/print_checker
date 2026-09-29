@@ -205,7 +205,7 @@ def font_path_args() -> list:
 
 
 def substituted(log: str, ignore=()) -> list[str]:
-    """Fonty, za które Ghostscript wziął ZAMIENNIK (decyzja Tomasza: nigdy kroju zastępczego).
+    """Fonty, za które Ghostscript wziął ZAMIENNIK (program o nich ostrzega i zaznacza je na podglądzie).
 
     Tylko bez `-q` Ghostscript pisze „Loading font X (or substitute) from <ścieżka>" (przy
     `stream` — `quiet=False`; przegląd kodu 27.09: spłaszczenie szło z `-q` i nic nie widziało). Font

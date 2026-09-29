@@ -179,6 +179,9 @@ def api_upload():
     except render.UnsupportedFormat as e:
         return err(str(e), 415)
     except Exception as e:
+        import prepare
+        if isinstance(e, prepare.Unreadable):
+            return err(str(e), 415)
         return err(f"Nie udało się otworzyć pliku: {type(e).__name__}: {e}")
     if job.info.get("page_count", 0) < 1:
         jobs.delete(job.id)
@@ -285,6 +288,29 @@ def api_analysis(jid):
         job.images.setdefault(v.id, {})[page] = res.pop("_images", None)
         cache[page] = res
     return jsonify({"version": v.id, "page": page, **cache[page]})
+
+
+@app.get("/api/jobs/<jid>/ink")
+def api_ink(jid):
+    """Suma farb na wydruku (ink.py) — ostatnia wersja, jedna strona. Obraz (JPG/TIFF): pomijamy."""
+    job = job_or_404(jid)
+    v = job.version(request.args.get("v"))
+    if v is None:
+        return err("Tej wersji pliku już nie ma.", 404)
+    page = request.args.get("page", 0, type=int)
+    if not 0 <= page < job.info["page_count"]:
+        return err("Nie ma takiej strony.")
+    if render.is_raster(v.path):
+        return jsonify({"version": v.id, "page": page, "skip": True})
+    cache, key = job.ink, (v.id, page)
+    if key not in cache:
+        import ink
+        try:
+            wmm, hmm = v.pages_mm[page]
+            cache[key] = ink.measure(v.path, page, (wmm / render.MM, hmm / render.MM))
+        except Exception as e:
+            return err(f"Nie udało się policzyć farby: {type(e).__name__}: {e}", 500)
+    return jsonify({"version": v.id, "page": page, **cache[key]})
 
 
 def gl_pdf(hash_: str) -> str | None:
@@ -424,7 +450,11 @@ def download_file(job, page: int, name: str) -> tuple[str, str, str]:
     path = v.path
     if not render.is_raster(v.path):
         ext = ".pdf"
-        if job.info["page_count"] > 1:
+        import prepare
+        wmm, hmm = (v.pages_mm[page] if page < len(v.pages_mm) else (0, 0))
+        uu = prepare.user_unit_for(wmm / render.MM, hmm / render.MM)
+        if job.info["page_count"] > 1 or uu > 1:
+            # strona ponad 200 cali (≈ 5 m) — wraca UserUnit, inaczej Acrobat i RIP-y jej nie przyjmą
             path = os.path.join(job.dir, f"pobierz_{v.id}_p{page}.pdf")
             # jeden naraz i przez plik tymczasowy: podwójne kliknięcie (albo okno „Zapisz jako”
             # równolegle) dawało obcięty PDF (przegląd kodu 27.09, C21)
@@ -436,6 +466,8 @@ def download_file(job, page: int, name: str) -> tuple[str, str, str]:
                         keep = pdf.pages[page]
                         out = pikepdf.new()
                         out.pages.append(keep)
+                        if uu > 1:
+                            prepare.with_user_unit(out, out.pages[0], uu)
                         if "/OutputIntents" in pdf.Root:        # profil kolorystyczny idzie z plikiem
                             oi = pdf.Root.OutputIntents
                             out.Root.OutputIntents = out.copy_foreign(oi if oi.is_indirect else pdf.make_indirect(oi))

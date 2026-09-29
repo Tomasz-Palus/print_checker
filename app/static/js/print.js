@@ -2,9 +2,9 @@
 // Symulacja wydruku (Tomasz 28.09): od niej podgląd pokazuje WYDRUK, więc dalsze rozdziały nie
 // potrzebują już „Pokaż, jak wydrukuje" — suwak przed/po każdej poprawki porównuje wydruk z wydrukiem.
 // Każdy z dalszych: fakty o stronie → jedno zdanie → wybór (poprawka albo „Zostaw jak jest").
-import { $, esc, chapter } from "./util.js";
+import { $, esc, chapter, plural } from "./util.js";
 import { S, changed, hasStep, isPdf, facts, colorNeed, fileProfile, transparencyKinds, flattenPlan, scaleK,
-         sizeSettled, printSettled, colorSettled, overprintSettled, fontsSettled } from "./state.js";
+         sizeSettled, printSettled, colorSettled, overprintSettled, fontsSettled, fontWarnings, inkNow } from "./state.js";
 import { applyStep, undoStep } from "./steps.js";
 
 const stepText = (name) => S.job.versions.find((v) => v.step === name)?.text || "";
@@ -119,6 +119,15 @@ export function renderColor() {
     }
   }
   chapter("ch-color", st, sum);
+  // za dużo farby (ink.py) — tylko informacja: poprawić może grafik / klient (Tomasz 29.09)
+  const ink = inkNow(), ib = ink?.boxes || [];
+  $("coInk").hidden = !ib.length;
+  if (ib.length) $("coInk").innerHTML = `<b>Za dużo farby</b> w ${ib.length} ${plural(ib.length, "miejscu", "miejscach", "miejscach")}: `
+    + `suma farb dochodzi do <b>${ink.max} %</b>, a drukarnia przyjmuje do ${ink.limit} % (czerwone ramki na podglądzie). `
+    + `Farba może nie wyschnąć i się rozmazać. `
+    + (ink.max >= 390 ? `Najczęściej to czerń złożona ze wszystkich farb (100/100/100/100) albo kolor „Registration”. `
+      : `Najczęściej to bardzo ciemne tło złożone ze wszystkich farb. `)
+    + `Poproś klienta o poprawkę — np. czerń 40/30/30/100.`;
   $("coSay").innerHTML = say;
   $("coNote").innerHTML = note; $("coNote").hidden = !note;
   $("coErr").hidden = !S.stepErr.cmyk; $("coErr").textContent = S.stepErr.cmyk || "";
@@ -148,6 +157,8 @@ export function renderOverprint() {
   if (el.hidden) return;
   const on = hasStep("overprint"), a = facts("overprint"), c = choice("overprint");
   const uses = on || (a && !a.error ? a.overprint_uses || 0 : 0);
+  const white = !on && a && !a.error ? (a.white_overprint || []).length : 0;
+  const whiteTxt = `biel z overprintem (${white} ${plural(white, "miejsce", "miejsca", "miejsc")})`;
   let st = "todo", sum = "", say = "", note = "";
   if (!on && !c.act && !a) {
     st = "open"; say = loading("overprint");
@@ -167,10 +178,16 @@ export function renderOverprint() {
     } else if (c.act === "keep") {
       sum = "zostawiony";
       say = "Overprint zostaje — podgląd pokazuje, jak to wyjdzie z drukarki.";
+      if (white) say = `<span class="say warn">Overprint zostaje, a ${whiteTxt} w druku zniknie</span> `
+        + `(pomarańczowe ramki na podglądzie).`;
     } else {
       say = `W projekcie jest <b>overprint</b> (nadruk): farba kładzie się na tło zamiast je zakryć, `
         + `więc w druku część elementów wychodzi inaczej niż na ekranie — podgląd pokazuje już, jak. `
         + `Wytyczne go nie dopuszczają.`;
+      // biel z overprintem nie zakrywa tła — znika zupełnie (Tomasz 29.09, „edge cases”)
+      if (white) note = `<span class="say warn">Uwaga: ${whiteTxt} w druku zniknie</span> `
+        + `(pomarańczowe ramki na podglądzie). Na ekranie go widać, na wydruku nie. <b>Wyłącz overprint</b>, `
+        + `żeby się wydrukował.`;
     }
   }
   chapter("ch-op", st, sum);
@@ -213,7 +230,14 @@ export function renderFonts() {
       say = on ? `<span class="say ok">Tekst zamieniony na krzywe.</span>`
                  + `<span class="now-only"> Suwakiem niżej porównasz przed i po.</span>`
                : S.busy ? "Zamieniam tekst na krzywe…" : "Nie udało się zamienić tekstu na krzywe.";
-      if (on) note = esc(stepText("outline"));
+      if (on) note = esc(stepText("outline").split("; UWAGA:")[0]);
+      // font, którego nie znaleziono: krzywe mają kształt kroju zastępczego (Tomasz 29.09 — ma się
+      // dać, ale z ostrzeżeniem i zaznaczeniem na podglądzie)
+      const baked = bakedFonts("outline");
+      if (on && baked.length) say = `<span class="say warn">Tekst zamieniony na krzywe, ale ${baked.length === 1 ? "fontu" : "fontów"} `
+        + `${esc(baked.join(", "))} nie było w pliku ani w sieci</span> — te litery wyszły krojem zastępczym albo zniknęły `
+        + `(pomarańczowe ramki na podglądzie). Najlepiej poproś klienta o PDF z osadzonymi fontami.`
+        + `<span class="now-only"> Suwakiem niżej porównasz przed i po.</span>`;
     } else if (c.act === "keep") {
       sum = "zostawione";
       say = "Tekst zostaje w fontach — drukarnia złoży go swoim programem.";
@@ -222,10 +246,10 @@ export function renderFonts() {
         + `że w drukarni wyjdzie dokładnie ten sam kształt liter.`;
       if (miss.length) note = `<span class="say warn">${miss.length === 1 ? "Font" : "Fonty"} ${esc(miss.join(", "))} `
         + `${miss.length === 1 ? "nie jest osadzony" : "nie są osadzone"} w pliku</span> — w pliku jest tylko nazwa, `
-        + `bez kształtów liter. <b>Zamień na krzywe</b> — program poszuka ${miss.length === 1 ? "go" : "ich"} w Google Fonts `
-        + `i w systemie (kroju zastępczego nie użyje). Jeśli nie znajdzie, najlepiej poproś klienta o PDF z osadzonymi `
-        + `fontami. <b>Zostaw jak jest</b> też możesz wybrać — wtedy drukarnia podstawi swój krój: litery wyjdą inne, `
-        + `a przy niektórych plikach (tekst z Worda, Canvy) nawet krzaczki.`;
+        + `bez kształtów liter (pomarańczowe ramki na podglądzie). <b>Zamień na krzywe</b> — program poszuka `
+        + `${miss.length === 1 ? "go" : "ich"} w Google Fonts i w systemie; jeśli nie znajdzie, litery dostaną kształt `
+        + `kroju zastępczego. <b>Zostaw jak jest</b> — krój podstawi drukarnia: litery wyjdą inne, a przy niektórych `
+        + `plikach (tekst z Worda, Canvy) nawet krzaczki. Najpewniej: poproś klienta o PDF z osadzonymi fontami.`;
     }
   }
   chapter("ch-fonts", st, sum);
@@ -266,7 +290,7 @@ export function renderFlatten() {
       say = on ? `<span class="say ok">Projekt spłaszczony</span> — na maszynę pójdzie dokładnie to, co widać.`
                  + `<span class="now-only"> Suwakiem niżej porównasz przed i po.</span>`
                : S.busy ? "Spłaszczam projekt…" : "Nie udało się spłaszczyć projektu.";
-      note = on ? esc(stepText("flatten")) : plan;
+      note = on ? esc(stepText("flatten").split("; UWAGA:")[0]) : plan;
     } else if (c.act === "keep" && !kinds.length) {
       sum = "zostawione";
       say = `<span class="say ok">Projekt zostaje jak jest</span> — bez przezroczystości nie ma czego spłaszczać.`;
@@ -287,10 +311,28 @@ export function renderFlatten() {
       note = plan;
     }
   }
+  // spłaszczenie utrwala krój zastępczy tak samo jak krzywe — ostrzeżenie przed i po
+  const live = fontWarnings().filter((f) => !f.baked).map((f) => f.name);
+  const fb = bakedFonts("flatten");
+  if (on && fb.length) say = `<span class="say warn">Projekt spłaszczony, ale ${fb.length === 1 ? "fontu" : "fontów"} `
+    + `${esc(fb.join(", "))} nie było w pliku ani w sieci</span> — te litery spłaszczyły się krojem zastępczym albo `
+    + `zniknęły (pomarańczowe ramki na podglądzie). Najlepiej poproś klienta o PDF z osadzonymi fontami.`
+    + `<span class="now-only"> Suwakiem niżej porównasz przed i po.</span>`;
+  else if (!on && live.length && c.act !== "keep") note = `<span class="say warn">Uwaga: `
+    + `${live.length === 1 ? "font" : "fonty"} ${esc(live.join(", "))} nie ${live.length === 1 ? "jest" : "są"} w pliku</span> `
+    + `— program poszuka ${live.length === 1 ? "go" : "ich"} w Google Fonts i w systemie, a czego nie znajdzie, `
+    + `to po spłaszczeniu zostanie na stałe krojem zastępczym (pomarańczowe ramki na podglądzie). `
+    + (note || "");
   chapter("ch-flat", st, sum);
   $("flSay").innerHTML = say;
   $("flNote").innerHTML = note; $("flNote").hidden = !note;
   rowsFor("fl", "flatten", !!a && !a.error || on || !!c.act, on);
+}
+
+// Fonty utrwalone krojem zastępczym przez dany krok (serwer: `fonts_subst`).
+function bakedFonts(step) {
+  const v = S.job.versions.find((x) => x.step === step);
+  return (v?.fonts_subst || []).map((f) => f.name.split("+").pop());
 }
 
 // Wspólne rzędy fontów i spłaszczenia: [poprawka | zostaw] → suwak przed/po.

@@ -50,6 +50,43 @@ class _Walker:
 
     def __init__(self):
         self.shapes, self.texts = [], []
+        self._dec = {}
+
+    def decoder(self, resources, name):
+        """Jak zamienić bajty z Tj/TJ na litery w danym foncie. Font Identity-H (np. tekst
+        z Illustratora / Worda w SegoeUI) ma w strumieniu tylko numery znaków — bez ToUnicode
+        dawał śmieci, a napis z szablonu („1015 x 2513 [mm]”, „Wydruk …”) nie rozpoznawał się
+        i zostawał po „Usuń szablon” (Tomasz 29.09, adFrame Smart 100x250)."""
+        try:
+            f = resources["/Font"][name]
+        except Exception:
+            return None
+        key = tuple(f.objgen) if tuple(f.objgen) != (0, 0) else id(f)
+        if key in self._dec:
+            return self._dec[key]
+        two = str(f.get("/Subtype", "")) == "/Type0"
+        tu = {}
+        if "/ToUnicode" in f:
+            try:
+                import fontfix
+                tu = fontfix._parse_tounicode(f["/ToUnicode"])
+            except Exception:
+                tu = {}
+
+        def dec(b: bytes) -> str:
+            if two:
+                codes = [b[i] << 8 | b[i + 1] for i in range(0, len(b) - 1, 2)]
+            else:
+                codes = list(b)
+            if not tu:
+                # bez mapy: font prosty — jak dawniej (latin1); dwubajtowy — nieczytelny
+                return "" if two else b.decode("latin1", "replace")
+            out = "".join(tu.get(c, "") for c in codes)
+            # fonty symboliczne mapują litery na U+F020–F0FF („” = „1”)
+            return "".join(chr(ord(ch) - 0xF000) if 0xF020 <= ord(ch) <= 0xF0FF else ch for ch in out)
+
+        self._dec[key] = dec
+        return dec
 
     def run(self, container, resources, ctm, depth=0, owner=None):
         if depth > 8:
@@ -61,6 +98,7 @@ class _Walker:
         stack, fill, stroke, width = [], (0.0,) * 3, (0.0,) * 3, 1.0
         box, nseg, first = None, 0, None
         t_start, t_txt, t_pos, t_size, t_scale = None, [], None, 12.0, 1.0
+        t_dec = None
 
         def add(x, y):
             nonlocal box
@@ -127,6 +165,7 @@ class _Walker:
                     t_start, t_txt, t_pos = i, [], None
                 elif o == "Tf":
                     t_size = float(operands[1])
+                    t_dec = self.decoder(resources, operands[0])
                 elif o in ("Tm", "Td", "TD"):
                     v = [float(x) for x in operands]
                     if o == "Tm" and len(v) >= 6:
@@ -137,7 +176,7 @@ class _Walker:
                     t_pos = t_pos or p0
                 elif o in ("Tj", "TJ", "'", '"'):
                     for x in operands:
-                        _text(x, t_txt)
+                        _text(x, t_txt, t_dec)
                 elif o == "ET":
                     txt = "".join(t_txt).strip()
                     if t_start is not None and txt:
@@ -160,19 +199,19 @@ class _Walker:
                 continue
 
 
-def _text(x, out):
+def _text(x, out, dec=None):
     """Tekst z Tj/TJ. Tablice (TJ) da się iterować, łańcuchy rzucają TypeError — i tylko tak
     da się je odróżnić (`bytes(tablica)` zwraca puste bajty zamiast błędu)."""
     try:
         for y in x:
-            _text(y, out)
+            _text(y, out, dec)
         return
     except TypeError:
         pass
     try:
         b = bytes(x)
         if b:
-            out.append(b.decode("latin1", "replace"))
+            out.append(dec(b) if dec else b.decode("latin1", "replace"))
     except Exception:
         pass
 

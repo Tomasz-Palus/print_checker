@@ -4,7 +4,12 @@ export const HELP = {
   file: `Wgraj plik, który ma iść do druku: PDF (najlepiej), AI, EPS, SVG albo obraz (JPG, PNG, TIFF).
     CorelDRAW, InDesign i PSD trzeba najpierw wyeksportować do PDF.<br><br>
     Oryginał nigdy nie jest zmieniany — każda poprawka tworzy nową wersję obok, a na końcu
-    pobierasz gotowy plik.`,
+    pobierasz gotowy plik.<br><br>
+    Przy wczytaniu program ustawia plik tak, jak się <b>wydrukuje</b>: warstwy ukryte albo oznaczone
+    „nie drukuj” i niedrukowane komentarze Acrobata usuwa, a drukowane stemple i pola wpisuje w stronę
+    (różne drukarnie traktują je różnie). Zdejmuje też hasło do uprawnień i przelicza stronę zapisaną
+    w powiększonej jednostce (UserUnit, strony ponad 5 m). Co zmienił — pisze pod plikiem.
+    PDF-a z hasłem do otwarcia albo zniszczonego otworzyć się nie da — trzeba poprosić klienta o nowy.`,
   product: `Program zgaduje produkt z nazwy pliku, z szablonu zostawionego w projekcie albo z wymiaru
     strony — ale zawsze trzeba go <b>potwierdzić</b>. Od produktu zależą wytyczne: wymiar,
     skala (1:1 albo 1:10) i obszar bezpieczny.<br><br>
@@ -65,19 +70,25 @@ export const HELP = {
     (np. ISO Coated v2), można go zostawić („Z pliku").<br><br>
     Uwaga na <b>półprzezroczystość na jaskrawych kolorach RGB</b>: bez zamiany drukarnia najpierw
     miesza kolory, a potem je przelicza; po zamianie jest odwrotnie. Wynik w tych miejscach potrafi
-    się wyraźnie różnić — porównaj suwakiem.`,
+    się wyraźnie różnić — porównaj suwakiem.<br><br>
+    <b>Za dużo farby:</b> program liczy, ile farby maszyna położy w jednym miejscu (suma C+M+Y+K).
+    Powyżej 330 % (limit profilu FOGRA39) farba może nie schnąć i się rozmazywać — zwykle to czerń
+    100/100/100/100 albo kolor „Registration”. Program tylko ostrzega: poprawić musi grafik albo klient.`,
   op: `<b>Overprint</b> (nadruk) każe farbie kłaść się NA tło zamiast je zakrywać. Czerwony napis
     na czarnym tle wychodzi wtedy prawie czarny, choć na ekranie był czerwony. Większość
     programów na ekranie tego nie pokazuje — nasz podgląd pokazuje (to już wydruk).<br><br>
     Wytyczne Adsystem overprintu nie dopuszczają. „Wyłącz overprint" sprawia, że wydrukuje się
     to, co widać w projekcie; suwak porówna wydruk przed i po. „Zostaw jak jest" zostawia
-    overprint.`,
+    overprint.<br><br>
+    <b>Biel z overprintem</b> w druku znika zupełnie (biała farba nie istnieje — biel to brak farby,
+    a overprint każe nie zakrywać tła). Program zaznacza takie miejsca na podglądzie.`,
   fonts: `Tekst zapisany fontem drukarnia musi „złożyć" swoim programem — gdy fontu brakuje albo
     jest inna wersja, litery się zmieniają. <b>Krzywe</b> to gotowe kształty liter: wyglądają
     identycznie, tylko nie da się ich już edytować jako tekstu.<br><br>
     Kształty bierzemy z fontu <b>osadzonego w pliku</b>. Gdy fontu w pliku nie ma, program szuka go
-    w Google Fonts, potem w fontach Windowsa. Kroju zastępczego nie używa nigdy — wtedy odmówi
-    i powie, o co poprosić klienta.<br><br>
+    w Google Fonts, potem w fontach Windowsa. Gdy nie znajdzie, zamieni mimo to — litery dostaną
+    kształt <b>kroju zastępczego</b>; program to powie, a na podglądzie zaznaczy je pomarańczową
+    ramką. Wtedy najlepiej poprosić klienta o PDF z osadzonymi fontami.<br><br>
     Wybierasz <b>Zamień na krzywe</b> albo <b>Zostaw jak jest</b>.`,
   flat: `<b>Spłaszczenie</b> zamienia całą stronę w jeden obraz CMYK — jak „Spłaszcz” w Photoshopie.<br><br>
     <b>Używaj go tylko wtedy, gdy to konieczne.</b> Przezroczystość (cienie, półprzezroczyste
@@ -86,7 +97,8 @@ export const HELP = {
     prosi albo gdy podgląd pokazuje ślady — szew albo jasną obwódkę tam, gdzie
     przezroczystość spotyka się z kolorem dodatkowym lub overprintem.<br><br>
     Rozdzielczość: zawsze <b>120 ppi na wydruku</b>, jak w ustaleniach z drukarnią. Cena: tekst i linie
-    przestają być wektorowe, plik robi się większy.<br><br>
+    przestają być wektorowe, plik robi się większy. Tekst fontem, którego nie ma w pliku, spłaszczy się
+    krojem zastępczym — program ostrzeże i zaznaczy go na podglądzie.<br><br>
     Wybierasz <b>Zostaw jak jest</b> albo <b>Spłaszcz projekt</b>. Gdy projekt nie ma
     przezroczystości, wystarczy <b>Zostaw jak jest</b>.`,
   qual: `Program otwiera każdy obraz w projekcie i czyta jego piksele. Sprawdza dwie rzeczy:<br><br>

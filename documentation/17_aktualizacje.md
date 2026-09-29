@@ -692,3 +692,122 @@ Numery jak w `18_przeglad_kodu.md`.
   krojem — tekst da się przeczytać. Ghostscript bierze numery wprost do kroju zastępczego —
   wychodzą krzaczki (tak jak w Photoshopie kropki). Żaden z nich nie pokazuje prawdziwego fontu —
   dlatego ostrzeżenie nad podglądem.
+
+## 0.5.9 — krzywe i spłaszczenie mimo brakującego fontu, z ostrzeżeniem na podglądzie (Tomasz 29.09)
+
+- **Decyzja Tomasza: „chciałbym, aby fonty dało się zamienić na krzywe — niech zostanie ostrzeżenie
+  o tych, co się zmienią w artefakty, i żeby to było widoczne na podglądzie. To samo przy
+  spłaszczeniu”.** Zmienia to, co było w 0.5.8 (tam krzywe i spłaszczenie odmawiały).
+  - `step_outline` i `step_flatten` nie odmawiają już przy brakującym foncie. Kolejność szukania
+    jak dotąd: font z pliku → Google Fonts → fonty systemu. Dopiero gdy nigdzie go nie ma,
+    Ghostscript bierze krój zastępczy. Krok zwraca wtedy `fonts_subst`: [{name, boxes}], a opis
+    dostaje „UWAGA: … te litery mają kształt kroju zastępczego”. Wynik trafia do wersji
+    (`jobs.Version.to_json`), bo w pliku po zamianie fontu już nie ma i analiza nic by nie widziała.
+    Usunięte: `_font_refusal`.
+  - `analyze.font_boxes(path, page, names)` — gdzie na stronie stoi tekst danym fontem: jedna ramka
+    na wiersz, w ułamkach strony (PyMuPDF `get_text("dict")`, tekst niewidoczny pominięty).
+    `fonts_missing` z analizy ma teraz też `boxes`.
+  - `state.fontWarnings()` łączy oba źródła: fonty utrwalone krojem zastępczym (z kroków,
+    `baked`) i fonty, których dalej brakuje (analiza ostatniej wersji).
+  - **Podgląd:** każde takie miejsce ma przerywaną pomarańczową ramkę z etykietą „⚠ <font> — krój
+    zastępczy” (`scene.marks`, warstwa `.fmarks` w `viewer.js`). Widać je od razu po wczytaniu —
+    przed decyzją, po „Zostaw jak jest”, po krzywych i po spłaszczeniu.
+  - **Fonty:** notatka przed wyborem mówi, że zamiana się uda, ale czego program nie znajdzie,
+    wyjdzie krojem zastępczym. Po zamianie z brakami: pomarańczowy komunikat „Tekst zamieniony na
+    krzywe, ale fontów … nie było w pliku ani w sieci — te litery wyszły krojem zastępczym albo
+    zniknęły (pomarańczowe ramki na podglądzie). Najlepiej poproś klienta o PDF z osadzonymi
+    fontami”.
+  - **Spłaszczenie:** przed spłaszczeniem ostrzeżenie o brakujących fontach (poszuka w Google Fonts
+    i w systemie, czego nie znajdzie — zostanie na stałe krojem zastępczym); po spłaszczeniu —
+    pomarańczowy komunikat jak w Fontach.
+  - **Pobierz plik do druku:** osobne pozycje „Brak fontu w pliku” (drukarnia podstawi krój)
+    i „Krój zastępczy utrwalony (krzywe / spłaszczenie)”.
+  - Pomoc (?) w Fontach i Spłaszczeniu opisuje nowe zachowanie; komentarze w `fontfix.py`,
+    `gs.py`, `steps.py` poprawione.
+- Sprawdzone w sandboksie na stronie 1000 × 2000 (`Test_fonty_1strona_1000x2000.pdf`):
+  - krzywe i spłaszczenie udane; Roboto i Lora pobrane i osadzone prawdziwe;
+  - FooBar Pro, FooBar Sans (i w sandboksie Arial) zgłoszone w `fonts_subst` z ramkami;
+  - Playwright: ramki na podglądzie przy przypadkach 3, 4 i 8; komunikaty w Fontach
+    i Spłaszczeniu jak wyżej.
+  - Przypadek 8 (Identity-H bez fontu) po krzywych jest pusty — litery znikają. Dlatego komunikat
+    mówi „albo zniknęły”, a ramka zostaje w tym miejscu.
+- **„Usuń szablon” zostawiał napisy ze środka** (Tomasz 29.09, `adFrame_Smart_100x250_ramki_w3.pdf`):
+  po usunięciu ramek zostawało „1 / 1015 x 2513 [mm] / Wydruk adFrame Smart 100x250”.
+  - Przyczyna: napis jest w foncie Identity-H (SegoeUI, dwubajtowe numery znaków). `frames.py`
+    czytał bajty jak zwykły tekst (latin1) i wychodziły śmieci, więc napis nie przypominał napisu
+    z szablonu i nie trafiał na listę do usunięcia.
+  - Teraz `_Walker.decoder` czyta tekst przez ToUnicode fontu (ten sam parser co `fontfix`).
+    Obsługuje fonty dwubajtowe (Type0) i znaki „symboliczne” U+F020–F0FF („” = „1”).
+    Font dwubajtowy bez ToUnicode = tekst nieczytelny, więc liczy się tylko położenie i wielkość
+    (tak, jak opisuje `_text_like`).
+  - Sprawdzone: napis odczytany jako „11015 x 2513 [mm]Wydruk adFrame Smart 100x250”
+    (w szablonie „…Print adFrame…” — podobieństwo wystarcza), usunięte 2 ramki + napis, na
+    stronie nie zostaje żaden tekst.
+- **Przypadki brzegowe (Tomasz 29.09: „warto wszystkie te punkty zrobić”)** — pierwsza piątka:
+  - **Ukryte warstwy (OCG) i adnotacje** — nowy `prepare.py`, `bake_print_state` przy wgraniu
+    (po `normalize_geometry`).
+    - Stan do druku: /D (BaseState, ON, OFF) + `/Usage /Print /PrintState`; OCMD (AnyOn, AllOn,
+      AnyOff, AllOff).
+    - Treść niedrukowanych warstw jest wycinana: `BDC /OC … EMC`, `Do` z /OC, także w formach.
+      Znaczniki drukowanych warstw zamieniane na `/OC BMC`, `/OCProperties` usunięte.
+    - Adnotacje z flagą „Print” (i nie „Hidden”) — ich wygląd /AP /N wpisany w treść strony
+      (macierz jak `analyze._annot_ctm`). Pozostałe usunięte razem z /Popup i /AcroForm; linki zostają.
+    - Powód: RIP-y różnie traktują warstwy i adnotacje (starsze drukują wszystko), a MuPDF rysuje
+      wszystkie adnotacje. Teraz podgląd = wydruk, a analiza nie liczy tego, co się nie drukuje.
+      To domyka „Ukryte warstwy” z przeglądu kodu i A7.
+  - **UserUnit** (strony ponad 200 cali, np. z Illustratora) — `normalize_geometry` wpisuje go
+    w treść: MediaBox × U, `cm` z U, bez /UserUnit.
+    - MuPDF i Ghostscript go uwzględniały, a pikepdf i nasze obliczenia nie — wymiar wychodził
+      U razy za mały.
+    - Przy pobieraniu strona ponad 14 400 pt dostaje UserUnit z powrotem
+      (`prepare.with_user_unit`, najmniejsza całkowita jednostka).
+  - **PDF z hasłem / uszkodzony** — `prepare.check_open`, przed wszystkim innym. Jasne komunikaty
+    (błąd 415):
+    - hasło do otwarcia;
+    - plik pusty albo niepełny;
+    - „to nie jest PDF” (brak nagłówka);
+    - PDF zniszczony.
+    Hasło tylko do uprawnień jest zdejmowane. Plik naprawiony przez qpdf (ostrzeżenia) daje
+    notatkę „obejrzyj dokładnie podgląd”.
+  - **Rozdział Plik:** nowa ramka „Przygotowane przy wczytaniu” (`#filePrep`, `info.prepared`)
+    — lista zmian: warstwy, adnotacje, hasło, UserUnit, naprawa.
+  - **Biel z overprintem** — `analyze.py` śledzi stan overprintu (/OP, /op, /OPM, dziedziczony
+    przez formy), kolor wypełnienia i obrysu oraz obrys ścieżki i napisu.
+    - Biel, która znika: szarość 1; RGB 1/1/1 (znika po zamianie na CMYK); CMYK 0/0/0/0 przy OPM 1.
+      Kolor dodatkowy „White” nie jest liczony — jest celowy.
+    - Wynik: `white_overprint` = ramki (ułamki strony).
+    - Overprint: ostrzeżenie „biel z overprintem (N miejsc) w druku zniknie” przed decyzją
+      i po „Zostaw jak jest”; pomarańczowe ramki na podglądzie znikają po „Wyłącz overprint”.
+  - **Za dużo farby (TAC)** — nowy `ink.py` i `/api/jobs/<id>/ink`: render CMYK FOGRA39 z symulacją
+    overprintu (1500 px), suma C+M+Y+K, limit 330 % (limit profilu).
+    - Czerń RGB po zamianie daje ok. 316 %, więc nie ma fałszywych alarmów.
+    - Skupiska ponad limit → czerwone ramki „farba 400 %”.
+    - Kolory: ramka „Za dużo farby…” (przy ≥ 390 % podpowiada czerń 4 × 100 % albo „Registration”).
+    - Tylko informacja — poprawić musi grafik albo klient.
+    - Liczone od Symulacji wydruku, dla ostatniej wersji (`S.ink`, `inkNow()`).
+  - **Wspólne:**
+    - `state.printRisks()` zbiera ramki bieli z overprintem i farby do podglądu (`.fmarks`,
+      czerwone: klasa `red`).
+    - W „Pobierz plik do druku” są nowe pozycje: biel z overprintem, za dużo farby.
+    - Pomoc (?) w rozdziałach Plik, Overprint i Kolory uzupełniona.
+  - **Sprawdzone:**
+    - Testy na sztucznych plikach: warstwy (ukryta, „nie drukuj”, widoczna); stempel, pole
+      tekstowe, komentarz; UserUnit 10 (render przed i po identyczny, po pobraniu UserUnit 2 i ten
+      sam wygląd); hasło do otwarcia, hasło do uprawnień, obcięty plik, śmieci, „nie PDF”; biel
+      CMYK, szara i bez overprintu; TAC: czerń RGB 316 %, 4 × 100 % i Registration = 400 %.
+    - Playwright na `Test_edge_1strona_1000x1500.pdf`: ramka w rozdziale Plik, ostrzeżenie
+      o farbie w Kolorach, ostrzeżenie o bieli w Overprincie, 4 ramki na podglądzie; po „Wyłącz
+      overprint” zostają 2 (farba). Bez błędów JS.
+  - **Pliki testowe** (`przykladowe projekty/bledne/edge/`):
+    - `Test_edge_1strona_1000x1500.pdf` (warstwy, adnotacje, biel z overprintem, farba);
+    - `Test_edge_UserUnit_7000x1760.pdf`;
+    - `Test_edge_haslo_do_otwarcia_abc.pdf`;
+    - `Test_edge_haslo_uprawnien.pdf`;
+    - `Test_edge_uszkodzony_naprawialny.pdf`;
+    - `Test_edge_nie_pdf.pdf`.
+- **„Różnice po spłaszczeniu” w `adFrame_Smart_100x250_1.pdf`** (Tomasz 29.09, zrzuty z Photoshopa):
+  - Oryginał to JEDEN obraz CMYK JPEG 4795 × 11872 px, dokładnie 120 ppi, bez żadnego wektora.
+  - Spłaszczenie odtwarza go 1:1 — porównane wszystkie 56,9 mln pikseli z dekodowanym JPEG-iem:
+    różnica 0.
+  - Różnica widoczna w Photoshopie wynika więc z tego, jak Photoshop otwiera (rasteryzuje) każdy
+    z PDF-ów, a nie z danych do druku.

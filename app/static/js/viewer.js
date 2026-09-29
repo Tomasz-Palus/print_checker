@@ -398,6 +398,21 @@ function drawDecor(z, px, py) {
   dim.hidden = !scene.dimOutside;
   for (const el of [fr, dim]) box(el, px(0), py(0), scene.frame.w * z, scene.frame.h * z);
   if (!fr.hidden) fr.innerHTML = `<span>${scene.frameLabel}</span>`;
+  // litery krojem zastępczym (brak fontu) — ramki z nazwą fontu (Tomasz 29.09)
+  const mk = decor("fmarks"), marks = scene.marks || [];
+  mk.hidden = !marks.length;
+  if (marks.length) {
+    while (mk.children.length < marks.length) mk.appendChild(document.createElement("div"));
+    [...mk.children].forEach((d, i) => {
+      const m = marks[i];
+      d.hidden = !m;
+      if (!m) return;
+      const pad = 3;
+      box(d, px(m.r.x) - pad, py(m.r.y) - pad, m.r.w * z + 2 * pad, m.r.h * z + 2 * pad);
+      d.classList.toggle("red", m.tone === "red");
+      if (d.dataset.l !== m.label) { d.innerHTML = `<span>⚠ ${m.label}</span>`; d.dataset.l = m.label; }
+    });
+  }
   // podświetlony obszar
   const hl = decor("hilite");
   hl.hidden = !hilite;

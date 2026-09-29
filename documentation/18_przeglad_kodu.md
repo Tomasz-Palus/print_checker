@@ -146,7 +146,7 @@ Przegląd całego programu na prośbę Tomasza. Bez zmian w kodzie — to lista 
 - **Komunikat „Zapisano: …”:** przechodzi na inny plik albo stronę.
 - **Obraz rastrowy:** ppi liczone tylko z szerokości (`quality.py:68`).
 - **16-bitowe obrazy szare:** tracą szczegół przed pomiarem (`detailmap.py:294`).
-- **Ukryte warstwy (OCG):** są analizowane jak widoczne.
+- **Ukryte warstwy (OCG):** są analizowane jak widoczne. **Zrobione w 0.5.9** (`prepare.bake_print_state` — stan do druku wpisany przy wgraniu).
 
 ## Sprawdzone i w porządku
 
@@ -172,7 +172,7 @@ Przegląd całego programu na prośbę Tomasza. Bez zmian w kodzie — to lista 
 
 - **0.4.8:** A1, A2, A3, A4, A5, A11, A14, B15 — zrobione.
 - **0.4.9:** A6, A7, A8, A9, C21, C22, C26, C27 — zrobione.
-- **0.5:** A10 (obrót, CropBox), A12, A13 — zrobione. UserUnit zostaje.
+- **0.5:** A10 (obrót, CropBox), A12, A13 — zrobione. UserUnit — zrobione w 0.5.9 (`normalize_geometry`, przy pobraniu wraca).
 - **0.5.3:** z części D — ppi rastra z obu boków, 16-bitowe obrazy szare, ogromny obraz
   liczony bez tego, co leży nad nim (i bez założenia, że leży prosto) — zrobione.
 - **Zostaje:**
