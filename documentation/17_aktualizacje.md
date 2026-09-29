@@ -586,3 +586,37 @@ Numery jak w `18_przeglad_kodu.md`.
 - Sprawdzone (Playwright, 1878, format 3030 × 2280): wpisane −12,5 i 999 mm → suwaki i opis
   się zgadzają. Wariantu 1:10 nie dało się odtworzyć w sandboksie (brak dostępu do wytycznych
   z sieci) — do sprawdzenia u Tomasza na adWall Vario Prosta 600.
+
+## 0.5.6 — fałszywy „szablon wtopiony w obraz”, Akceptacja od „po” (Tomasz 29.09)
+
+- **„Linie w kolorach wytycznych są wtopione w obraz” na pliku bez żadnego obrazu**
+  (Wydruk Multiframe 250 SET3, „sam wektor”).
+  - Przyczyna: `frames.in_pixels` szukał linii w kolorze wytycznych na renderze CAŁEJ strony.
+    Cyjanowa kreska wektorowa pod napisem (ok. 64 % szerokości) mieściła się w tolerancji
+    koloru i w progu „pół szerokości”.
+  - Teraz liczą się tylko piksele wewnątrz obrazów (położenia z analizy oryginału,
+    `server._image_boxes`). Strona bez obrazów — sprawdzenie od razu „nie”. Linia wektorowa
+    w kolorze wytycznych to element projektu (prawdziwy wektorowy szablon i tak łapie
+    `frames.find`).
+  - Sprawdzone: odtworzona strona wektorowa z cyjanową kreską — wcześniej „wtopiony”, teraz nie.
+    Obraz z wtopioną cyjanową linią przez całą szerokość — dalej wykryty.
+- **Akceptacja: suwak startuje od „po”** — plik taki, jaki pójdzie do druku (wcześniej od
+  „przed”).
+- **Spłaszczenie „szarpie” krawędzie** (1815 / Multiframe CAD/CAM, Photoshop przy ~450 %).
+  - Główna przyczyna: kompresja JPEG q90. Na ostrej krawędzi białego napisu na granacie
+    dawała kwadraciki 8×8 i wcięcia wzdłuż krawędzi. Zmierzone na wycinku 1815, w pasie ±4 px
+    wokół krawędzi: q90 — średnio 1,8/255, 99. percentyl 9, maks. 19; q98 — 0,4 / 2 / 4.
+    Najpierw q98, a na prośbę Tomasza (chce bezstratnie; JPEG 100 też nie jest bezstratny —
+    do 2/255) **zapis bezstratny ZIP (Flate) z predyktorem PNG „Sub”** (`_flatten_supersampled`
+    pisze strumień pasmami, `step_flatten` wstawia go jako /FlateDecode, Predictor 15).
+    Pomiary: 1815 (grafika wektorowa) — 9 MB (JPEG q90: 17 MB), 25 s; 1878 (zdjęcia,
+    14268 × 10867 px) — 288 MB, 107 s w sandboksie. Poziom zlib 3 (`FLATTEN_ZLIB_LEVEL`).
+  - Overprint przy spłaszczaniu liczy się tylko wtedy, gdy STRONA naprawdę go używa
+    (`overprint_uses` z analizy). Wcześniej wystarczył nieużywany stan graficzny z /OP w pliku —
+    wtedy przy dużej stronie gs wyłączał wygładzanie krawędzi (obejście błędu gs, `gs.aa_args`).
+  - Gdy wygładzania gs naprawdę nie da się włączyć (overprint na dużej stronie), nadpróbkowanie
+    4× zamiast 2× (16 próbek na piksel, jak AlphaBits=4); przy stronie ponad 4000 Mpx
+    renderu — 3×.
+  - Porównanie wycinka ukośnej krawędzi „/”: q98 wygląda jak render MuPDF-a z pliku
+    wektorowego. Rozdzielczość zostaje (150 ppi przy wydruku 1,5–3 m), więc w dużym
+    powiększeniu dalej widać piksele — ale równe, bez wcięć.

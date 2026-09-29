@@ -685,7 +685,12 @@ def step_outline(src, dst, p, job) -> dict:
 # spłaszczenie
 # ----------------------------------------------------------------------------
 FLATTEN_MAX_MPX = 400      # sufit; adWall Vario Prosta 600 w 1:10 przy 120 ppi to 319 Mpx (8 s)
-FLATTEN_JPEG_Q = 90        # zmierzone: q95/q98 poprawiają wygląd o 0,1/255, a plik rośnie o 40–90 %
+# Zapis spłaszczenia BEZSTRATNY (Tomasz 29.09): ZIP (Flate) z predyktorem PNG „Sub” — piksel w piksel
+# to, co wyrenderował Ghostscript. Wcześniej JPEG q90: na ostrej krawędzi (biały napis na granacie)
+# kwadraciki 8×8 i wcięcia, w pasie ±4 px wokół krawędzi do 19/255 (1815, CAD/CAM). JPEG 100 też
+# nie jest bezstratny (do 2/255). Grafika wektorowa kompresuje się w ZIP lepiej niż JPEG-iem;
+# zdjęcia — gorzej (plik większy).
+FLATTEN_ZLIB_LEVEL = 3        # zmierzone na zdjęciach 1878: 6 → 40 MB/s, 3 → 89 MB/s (+7 % rozmiaru), 1 → 118 MB/s (+13 %)
 
 
 def flatten_ppi_for(long_mm: float) -> int:
@@ -710,29 +715,35 @@ def flatten_plan(w_pt: float, h_pt: float, k: float) -> dict:
 
 
 FLATTEN_SS = 2              # nadpróbkowanie spłaszczenia (zawsze; jak podgląd)
+# Gdy wygładzanie Ghostscripta jest wyłączone (overprint na dużej stronie — błąd gs, gs.aa_args),
+# 2× daje tylko 4 próbki na piksel: krawędzie wychodzą „szarpane” (Tomasz 29.09). Wtedy 4× = 16
+# próbek, tyle co AlphaBits=4 — o ile render się mieści w FLATTEN_SS_MAX_MPX (dalej 3×).
+FLATTEN_SS_NOAA = 4
+FLATTEN_SS_MAX_MPX = 4000
 
 
-def _flatten_supersampled(base: list, dpi: float, ss: int, src: str, jpg: str) -> str:
+def _flatten_supersampled(base: list, dpi: float, ss: int, src: str, out_path: str) -> tuple[str, int, int]:
     """Spłaszczenie z nadpróbkowaniem: render ss× gęściej, uśrednienie bloków ss×ss (Pillow reduce),
-    zapis JPEG-a CMYK. Tak jak piramida podglądu (render._level0).
+    zapis BEZSTRATNY: strumień Flate (zlib) wierszy CMYK z predyktorem PNG „Sub” (filtr 1),
+    gotowy do wstawienia do PDF-a jako /FlateDecode z /DecodeParms Predictor 15.
 
-    Obraz idzie strumieniem pasmami; wynik leży w pliku na dysku (np.memmap), więc nawet 300 Mpx
-    nie trzyma całej strony w pamięci. Zwraca dziennik gs."""
+    Obraz idzie strumieniem pasmami — ani render, ani wynik nie siedzą w pamięci w całości
+    (spłaszczenie 400 Mpx). Zwraca (dziennik gs, szerokość, wysokość)."""
     import math
+    import zlib
     import numpy as np
     from PIL import Image
     import render
-    raw = jpg + ".cmyk"
     p = gs.stream([*base, "-sDEVICE=pamcmyk32", f"-r{dpi * ss:.4f}", "-sOutputFile=-",
                    *gs.PREVIEW_PRE, gs.arg_path(src)], quiet=False)   # pełny dziennik: zamienione fonty
-    out = im = None
+    comp = zlib.compressobj(FLATTEN_ZLIB_LEVEL)
+    fh = open(out_path, "wb")
     try:
         try:
             W2, H2, ch = render._head(p)
             if ch != 4:
                 raise RuntimeError("Ghostscript nie zwrócił obrazu CMYK.")
             W, H = math.ceil(W2 / ss), math.ceil(H2 / ss)
-            out = np.memmap(raw, np.uint8, "w+", shape=(H, W, 4))
             band_h = max(1, 64_000_000 // (W2 * 4 * ss))          # ~64 MB surowych danych na pasmo
             for y in range(0, H, band_h):
                 hgt = min(band_h, H - y)
@@ -740,26 +751,29 @@ def _flatten_supersampled(base: list, dpi: float, ss: int, src: str, jpg: str) -
                 a = np.frombuffer(render._read(p, W2 * 4 * rows, "spłaszczenie"), np.uint8).reshape(rows, W2, 4)
                 if rows != hgt * ss or W2 != W * ss:
                     a = np.pad(a, ((0, hgt * ss - rows), (0, W * ss - W2), (0, 0)), mode="edge")
-                im = Image.frombuffer("CMYK", (W * ss, hgt * ss), np.ascontiguousarray(a).tobytes(),
-                                      "raw", "CMYK", 0, 1).reduce(ss)
-                out[y:y + hgt] = np.asarray(im)
-                im = None
+                if ss > 1:
+                    a = np.asarray(Image.frombuffer("CMYK", (W * ss, hgt * ss), np.ascontiguousarray(a).tobytes(),
+                                                    "raw", "CMYK", 0, 1).reduce(ss))
+                # predyktor PNG „Sub”: każdy bajt minus bajt tej samej farby piksel wcześniej
+                f = np.empty((hgt, W * 4 + 1), np.uint8)
+                f[:, 0] = 1
+                row = a.reshape(hgt, W * 4)
+                f[:, 1:5] = row[:, :4]
+                f[:, 5:] = row[:, 4:] - row[:, :-4]                # uint8 — zawija modulo 256, jak w PNG
+                fh.write(comp.compress(f.tobytes()))
+                del a, f, row
         finally:
             render._close(p)
         log = bytes(p.err_all).decode("utf-8", "replace")
         if p.returncode not in (0, None):
             raise RuntimeError(f"kod {p.returncode}: " + log[-300:])
-        out.flush()
-        # Pillow zapisuje CMYK w konwencji Adobe (odwrócone) — jak jpegcmyk Ghostscripta
-        im = Image.frombuffer("CMYK", (W, H), out, "raw", "CMYK", 0, 1)
-        im.save(jpg, "JPEG", quality=FLATTEN_JPEG_Q, subsampling=0)
-        return log
+        fh.write(comp.flush())
+        fh.close()
+        return log, W, H
     except Exception as e:
-        _rm(jpg)
+        fh.close()
+        _rm(out_path)
         raise ValueError(f"Ghostscript nie dał rady spłaszczyć strony. Komunikat: {e}") from e
-    finally:
-        del im, out
-        _rm(raw)
 
 
 def step_flatten(src, dst, p, job) -> dict:
@@ -792,20 +806,30 @@ def step_flatten(src, dst, p, job) -> dict:
         icc, name = gs.safe_icc(gs.fogra(), work), gs.FOGRA_NAME
         with open(gs.fogra(), "rb") as fh:
             data = fh.read()
-    op = pdfutil.uses_overprint(src)
+    # overprint liczy się tylko ten, którego STRONA naprawdę używa (analiza treści). Wcześniej
+    # wystarczył dowolny stan graficzny z /OP w całym pliku (Illustrator zostawia nieużywane) —
+    # i spłaszczenie traciło wygładzanie krawędzi (Tomasz 29.09).
+    try:
+        op = (_page_facts(job, src, page).get("overprint_uses") or 0) > 0
+    except Exception:
+        op = pdfutil.uses_overprint(src)
     gs_src, finfo = _prepare_fonts(src, dst)
-    jpg = dst + ".jpg"
+    zpath = dst + ".flate"
     # Zawsze nadpróbkowanie 2× (jak podgląd, render.SS): Ghostscript nie wygładza krawędzi gradientu
     # przyciętego kształtem liter (Tomasz 25.09), a przy dużej stronie z overprintem nie wygładza
     # niczego (błąd — gs.aa_args). Wygładzanie Ghostscripta dokładamy, gdy jest bezpieczne.
     ss = FLATTEN_SS
     aa = gs.aa_args(op, plan["px"][0] * ss, plan["px"][1] * ss, 4)
+    if not aa:                                   # bez wygładzania gs — więcej próbek na piksel
+        mpx = plan["px"][0] * plan["px"][1] / 1e6
+        ss = FLATTEN_SS_NOAA if mpx * FLATTEN_SS_NOAA ** 2 <= FLATTEN_SS_MAX_MPX else 3
+        aa = gs.aa_args(op, plan["px"][0] * ss, plan["px"][1] * ss, 4)
     base = ["-dSAFER", "--permit-file-read=" + icc, *gs.font_path_args(),
             "-sOutputICCProfile=" + icc, "-sDefaultCMYKProfile=" + icc, "-dUseCropBox",
             f"-dFirstPage={page + 1}", f"-dLastPage={page + 1}", *gs.SPEED[:1], *aa,
             "-dOverprint=/simulate"]                 # na urządzeniu CMYK to nie symulacja, tylko druk
     try:
-        log, err = _flatten_supersampled(base, plan["dpi"], ss, gs_src, jpg), None
+        (log, pw_, ph_), err = _flatten_supersampled(base, plan["dpi"], ss, gs_src, zpath), None
     finally:
         _rm(gs_src if gs_src != src else None)
     try:
@@ -814,20 +838,19 @@ def step_flatten(src, dst, p, job) -> dict:
         subs = gs.substituted(log, finfo.get("niewidoczne", []))
         if subs:
             raise ValueError(_font_refusal("spłaszczam", subs, finfo))
-        with open(jpg, "rb") as fh:
+        with open(zpath, "rb") as fh:
             raw = fh.read()
-        px = Image.open(io.BytesIO(raw)).size
+        px = (pw_, ph_)
         with pikepdf.open(src) as pdf:
             ic = pdf.make_stream(data)
             ic["/N"] = 4
-            img = pikepdf.Stream(pdf, raw)
+            img = pikepdf.Stream(pdf, b"")
+            # bezstratnie: dane już skompresowane (Flate + predyktor PNG) — wstawiamy bez przeliczania
+            img.write(raw, filter=pikepdf.Name("/FlateDecode"),
+                      decode_parms=pikepdf.Dictionary(Predictor=15, Colors=4, BitsPerComponent=8, Columns=px[0]))
             img["/Type"], img["/Subtype"] = pikepdf.Name("/XObject"), pikepdf.Name("/Image")
             img["/Width"], img["/Height"], img["/BitsPerComponent"] = px[0], px[1], 8
             img["/ColorSpace"] = pikepdf.Array([pikepdf.Name("/ICCBased"), pdf.make_indirect(ic)])
-            img["/Filter"] = pikepdf.Name("/DCTDecode")
-            # CMYK-owy JPEG z Ghostscripta jest w konwencji Adobe (wartości odwrócone) —
-            # bez /Decode strona wychodzi jak negatyw
-            img["/Decode"] = pikepdf.Array([1, 0, 1, 0, 1, 0, 1, 0])
             new = pikepdf.Dictionary(
                 Type=pikepdf.Name("/Page"), MediaBox=[0, 0, w_pt, h_pt],
                 Resources=pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im0=img)),
@@ -835,7 +858,7 @@ def step_flatten(src, dst, p, job) -> dict:
             pdf.pages[page] = pikepdf.Page(pdf.make_indirect(new))
             pdf.save(dst)
     finally:
-        _rm(jpg)
+        _rm(zpath)
     text = (f"strona spłaszczona do jednego obrazu CMYK {px[0]} × {px[1]} px "
             f"({plan['ppi']} ppi na wydruku), profil {name}")
     if plan["cut"]:

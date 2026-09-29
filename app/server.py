@@ -296,6 +296,25 @@ def gl_pdf(hash_: str) -> str | None:
     return None
 
 
+def _image_boxes(job, page: int) -> list:
+    """Gdzie na stronie oryginału leżą obrazy (mm, y od góry) — z analizy (ta sama pamięć co
+    /analysis). Obrazki < 8 px to wypełnienia, nie zdjęcia."""
+    v = job.original
+    cache = job.analysis.setdefault(v.id, {})
+    if page not in cache:
+        res = analyze.analyze(v.path, page)
+        job.images.setdefault(v.id, {})[page] = res.pop("_images", None)
+        cache[page] = res
+    out = []
+    for rec in job.images.get(v.id, {}).get(page) or []:
+        if rec.get("mask") or rec.get("width", 0) < 8 or rec.get("height", 0) < 8:
+            continue
+        for p in rec.get("placements") or []:
+            if p.get("page", page) == page and p.get("bw_mm") and p.get("bh_mm"):
+                out.append((p["x_mm"], p["y_mm"], p["bw_mm"], p["bh_mm"]))
+    return out
+
+
 @app.get("/api/jobs/<jid>/frames")
 def api_frames(jid):
     """Czy w pliku został szablon z wytycznych. Zawsze na ORYGINALE — usuwanie szablonu jest
@@ -312,7 +331,8 @@ def api_frames(jid):
         r = frames.find(job.original.path, page, tuple(mm), gl_pdf(request.args.get("gl", "")), glp if glp >= 0 else None)
         # linie w kolorach wytycznych na obrazie strony — ale tylko gdy nie tłumaczą ich ramki
         # WEKTOROWE (bez wytycznych wektorowy szablon wyglądał jak „wtopiony w obraz")
-        pixels = not r["found"] and not r["foreign"] and frames.in_pixels(job.original.path, page, tuple(mm))
+        pixels = not r["found"] and not r["foreign"] and frames.in_pixels(job.original.path, page, tuple(mm),
+                                                                          _image_boxes(job, page))
         # szablon przykryty grafiką nie drukuje się — nie ma czego zgłaszać
         hidden = bool(r["found"]) and not frames.visible(job.original.path, page, r["found"])
     except Exception as e:

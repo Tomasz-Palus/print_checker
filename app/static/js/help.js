@@ -107,6 +107,6 @@ export const HELP = {
   acc: `Ostatnie spojrzenie przed pobraniem. <b>Pokaż wydruk przed i po</b> porównuje, jak plik
     wydrukowałby się bez poprawek z rozdziałów Kolory, Overprint, Fonty i Spłaszczenie, z tym,
     jak wydrukuje się teraz — oba tak, jak zrobi to drukarnia (kolory z drukarki, overprint).
-    Suwak startuje od „przed". Gdy wszystko gra — <b>Akceptuję plik</b>. Każda późniejsza zmiana
+    Suwak startuje od „po” — tak, jak plik pójdzie do druku. Gdy wszystko gra — <b>Akceptuję plik</b>. Każda późniejsza zmiana
     pliku zdejmuje akceptację.`,
 };

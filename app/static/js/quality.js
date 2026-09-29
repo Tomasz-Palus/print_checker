@@ -220,8 +220,8 @@ function fileName() {
 // konkretnej wersji: każda zmiana pliku ją zdejmuje.
 $("acShow").querySelector("button").addEventListener("click", () => {
   const on = S.sim === "final";
-  S.sim = on ? null : "final"; S.simMix = 0; S.cmp = null;     // start od „przed" — różnicę widać od razu
-  $("acSimBar").querySelector("input").value = 0;
+  S.sim = on ? null : "final"; S.simMix = 100; S.cmp = null;   // start od „po” — plik taki, jaki pójdzie do druku (Tomasz 29.09)
+  $("acSimBar").querySelector("input").value = 100;
   S.accShown = head().id;
   closeNav();
   if (!on) viewer.zoomFit();              // cały projekt w oknie, jak po „Dopasuj" (Tomasz 25.09)

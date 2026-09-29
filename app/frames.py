@@ -404,19 +404,38 @@ RASTER_TOL = 70           # druk i JPEG rozmywają kolor
 RASTER_MIN_COVER = 0.5    # jaka część wiersza/kolumny ma mieć ten kolor
 
 
-def in_pixels(path: str, page_index: int, page_mm: tuple) -> bool:
-    """Czy w obrazie strony biegnie linia w kolorze wytycznych przez (prawie) całą szerokość
-    albo wysokość. Pas grubszy niż 14 mm to już pole, nie linia — pomijamy."""
+def in_pixels(path: str, page_index: int, page_mm: tuple, boxes_mm: list | None = None) -> bool:
+    """Czy w OBRAZACH strony biegnie linia w kolorze wytycznych przez (prawie) całą szerokość
+    albo wysokość. Pas grubszy niż 14 mm to już pole, nie linia — pomijamy.
+
+    `boxes_mm` — gdzie na stronie leżą obrazy [(x, y, w, h) w mm, y od góry]. Liczą się tylko
+    piksele wewnątrz nich: wektorowa linia w kolorze podobnym do wytycznych to element projektu,
+    nie „szablon wtopiony w obraz” (Tomasz 29.09: plik „sam wektor” z cyjanową kreską pod
+    napisem dostał to ostrzeżenie). Pusta lista = strona bez obrazów = nic wtopionego być nie może.
+    None — jak dawniej, cała strona."""
     import numpy as np
     from PIL import Image
     import render
+    if boxes_mm is not None and not boxes_mm:
+        return False
     try:
         a = np.asarray(Image.open(io.BytesIO(render.page_png(path, page_index, 2400))).convert("RGB")).astype(np.int16)
     except Exception:
         return False
     H, W, _ = a.shape
+    inside = None
+    if boxes_mm is not None:
+        inside = np.zeros((H, W), bool)
+        sx, sy = W / max(page_mm[0], 1e-6), H / max(page_mm[1], 1e-6)
+        for x, y, w, h in boxes_mm:
+            x0, y0 = max(0, int(x * sx)), max(0, int(y * sy))
+            x1, y1 = min(W, int(np.ceil((x + w) * sx))), min(H, int(np.ceil((y + h) * sy)))
+            if x1 > x0 and y1 > y0:
+                inside[y0:y1, x0:x1] = True
     for rgb in RASTER_COLORS:
         m = np.abs(a - np.array(rgb, dtype=np.int16)).max(axis=2) <= RASTER_TOL
+        if inside is not None:
+            m &= inside
         for vals, mm_px in ((m.mean(axis=1), page_mm[1] / H), (m.mean(axis=0), page_mm[0] / W)):
             run = 0
             for v in list(vals) + [0.0]:
