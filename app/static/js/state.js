@@ -253,7 +253,7 @@ export const overprintSettled = () => settledByChoice("overprint", colorSettled(
 export const fontsSettled = () => settledByChoice("outline", overprintSettled(), (a) => !isPdf() || !(a.fonts || []).length);
 // Spłaszczenie: ZAWSZE czeka na wybór, także bez przezroczystości (Tomasz 25.09: „kolejny rozdział
 // nie powinien się pojawić, dopóki nie wybiorę")
-export const flattenSettled = () => settledByChoice("flatten", fontsSettled(), (a) => !isPdf());
+export const flattenSettled = () => settledByChoice("flatten", fontsSettled(), (a) => !isPdf() || !!a.flat_image);
 
 // Ile pikseli wyjdzie po spłaszczeniu (to samo liczy serwer: steps.flatten_plan).
 export function flattenPlan() {

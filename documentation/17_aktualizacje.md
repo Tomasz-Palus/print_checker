@@ -917,3 +917,52 @@ Numery jak w `18_przeglad_kodu.md`.
   - Sprawdzone: plik testowy (czerń 4 × 100 % i „Registration”) → 2 miejsca poprawione, suma farb
     400 % → 353 %, bez ostrzeżenia. Czerń 60/50/50/100 nietknięta. Playwright: przycisk
     dopiero po wyborze w rzędzie Kolory, po poprawie ramki znikają, błędów JS brak.
+
+## 0.6.2 — samouczek dogoniony, strona „już jednym obrazem” bez spłaszczania (Tomasz 29.09)
+
+- **Samouczek** (pytanie Tomasza „czy samouczek mamy zaktualizowany do tej wersji?”):
+  - Nowy krok „Za dużo farby” po Kolorach — pokazuje się, gdy jest przycisk „Popraw czerń”.
+    Plik przykładowy ma czerń 400 %, więc krok zawsze wystąpi. Mówi też, że ramki widać tylko
+    w rozdziale, którego dotyczą.
+  - Overprint: gdy jest biel z overprintem — zdanie o bieli, która w druku znika, i pomarańczowych
+    ramkach.
+  - Jakość wydruku: gdy jest ramka o cienkich liniach / obszarze bezpiecznym — zdanie o niej.
+  - Sprawdzone (Playwright, cały samouczek na pliku przykładowym): wszystkie kroki po kolei, od
+    „Witaj” do „To wszystko!”, bez błędów JS.
+- **Strona, która już jest jednym obrazem, nie jest spłaszczana** (Tomasz 29.09: „spłaszczenie
+  powoduje drobne glitche … adFrame_Smart_100x250_1_1, ikona stolika”):
+  - Przyczyna: `adFrame_Smart_100x250_1_1.pdf` (tak jak `_1`) to w środku jeden obraz JPEG CMYK
+    4795 × 11872 px, dokładnie 120 ppi, bez wektora. Spłaszczenie tylko przelicza te piksele od
+    nowa. W sandboksie (Ghostscript 10.02) wynik jest identyczny co do piksela (sprawdzone: 56,9 mln
+    pikseli, różnica 0). Ghostscript w zainstalowanym programie (10.07) najpewniej przesuwa przy tym
+    pojedyncze rzędy pikseli — stąd drobne ząbki na krawędziach.
+  - `analyze.flat_image`: strona, której treść to tylko q/Q/cm/gs (bez przezroczystości
+    i overprintu) i jedno `Do` obrazu pokrywającego całą stronę, bez maski i bez adnotacji →
+    `{w, h, ppi}` w analizie.
+  - Rozdział Spłaszczenie: „Projekt jest już jednym obrazem (W × H px) — nie ma czego spłaszczać”,
+    zaliczony sam, bez przycisków. `step_flatten` dla takiej strony odmawia (na wszelki wypadek).
+  - Sprawdzone (Playwright, `adFrame_Smart_100x250_1_1.pdf`): Spłaszczenie „już jeden obraz”,
+    zaliczone, bez rzędów wyboru; plik testowy z wektorami — bez zmian.
+- **Symulacja wydruku liczy profilem z pliku** (Tomasz 29.09, 1878: „liście w »druk« bardziej
+  pomarańczowe niż w »ekran« — a zdjęcie jest w CMYK”):
+  - Zdjęcia 1878 to CMYK z profilem ISO Coated v2 (ECI), ten sam jest w deklaracji pliku.
+    Symulacja liczyła „maszynę” zawsze w FOGRA39, więc Ghostscript przeliczał ISO Coated v2 →
+    FOGRA39. Liczby farb zmieniały się średnio o ok. 10 % (inna generacja czerni), a kolor na
+    ekranie miejscami o kilkanaście punktów (żółto-zielone liście).
+  - `gs.sim_profile(plik)` = profil CMYK zapisany w pliku (`steps.file_icc`: OutputIntent albo
+    osadzony profil CMYK, sprawdzony: CMYK + klasa „prtr”), a gdy go nie ma — FOGRA39. Używają go:
+    - `gs.proof_args` / `color_args` (podgląd „druk” i „ekran”, wycinki);
+    - `render.proof_rgb` (CMYK → ekran);
+    - `ink.measure` (suma farb).
+    Spłaszczenie już wcześniej brało profil z pliku. `RENDER_VER` 8 — stare kafelki podglądu się
+    nie mieszają.
+  - Zmierzone na wycinku z drzewami: „ekran” vs „druk” średnio 2,5 → 0,2 (na 255).
+  - Po „Zamień na CMYK → FOGRA39” plik ma w deklaracji FOGRA39, więc symulacja nowej wersji liczy
+    FOGRA39. Suwak przed/po w Kolorach pokazuje wtedy tę niewielką różnicę — tak ma być.
+- **Kolory: przycisk „Z pliku” z nazwą profilu** (Tomasz 29.09): pod napisem „Z pliku” jest nazwa
+  profilu z pliku (np. ISO Coated v2 (ECI)). Przycisk zostaje widoczny także po wybraniu FOGRA39 —
+  kliknięcie cofa zamianę i robi ją od nowa z profilem z pliku.
+- **Spowolnienie analizy z 0.6.0 naprawione:** `analyze._text_boxes` (obszar bezpieczny)
+  i `font_boxes` czytały tekst przez `get_text("dict")`, które przy okazji dekoduje WSZYSTKIE obrazy
+  strony. Przy 1878 (zdjęcie 11891 × 9055 px) analiza trwała 22 s zamiast 1 s. Teraz jest
+  `flags=TEXTFLAGS_TEXT` (bez obrazów) — 1,3 s.

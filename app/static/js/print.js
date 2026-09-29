@@ -161,8 +161,14 @@ export function renderColor() {
   const fp = isPdf() ? fileProfile(a) : "";
   $("coProf").hidden = !(rows && c.act === "convert");
   document.querySelectorAll("#coProf button").forEach((b) => {
-    // po zamianie plik ma już NASZ profil — „z pliku" znaczy tylko profil sprzed zamiany
-    if (b.dataset.v === "keep") { b.hidden = c.profile !== "keep" && (!fp || on); b.title = fp && !on ? `Zostaje profil zapisany w pliku: ${fp}` : ""; }
+    // „Z pliku” widać zawsze, gdy plik ma profil — z jego nazwą; także po wyborze FOGRA39, żeby dało
+    // się zmienić zdanie (Tomasz 29.09). Profil to ten sprzed zamiany (facts("cmyk")).
+    if (b.dataset.v === "keep") {
+      b.hidden = !fp;
+      const html = `Z pliku<br><small>${esc(fp)}</small>`;
+      if (b.dataset.html !== html) { b.innerHTML = html; b.dataset.html = html; }
+      b.title = fp ? `Kolory zostają w profilu zapisanym w pliku: ${fp}` : "";
+    }
   });
   pick("coProf", c.profile);
   lockRows(["coAct", "coProf"]);
@@ -306,6 +312,11 @@ export function renderFlatten() {
   } else if (!on && !c.act && a.error) {
     st = "done"; sum = "nie udało się sprawdzić";
     say = `<span class="say warn">Nie udało się sprawdzić przezroczystości.</span>`;
+  } else if (!on && a.flat_image) {
+    // strona już jest jednym obrazem — spłaszczenie tylko przeliczyłoby piksele (Tomasz 29.09: ząbki)
+    st = "done"; sum = "już jeden obraz";
+    say = `<span class="say ok">Projekt jest już jednym obrazem</span> (${nf(a.flat_image.w)} × ${nf(a.flat_image.h)} px) — `
+      + `nie ma czego spłaszczać. Program zostawia go bez zmian.`;
   } else {
     if (S.settle.flatten || on) st = "done";
     if (c.act === "fix" || on) {
@@ -349,7 +360,7 @@ export function renderFlatten() {
   chapter("ch-flat", st, sum);
   $("flSay").innerHTML = say;
   $("flNote").innerHTML = note; $("flNote").hidden = !note;
-  rowsFor("fl", "flatten", !!a && !a.error || on || !!c.act, on);
+  rowsFor("fl", "flatten", (!!a && !a.error && !a.flat_image) || on || !!c.act, on);
 }
 
 // Fonty utrwalone krojem zastępczym przez dany krok (serwer: `fonts_subst`).

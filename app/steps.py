@@ -947,8 +947,13 @@ def step_flatten(src, dst, p, job) -> dict:
     profilem z pliku albo FOGRA39. Tekst i wektory dostają rozdzielczość rastra."""
     import io
     import pdfutil
+    import analyze
     from PIL import Image
     page = int(p.get("page", 0))
+    fi = analyze.flat_image(src, page)
+    if fi:
+        raise ValueError(f"Strona już jest jednym obrazem ({fi['w']} × {fi['h']} px) — spłaszczanie niczego nie "
+                         "poprawi, tylko przeliczyłoby piksele od nowa. Wybierz „Zostaw jak jest”.")
     d = pymupdf.open(src)
     try:
         rect = d[page].rect

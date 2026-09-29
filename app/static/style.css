@@ -235,6 +235,7 @@ select.sel.small { width: auto; padding: 4px 8px; margin: 6px 0 0 24px; font-siz
 .seg button:last-child { border-radius: 0 8px 8px 0; }
 .seg button.on { background: var(--accent); border-color: var(--accent); color: #fff; position: relative; }
 .seg button:disabled { opacity: .5; cursor: default; }
+#coProf button small { font-size: 11px; opacity: .8; white-space: normal; }
 .seg button:only-child { border-radius: 8px; }
 .seg.rowsel button { flex: 1 1 0; min-width: 0; white-space: normal; font-size: 14px; padding: 9px 8px; color: var(--ink, #1f2937); }
 .seg.rowsel button.on { color: #fff; }

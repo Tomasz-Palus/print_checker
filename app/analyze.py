@@ -690,7 +690,7 @@ def font_boxes(path: str, page: int, names: list, limit: int = 80) -> dict:
         try:
             pg = d[page]
             W, H = pg.rect.width or 1, pg.rect.height or 1
-            for b in pg.get_text("dict")["blocks"]:
+            for b in pg.get_text("dict", flags=pymupdf.TEXTFLAGS_TEXT)["blocks"]:
                 for ln in b.get("lines", []):
                     rows: dict = {}
                     for sp in ln.get("spans", []):
@@ -711,6 +711,55 @@ def font_boxes(path: str, page: int, names: list, limit: int = 80) -> dict:
     return out
 
 
+def flat_image(path: str, page: int | None) -> dict | None:
+    """Strona, która JUŻ jest jednym obrazem na całą stronę (eksport „spłaszczony” z Photoshopa,
+    obraz 120 ppi w PDF-ie): w treści tylko q/Q/cm/gs i jedno `Do` obrazu, który pokrywa stronę.
+    Spłaszczanie takiej strony tylko przelicza piksele od nowa — nowszy Ghostscript potrafi przy
+    tym przesunąć pojedyncze rzędy i dać drobne ząbki na krawędziach (Tomasz 29.09,
+    adFrame_Smart_100x250_1_1). Zwraca {w, h, ppi} obrazu (ppi w pliku) albo None."""
+    if page is None:
+        return None
+    try:
+        with pikepdf.open(path) as pdf:
+            pg = pdf.pages[page]
+            mb = [float(v) for v in (pg.obj.get("/MediaBox") or [0, 0, 0, 0])]
+            if pg.obj.get("/Annots"):
+                return None
+            res = pg.obj.get("/Resources")
+            xo = res.get("/XObject") if res is not None else None
+            ctm, stack, found = [1, 0, 0, 1, 0, 0], [], None
+            for operands, op in pikepdf.parse_content_stream(pg):
+                o = str(op)
+                if o == "q":
+                    stack.append(ctm)
+                elif o == "Q":
+                    ctm = stack.pop() if stack else ctm
+                elif o == "cm":
+                    ctm = _mul([float(x) for x in operands], ctm)
+                elif o == "gs":
+                    g = res.get("/ExtGState", {}).get(operands[0]) if res is not None else None
+                    if g is not None and any(k in g for k in ("/SMask", "/BM", "/ca", "/CA", "/OP", "/op")):
+                        return None
+                elif o == "Do":
+                    im = xo.get(operands[0]) if xo is not None else None
+                    if found is not None or im is None or str(im.get("/Subtype", "")) != "/Image" \
+                            or "/SMask" in im or "/Mask" in im or bool(im.get("/ImageMask", False)):
+                        return None
+                    # obraz pokrywa całą stronę (bez obrotu, z dokładnością do 0,5 pt)
+                    if abs(ctm[1]) > 1e-6 or abs(ctm[2]) > 1e-6 or ctm[0] <= 0 or ctm[3] <= 0:
+                        return None
+                    box = (ctm[4], ctm[5], ctm[4] + ctm[0], ctm[5] + ctm[3])
+                    if max(abs(a - b) for a, b in zip(box, mb)) > 0.5:
+                        return None
+                    found = {"w": int(im.get("/Width", 0)), "h": int(im.get("/Height", 0)),
+                             "ppi": round(int(im.get("/Width", 0)) / (ctm[0] / 72.0), 1)}
+                else:
+                    return None                      # jakakolwiek inna treść — to nie „sam obraz”
+            return found
+    except Exception:
+        return None
+
+
 def _text_boxes(path: str, page: int | None, limit: int = 600) -> list:
     """Widoczny tekst strony: jedna ramka na wiersz [fx, fy, fw, fh] (ułamki strony, y od góry).
     Do sprawdzenia obszaru bezpiecznego — napis przy krawędzi może zostać ucięty albo schowany
@@ -724,7 +773,7 @@ def _text_boxes(path: str, page: int | None, limit: int = 600) -> list:
         try:
             pg = d[page]
             W, H = pg.rect.width or 1, pg.rect.height or 1
-            for b in pg.get_text("dict")["blocks"]:
+            for b in pg.get_text("dict", flags=pymupdf.TEXTFLAGS_TEXT)["blocks"]:
                 for ln in b.get("lines", []):
                     sp = [s for s in ln.get("spans", []) if s.get("alpha", 255) != 0 and s.get("text", "").strip()]
                     if not sp or len(out) >= limit:
@@ -808,6 +857,7 @@ def analyze_pdf(path: str, only_page: int | None = None) -> dict:
         pdf.close()
     res["fonts_missing"] = _fonts_missing(path, only_page)
     res["text_boxes"] = _text_boxes(path, only_page)
+    res["flat_image"] = flat_image(path, only_page)
     return res
 
 

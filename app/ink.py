@@ -67,7 +67,7 @@ def measure(path: str, page: int, page_pt: tuple) -> dict:
     fd, tmp = tempfile.mkstemp(suffix=".pam")
     os.close(fd)
     try:
-        r = gs.run(["-q", "-dSAFER", *gs.proof_args(), "-sDEVICE=pamcmyk32", f"-r{dpi:.4f}",
+        r = gs.run(["-q", "-dSAFER", *gs.proof_args(path), "-sDEVICE=pamcmyk32", f"-r{dpi:.4f}",
                     f"-dFirstPage={page + 1}", f"-dLastPage={page + 1}", *gs.overprint_args(True),
                     "-sOutputFile=" + gs.arg_path(tmp), gs.arg_path(path)], 600)
         if r.returncode != 0 or os.path.getsize(tmp) < 16:

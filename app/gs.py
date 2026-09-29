@@ -149,18 +149,61 @@ def cmyk_target_args(icc_path: str, work_dir: str) -> list:
     return ["--permit-file-read=" + d, "-sICCProfilesDir=" + d]
 
 
-def color_args() -> list:
-    """CMYK na ekran przez FOGRA39 — tak, jak pokazuje go Photoshop. `--permit-file-read`
-    jest konieczne: w trybie -dSAFER Ghostscript czyta tylko to, na co dostał zgodę."""
-    p = arg_path(fogra())
+_sim: dict = {}
+_sim_lock = threading.Lock()
+
+
+def sim_profile(src: str | None) -> str:
+    """Profil CMYK „maszyny” w symulacji druku: profil zapisany w PLIKU (deklaracja OutputIntent
+    albo osadzony profil CMYK — np. ISO Coated v2), a gdy go nie ma — FOGRA39.
+
+    Tomasz 29.09 (1878, liście na zdjęciu bardziej pomarańczowe w „druk” niż w „ekran”): zdjęcie
+    CMYK z profilem ISO Coated v2 symulacja przeliczała na FOGRA39 — liczby farb zmieniały się
+    średnio o 10 %, a kolor miejscami o kilkanaście punktów (inna generacja czerni). Drukarnia
+    dostaje jednak TE liczby i drukuje je tak, jak opisuje je profil pliku (ISO Coated v2 i FOGRA39
+    to ta sama norma druku). Plik przeliczony na FOGRA39 (Kolory) ma już FOGRA39 w deklaracji."""
+    if not src:
+        return fogra()
+    with _sim_lock:
+        if src in _sim:
+            return _sim[src]
+    out = fogra()
+    try:
+        import hashlib
+        import io
+        import steps
+        from PIL import ImageCms
+        data, _ = steps.file_icc(src)
+        if data:
+            prof = ImageCms.ImageCmsProfile(io.BytesIO(data)).profile
+            if prof.xcolor_space.strip() == "CMYK" and prof.device_class.strip() == "prtr":
+                p = os.path.join(os.path.dirname(os.path.abspath(src)),
+                                 "icc_sym_" + hashlib.sha1(data).hexdigest()[:12] + ".icc")
+                if not os.path.exists(p):
+                    with open(p + ".part", "wb") as f:
+                        f.write(data)
+                    os.replace(p + ".part", p)
+                out = p
+    except Exception as e:
+        print(f"[adChecker] profil symulacji: {type(e).__name__}: {e}")
+    with _sim_lock:
+        _sim[src] = out
+    return out
+
+
+def color_args(src: str | None = None) -> list:
+    """CMYK na ekran przez profil pliku (albo FOGRA39) — tak, jak pokazuje go Photoshop.
+    `--permit-file-read` jest konieczne: w trybie -dSAFER Ghostscript czyta tylko to, na co
+    dostał zgodę."""
+    p = arg_path(sim_profile(src))
     return ["--permit-file-read=" + p, "-sDefaultCMYKProfile=" + p]
 
 
-def proof_args() -> list:
-    """Symulacja druku (rozdział „Kolory"): strona liczona do CMYK FOGRA39, intencja
-    relatywna kolorymetryczna + BPC. CMYK przechodzi bez zmian (±2/255). Na ekran przelicza
-    render.proof_rgb. (`-sProofProfile` się nie nadaje — przesuwa też CMYK.)"""
-    p = arg_path(fogra())
+def proof_args(src: str | None = None) -> list:
+    """Symulacja druku: strona liczona do CMYK maszyny (profil pliku albo FOGRA39 — sim_profile),
+    intencja relatywna kolorymetryczna + BPC. CMYK w tym profilu przechodzi bez zmian. Na ekran
+    przelicza render.proof_rgb tym samym profilem. (`-sProofProfile` się nie nadaje — przesuwa też CMYK.)"""
+    p = arg_path(sim_profile(src))
     return ["--permit-file-read=" + p, "-sOutputICCProfile=" + p, "-sDefaultCMYKProfile=" + p,
             "-dRenderIntent=1", "-dBlackPtComp=1"]
 

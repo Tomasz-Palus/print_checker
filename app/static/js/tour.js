@@ -7,7 +7,7 @@
 // Gdy akcja była zrobiona już wcześniej (np. monitor skalibrowany, powrót „Wstecz") — też „Dalej".
 // Kroki rozdziałów, które są już domknięte, idąc do przodu pomijamy.
 import { $, shown } from "./util.js";
-import { S, head, hasStep, isPdf, productOk, roleSettled, framesSettled, trimSettled, sizeSettled,
+import { S, head, hasStep, isPdf, facts, productOk, roleSettled, framesSettled, trimSettled, sizeSettled,
          printSettled, colorSettled, overprintSettled, fontsSettled, flattenSettled } from "./state.js";
 import { qualitySettled, acceptSettled } from "./quality.js";
 import { cover } from "./size.js";
@@ -167,9 +167,23 @@ const STEPS = [
       samo przeliczenie kolorów. Przesuń go w lewo.`,
     wait: () => S.cmp?.step === "cmyk" && S.cmp.v < 50, manual: true, optional: "Pomiń" },
 
+  // 0.6.1: za dużo farby — jednolitą czerń 4 × 100 % program poprawia na zalecaną C78 M85 Y90 K100
+  { part: PART2, target: ["ch-color", "vStage"], anchor: "coInk", title: "Za dużo farby", place: "right",
+    when: () => vis("bkDo") || hasStep("black"),
+    text: () => hasStep("black")
+      ? `Czerń poprawiona — ramki zniknęły. Poprawka ma własne <b>Cofnij</b>.`
+      : `Program policzył, ile farby położy maszyna. Tu czerń jest złożona ze wszystkich farb (do <b>400 %</b>) —
+         może nie wyschnąć i się rozmazać. <b>Czerwone ramki</b> na podglądzie pokazują gdzie (ramki widać tylko
+         w rozdziale, którego dotyczą).<br><br>Kliknij <b>Popraw czerń</b> — zamieni ją na zalecaną czerń
+         C78 M85 Y90 K100. Czerni w zdjęciach program nie poprawi.`,
+    wait: () => hasStep("black"), skipDone: true, optional: "Pomiń" },
+
   { part: PART2, target: ["ch-op"], title: "Overprint", when: isPdf,
-    text: twoStep("overprint", `<b>Overprint</b> (nadruk) sprawia, że farba kładzie się na tło, zamiast je zakryć —
-      w druku element wychodzi innym kolorem niż na ekranie. Wytyczne go nie dopuszczają.`, "Wyłącz overprint"),
+    text: () => twoStep("overprint", `<b>Overprint</b> (nadruk) sprawia, że farba kładzie się na tło, zamiast je zakryć —
+      w druku element wychodzi innym kolorem niż na ekranie. Wytyczne go nie dopuszczają.`
+      + ((facts("overprint")?.white_overprint || []).length ? ` Najgorzej z <b>białym</b>: biel to brak farby, więc
+      z overprintem w druku znika zupełnie — <b>pomarańczowe ramki</b> na podglądzie pokazują takie miejsca.` : ""),
+      "Wyłącz overprint")(),
     wait: overprintSettled, skipDone: true },
 
   { part: PART2, target: ["ch-fonts"], title: "Fonty", when: isPdf,
@@ -187,8 +201,10 @@ const STEPS = [
   { part: PART2, target: ["ch-qual"], title: "Jakość wydruku",
     text: () => !S.qual.data || S.qual.data.status === "running"
       ? `Program ogląda każdy obraz piksel po pikselu — czy na wydruku nie wyjdzie rozmyty. To chwilę potrwa…`
-      : `Program znalazł miejsca, które na wydruku wyjdą <b>rozmyte</b>.<br><br>Kliknij
-         <b>Pokaż na podglądzie</b>.`,
+      : `Program znalazł miejsca, które na wydruku wyjdą <b>rozmyte</b>.`
+        + (vis("quRisk") ? ` Niżej pisze też o <b>cienkich liniach</b> i <b>tekście przy krawędzi</b> (poza czerwoną
+           ramką wytycznych) — pokazuje je ramkami na podglądzie.` : "")
+        + `<br><br>Kliknij <b>Pokaż na podglądzie</b>.`,
     wait: () => qualitySettled() || vis("qnav"), skipDone: true },
 
   { part: PART2, target: ["vTools", "vStage"], title: "Słabe miejsca", place: "left", when: () => vis("qnav"),

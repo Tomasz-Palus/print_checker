@@ -389,7 +389,7 @@ def _gs_region(path, page_index, page_rect, clip, px_per_pt, smooth, gray) -> by
     tx, ty = -clip.x0, -(page_rect.height - clip.y1)
     with tempfile.TemporaryDirectory() as td:
         out = os.path.join(td, "r.pgm" if gray else "r.png")
-        r = gs.run(["-q", "-dSAFER", *gs.color_args(), "-sDEVICE=" + ("pgmraw" if gray else "png16m"),
+        r = gs.run(["-q", "-dSAFER", *gs.color_args(path), "-sDEVICE=" + ("pgmraw" if gray else "png16m"),
                     f"-r{px_per_pt * 72:.4f}", f"-dFirstPage={page_index + 1}", f"-dLastPage={page_index + 1}",
                     "-dFIXEDMEDIA", f"-dDEVICEWIDTHPOINTS={clip.width:.3f}", f"-dDEVICEHEIGHTPOINTS={clip.height:.3f}",
                     *gs.SPEED, *gs.aa_args(False, 0, 0), "-dInterpolateControl=" + ("1" if smooth else "0"),
@@ -409,24 +409,27 @@ _tf: dict = {}
 _tf_lock = threading.Lock()
 
 
-def _transform(kind: str):
-    """Przekształcenia ImageCms (liczone raz): cmyk→ekran, rgb→druk→ekran."""
+def _transform(kind: str, icc: str | None = None):
+    """Przekształcenia ImageCms (liczone raz na profil): cmyk→ekran, rgb→druk. `icc` — profil
+    maszyny (gs.sim_profile), domyślnie FOGRA39."""
     from PIL import ImageCms
+    icc = icc or gs.fogra()
     with _tf_lock:
-        if kind not in _tf:
-            fog = ImageCms.getOpenProfile(gs.fogra())
+        if (kind, icc) not in _tf:
+            fog = ImageCms.getOpenProfile(icc)
             srgb = ImageCms.createProfile("sRGB")
             rel, bpc = ImageCms.Intent.RELATIVE_COLORIMETRIC, ImageCms.Flags.BLACKPOINTCOMPENSATION
             if kind == "cmyk":
-                _tf[kind] = ImageCms.buildTransform(fog, srgb, "CMYK", "RGB", renderingIntent=rel, flags=bpc)
+                _tf[(kind, icc)] = ImageCms.buildTransform(fog, srgb, "CMYK", "RGB", renderingIntent=rel, flags=bpc)
             else:
-                _tf[kind] = ImageCms.buildTransform(srgb, fog, "RGB", "CMYK", renderingIntent=rel, flags=bpc)
-        return _tf[kind]
+                _tf[(kind, icc)] = ImageCms.buildTransform(srgb, fog, "RGB", "CMYK", renderingIntent=rel, flags=bpc)
+        return _tf[(kind, icc)]
 
 
-def proof_rgb(im: Image.Image) -> Image.Image:
+def proof_rgb(im: Image.Image, src: str | None = None) -> Image.Image:
+    """CMYK z symulacji druku → ekran, profilem maszyny tego pliku (gs.sim_profile)."""
     from PIL import ImageCms
-    return ImageCms.applyTransform(im, _transform("cmyk"))
+    return ImageCms.applyTransform(im, _transform("cmyk", gs.sim_profile(src) if src else None))
 
 
 # ----------------------------------------------------------------------------
@@ -438,7 +441,7 @@ MAX_MPX = 400          # sufit poziomu 0 (większe strony schodzą z ppi — i m
 OVERVIEW_PX = 2048     # dłuższy bok podglądu całej strony
 JPEG_Q = 90
 SS = 2                 # nadpróbkowanie podglądu i spłaszczenia (_supersample)
-RENDER_VER = 7         # zmiana sposobu renderu = nowe klucze = stare kafelki się nie mieszają
+RENDER_VER = 8         # zmiana sposobu renderu = nowe klucze = stare kafelki się nie mieszają
 
 
 def plan(page_w_pt: float, page_h_pt: float, print_w_mm: float, print_h_mm: float,
@@ -478,7 +481,7 @@ def _gs_args(src, page, dpi, op, proof, w_px, h_px, ss=1) -> list:
     # wygładzanie Ghostscripta liczone dla renderu ss× (gdy przy overprincie niebezpieczne — samo
     # nadpróbkowanie)
     aa = gs.aa_args(cmyk, w_px * ss, h_px * ss, 4 if cmyk else 3)
-    return ["-dSAFER", *(gs.proof_args() if cmyk else gs.color_args()),
+    return ["-dSAFER", *(gs.proof_args(src) if cmyk else gs.color_args(src)),
             "-sDEVICE=" + ("pamcmyk32" if cmyk else "ppmraw"), f"-r{dpi:.4f}",
             f"-dFirstPage={page + 1}", f"-dLastPage={page + 1}", *gs.SPEED, *aa,
             "-dInterpolateControl=1", *gs.overprint_args(op),
@@ -559,11 +562,11 @@ def _close(p) -> None:
         p.kill()
 
 
-def _img(a: np.ndarray) -> Image.Image:
-    """Tablica pikseli → obraz na ekran (CMYK z symulacji druku przez FOGRA39)."""
+def _img(a: np.ndarray, src: str | None = None) -> Image.Image:
+    """Tablica pikseli → obraz na ekran (CMYK z symulacji druku przez profil maszyny)."""
     a = np.ascontiguousarray(a)
     if a.shape[2] == 4:
-        return proof_rgb(Image.frombuffer("CMYK", (a.shape[1], a.shape[0]), a.tobytes(), "raw", "CMYK", 0, 1))
+        return proof_rgb(Image.frombuffer("CMYK", (a.shape[1], a.shape[0]), a.tobytes(), "raw", "CMYK", 0, 1), src)
     return Image.frombuffer("RGB", (a.shape[1], a.shape[0]), a.tobytes(), "raw", "RGB", 0, 1)
 
 
@@ -586,7 +589,7 @@ def _render_whole(src, page, pl, W, H, op, proof, stop) -> Image.Image | None:
             return None
         mode = "CMYK" if ch == 4 else "RGB"
         im = Image.frombuffer(mode, (w, h), np.ascontiguousarray(a).tobytes(), "raw", mode, 0, 1).reduce(ss)
-        im = proof_rgb(im) if ch == 4 else im
+        im = proof_rgb(im, src) if ch == 4 else im
     finally:
         _close(p)
     return im if im.size == (W, H) else im.resize((W, H), Image.LANCZOS)
@@ -612,9 +615,9 @@ def _level0(src, page, pl, out, op, proof, on_band, stop) -> bool:
                 band = np.pad(band, ((0, hgt * ss - src_rows), (0, W * ss - W2), (0, 0)), mode="edge")
                 im = Image.frombuffer("CMYK" if ch == 4 else "RGB", (W * ss, hgt * ss),
                                       np.ascontiguousarray(band).tobytes(), "raw", "CMYK" if ch == 4 else "RGB", 0, 1).reduce(ss)
-                im = proof_rgb(im) if ch == 4 else im
+                im = proof_rgb(im, src) if ch == 4 else im
             else:
-                im = _img(band)
+                im = _img(band, src)
             for tx in range(math.ceil(W / TILE)):
                 _save(os.path.join(out, f"L0_{tx}_{ty}.jpg"), im.crop((tx * TILE, 0, min(W, tx * TILE + TILE), hgt)))
             on_band(ty + 1)

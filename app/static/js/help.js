@@ -51,8 +51,9 @@ export const HELP = {
     Dokładną wartość wpiszesz w pole obok: mm na wydruku od środka, plus = w prawo / w dół,
     minus = w lewo / w górę.`,
   print: `Od tego rozdziału <b>podgląd pokazuje wydruk</b>, nie ekran: kolory tak, jak przeliczy je
-    drukarnia (profil Coated FOGRA39, intencja relatywna kolorymetryczna), i overprint, tak jak
-    zrobi to maszyna.<br><br>
+    drukarnia (profilem zapisanym w pliku, np. ISO Coated v2, a gdy plik go nie ma — Coated FOGRA39;
+    intencja relatywna kolorymetryczna), i overprint, tak jak zrobi to maszyna. Zdjęcie, które już
+    jest w CMYK, wygląda więc po obu stronach suwaka tak samo.<br><br>
     Ekran i wydruk zawsze się różnią. Monitor świeci, a farba tylko odbija światło, więc bardzo
     nasycone kolory (czysta zieleń, jaskrawy niebieski) w druku bledną. Przezroczystość drukarnia
     miesza w przestrzeni zapisanej w pliku, a czerń z samej farby K drukuje się grafitem.<br><br>
@@ -101,6 +102,8 @@ export const HELP = {
     Rozdzielczość: zawsze <b>120 ppi na wydruku</b>, jak w ustaleniach z drukarnią. Cena: tekst i linie
     przestają być wektorowe, plik robi się większy. Tekst fontem, którego nie ma w pliku, spłaszczy się
     krojem zastępczym — program ostrzeże i zaznaczy go na podglądzie.<br><br>
+Gdy strona <b>już jest jednym obrazem</b> (np. eksport z Photoshopa), program niczego nie spłaszcza —
+    przeliczanie gotowych pikseli dałoby tylko drobne ząbki na krawędziach.<br><br>
     Wybierasz <b>Zostaw jak jest</b> albo <b>Spłaszcz projekt</b>. Gdy projekt nie ma
     przezroczystości, wystarczy <b>Zostaw jak jest</b>.`,
   qual: `Program otwiera każdy obraz w projekcie i czyta jego piksele. Sprawdza dwie rzeczy:<br><br>
