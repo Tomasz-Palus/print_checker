@@ -210,7 +210,8 @@
       <div class="ch-b">
         <p class="say" id="prSay"></p>
         <div class="mini sim" id="prSimBar" data-sim="print"><span>ekran</span><input type="range" min="0" max="100" value="100"><span>druk</span></div>
-        <div class="row"><button class="btn primary" id="prOk" type="button">Rozumiem, dalej</button></div>
+        <div class="row"><button class="btn primary" id="prOk" type="button">Rozumiem, dalej</button>
+          <button class="btn" id="prUndo" type="button" hidden>Cofnij</button></div>
       </div>
     </section>
 
@@ -223,11 +224,6 @@
         <div class="note" id="coNote"></div>
         <div class="box warn" id="coInk" hidden>
           <div id="coInkTxt"></div>
-          <!-- „Popraw czerń” (Tomasz 29.09): jednolite czernie z za dużą ilością farby → C78 M85 Y90 K100 -->
-          <div class="row" id="bkRow" hidden>
-            <button class="btn primary" id="bkDo" type="button">Popraw czerń</button>
-            <button class="btn" id="bkUndo" type="button" hidden>Cofnij poprawę czerni</button>
-          </div>
         </div>
         <div class="box bad" id="coErr" hidden></div>
         <!-- wybór w rzędach (Tomasz 24.09): w każdym rzędzie jeden przycisk, wybrany = niebieski -->
@@ -239,6 +235,12 @@
           <button type="button" data-v="fogra39" title="Coated FOGRA39 (ISO 12647-2:2004) — standard druku">FOGRA39 (zalecany)</button>
           <button type="button" data-v="keep">Z pliku</button>
           <button type="button" data-v="none" title="Kolory CMYK bez deklaracji profilu">Bez profilu</button>
+        </div>
+        <!-- „Popraw czerń” (Tomasz 29.09) — pod wyborem „Zamień na CMYK / Zostaw jak jest”:
+             jednolite czernie z za dużą ilością farby → C78 M85 Y90 K100 -->
+        <div class="row now-only" id="bkRow" hidden>
+          <button class="btn primary" id="bkDo" type="button">Popraw czerń</button>
+          <button class="btn" id="bkUndo" type="button" hidden>Cofnij poprawę czerni</button>
         </div>
         <div class="mini" id="coMini" hidden><span>przed</span><input type="range" min="0" max="100" value="100" data-step="cmyk"><span>po</span></div>
         <div class="row ch-back"><button class="btn" type="button" data-back="cmyk">Cofnij</button></div>
@@ -305,6 +307,9 @@
         <div class="bar" id="quBar" hidden><i></i></div>
         <div class="note" id="quNote"></div>
         <div class="box warn" id="quRisk" hidden></div>
+        <!-- uwagi o cienkich liniach / obszarze bezpiecznym trzeba przeczytać (Tomasz 29.09): bez tego
+             rozdział zaliczał się sam, pojawiała się Akceptacja i ramki znikały -->
+        <div class="row" id="quRiskOk" hidden><button class="btn primary" type="button">Rozumiem, dalej</button></div>
         <div class="box bad" id="quErr" hidden></div>
         <div class="row" id="quRetry" hidden><button class="btn" type="button">Sprawdź jeszcze raz</button></div>
         <div class="seg rowsel" id="quShow" hidden><button type="button">Pokaż na podglądzie</button></div>

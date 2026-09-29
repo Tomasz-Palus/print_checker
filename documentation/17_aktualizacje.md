@@ -966,3 +966,53 @@ Numery jak w `18_przeglad_kodu.md`.
   i `font_boxes` czytały tekst przez `get_text("dict")`, które przy okazji dekoduje WSZYSTKIE obrazy
   strony. Przy 1878 (zdjęcie 11891 × 9055 px) analiza trwała 22 s zamiast 1 s. Teraz jest
   `flags=TEXTFLAGS_TEXT` (bez obrazów) — 1,3 s.
+
+## 0.6.3 — obszar bezpieczny w prawdziwym kształcie, „Cofnij” w Symulacji, przyciski w Kolorach (Tomasz 29.09)
+
+- **Obszar bezpieczny w kształcie z wytycznych** (Tomasz: „na jakiej podstawie to jest sprawdzane?
+  wytyczne mają różne obszary ochronne w różnych miejscach, często o nieregularnych kształtach”):
+  - Do 0.6.2 program brał prostokąt opisany na czerwonej ramce (`safe_mm`) — zaokrąglone rogi czy
+    kilka osobnych stref się nie liczyły.
+  - Teraz `state.safeZones`: czerwone kontury z SVG szablonu (klasa „safe”, te same linie co w
+    „Podglądzie szablonu”). Każdy kontur osobno jako wypełniony Path2D — ramka rysowana jako
+    pierścień daje swoje wnętrze, kilka stref daje sumę. Pomijane są drobne czerwone elementy
+    (kontur < 10 % szerokości i wysokości strony). Zapas: prostokąty `safe_mm`.
+  - Wiersz tekstu jest bezpieczny, gdy 9 punktów (rogi, środki boków, środek) leży wewnątrz
+    któregoś konturu (`isPointInPath`). Szablon leży na środku strony, jak na podglądzie.
+  - Sprawdzany jest tylko tekst zapisany jako tekst. Napisy na krzywych albo w zdjęciu to grafika.
+  - Sprawdzone (Playwright):
+    - adWall Vario Prosta Light 400 (zaokrąglone górne rogi, promień ok. 110 mm): napis w rogu —
+      w prostokącie, ale poza zaokrągleniem — jest zgłoszony, napis w środku nie;
+    - adFrame Smart 100x250 (ramka jako pierścień): jak dotąd 2 wiersze.
+- **„Cofnij” w Symulacji wydruku** (Tomasz: „aby dało się cofnąć do tego rozdziału”): przycisk obok
+  „Rozumiem, dalej” (gdy rozdział jest zaliczony). Cofa decyzje i poprawki z dalszych rozdziałów —
+  gdy jakieś poprawki są nałożone, pyta, co się cofnie (`undoStep("cmyk")`). Potem rozdział znowu
+  czeka na „Rozumiem, dalej”. Sprawdzone: po „Popraw czerń” → pytanie „cofną się: poprawienie
+  czerni” → Symulacja do zrobienia, dalsze rozdziały schowane.
+- **Kolory:**
+  - Przycisk profilu z pliku ma na górze nazwę profilu, a pod nią „(z pliku)”, np.
+    „ISO Coated v2 (ECI) (z pliku)”.
+  - „Popraw czerń” jest teraz POD wyborem „Zamień na CMYK / Zostaw jak jest” (i profilu). Ramka
+    z opisem nadmiaru farby zostaje nad nimi. W starszym, zwiniętym rozdziale przycisk się chowa
+    (`now-only`).
+- **Jakość wydruku czeka na „Rozumiem, dalej”, gdy są uwagi** (Tomasz 29.09: „pokazały mi się uwagi,
+  były zaznaczone ramkami, ale zaraz ramki zniknęły, bo wczytał się kolejny rozdział … fajnie, jakby był
+  panel od przybliżania”):
+  - Przy cienkich liniach albo tekście poza obszarem bezpiecznym rozdział nie zalicza się sam — pod
+    ramką z uwagami jest „Rozumiem, dalej” (`S.settle.quRisk`, zdejmowane razem z nową oceną jakości).
+  - Dopóki analiza wersji z ostateczną geometrią się nie wczyta, rozdział też czeka — Akceptacja
+    nie pojawia się i nie znika.
+  - W tym czasie Jakość jest ostatnim rozdziałem, więc widać ramki i panel z lupkami i rzeczywistą
+    wielkością. Panel pokazuje się też po ponownym rozwinięciu Jakości nagłówkiem.
+  - Klik w nagłówek rozdziału, który jest rozwinięty, ale nie „bieżący” (np. Jakość obok Akceptacji),
+    robi go bieżącym — ramki i lupki — zamiast go zwinąć. Zwija drugi klik.
+  - Samouczek: nowy krok „Cienkie linie i krawędzie” (plik przykładowy je ma) — czeka na
+    „Rozumiem, dalej”. Cały samouczek przechodzi (Playwright).
+- **Plik testowy `Test_edge_uszkodzony_naprawialny.pdf` zrobiony od nowa** (Tomasz: „nie jestem pewien,
+  czy jest uszkodzony — Acrobat i Photoshop normalnie go otwierają”):
+  - Poprzedni miał uciętą tylko tabelę obiektów. Każdy program odbudowuje ją po cichu i niczego nie
+    brakuje — uszkodzony był, ale bez widocznych skutków.
+  - Nowy jest ucięty w połowie danych zdjęcia. Otwiera się (tabela odbudowana), ale zdjęcia nie da
+    się odtworzyć — w ramce „tu powinno być zdjęcie” zostaje pusto (MuPDF i Ghostscript; Acrobat
+    może pokazać zdjęcie urwane).
+  - Dlatego ostrzeżenie „Plik był uszkodzony … obejrzyj dokładnie podgląd” zostaje w rozdziale Plik.

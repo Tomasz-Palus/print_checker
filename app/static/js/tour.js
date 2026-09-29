@@ -214,6 +214,13 @@ const STEPS = [
       rozdzielczości trzeba wymienić na większe — poproś o nie klienta. Gdy obejrzysz, zamknij pasek <b>×</b>.`,
     wait: () => !vis("qnav"), skipDone: true },
 
+  { part: PART2, target: ["ch-qual", "vStage"], anchor: "quRisk", title: "Cienkie linie i krawędzie", place: "right",
+    when: () => vis("quRiskOk"),
+    text: `Pod oceną obrazów program pisze o <b>cienkich liniach</b> (mogą się nie wydrukować) i o <b>tekście przy
+      krawędzi</b> — poza czerwoną linią z wytycznych może zostać ucięty. Ramki na podglądzie pokazują te miejsca;
+      lupki i rzeczywistą wielkość masz w panelu nad podglądem.<br><br>Gdy obejrzysz, kliknij <b>Rozumiem, dalej</b>.`,
+    wait: qualitySettled, skipDone: true },
+
   { part: PART2, target: ["ch-acc"], title: "Akceptacja pliku",
     text: `Ostatnie spojrzenie. Kliknij <b>Pokaż wydruk przed i po</b> — suwak porówna wydruk bez poprawek
       z wydrukiem po nich.`,

@@ -209,6 +209,10 @@ function viewHeader(e) {
   if (!h || e.target.closest(".ch-q")) return;
   if (e.type === "keydown" && e.key !== "Enter" && e.key !== " ") return;
   const ch = h.closest(".ch");
+  // Rozdział rozwinięty (np. jeden z dwóch ostatnich), ale nie „bieżący”: klik w nagłówek robi go
+  // bieżącym (ramki na podglądzie, lupki), zamiast go zwinąć — zwija dopiero drugi klik.
+  const cur = currentChapter();
+  if (!ch.classList.contains("open") && cur !== ch.id && ch.dataset.st === "done" && e.type === "click") ch.classList.add("open");
   setTimeout(() => { S.viewCh = ch.classList.contains("open") ? ch.id : null; changed(); }, 0);
 }
 document.addEventListener("click", viewHeader);
@@ -405,7 +409,8 @@ function render() {
   const lastTwo = chs.slice(-2);
   // Lupki, rzeczywista wielkość, dopasuj i nawigator — tylko przy „Jakości wydruku”: gdy to bieżący
   // (ostatni) rozdział albo gdy przeglądamy słabe miejsca (Tomasz 28.09)
-  const qualMode = !!S.job && (chs[chs.length - 1]?.id === "ch-qual" || navOpen());
+  // także gdy „Jakość wydruku” rozwinięto ponownie nagłówkiem (ramki cienkich linii i obszaru bezpiecznego)
+  const qualMode = !!S.job && (chs[chs.length - 1]?.id === "ch-qual" || navOpen() || currentChapter() === "ch-qual");
   viewer.showTools(qualMode);
   viewer.setZoomAllowed(qualMode);
   const pin = chs.find((ch) => ch.id === S.pin) || null;

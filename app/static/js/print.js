@@ -47,6 +47,14 @@ $("prOk").addEventListener("click", () => {
   S.settle.print = "seen"; S.sim = null;
   changed();
 });
+// „Cofnij” (Tomasz 29.09): powrót do Symulacji wydruku — razem z poprawkami i decyzjami z dalszych
+// rozdziałów (undoStep pyta, gdy jakieś poprawki są nałożone)
+$("prUndo").addEventListener("click", async () => {
+  if (!S.job || S.busy) return;
+  if (!(await undoStep("cmyk"))) return;
+  delete S.settle.print; S.sim = null;
+  changed();
+});
 
 export function renderPrint() {
   const el = $("ch-print");
@@ -61,6 +69,7 @@ export function renderPrint() {
       + ` Na wydruku kolory są zwykle <b>bledsze</b> niż na ekranie: monitor świeci, a farba tylko odbija`
       + ` światło. To normalne.<br>Przesuń suwak, żeby porównać ekran z wydrukiem.`;
   $("prOk").hidden = ok;
+  $("prUndo").hidden = !ok; $("prUndo").disabled = !!S.busy;
   $("prSimBar").hidden = false;           // chowa go main.render, gdy dalej jest świeższy suwak
   $("prOk").disabled = !!S.busy;
   if (S.sim !== "print") $("prSimBar").querySelector("input").value = 100;
@@ -142,7 +151,7 @@ export function renderColor() {
       + (heavy ? `To jednolita czerń złożona ze wszystkich farb${ink.max >= 390 ? " (100/100/100/100 albo kolor „Registration”)" : ""} — `
           + `<b>Popraw czerń</b> zamieni ją na zalecaną C78 M85 Y90 K100.`
           + (later ? ` Najpierw cofnij późniejsze poprawki (Overprint, Fonty, Spłaszczenie).`
-            : st !== "done" ? ` Przycisk pojawi się po wyborze w rzędzie niżej.` : "")
+            : st !== "done" ? ` Przycisk pojawi się pod wyborem niżej, gdy zdecydujesz o kolorach.` : "")
         : `To obraz albo przejście tonalne — tego program nie poprawi. Poproś klienta o poprawkę (np. czerń C78 M85 Y90 K100).`);
   }
   $("coInk").hidden = !it;
@@ -165,7 +174,7 @@ export function renderColor() {
     // się zmienić zdanie (Tomasz 29.09). Profil to ten sprzed zamiany (facts("cmyk")).
     if (b.dataset.v === "keep") {
       b.hidden = !fp;
-      const html = `Z pliku<br><small>${esc(fp)}</small>`;
+      const html = `${esc(fp)}<br><small>(z pliku)</small>`;
       if (b.dataset.html !== html) { b.innerHTML = html; b.dataset.html = html; }
       b.title = fp ? `Kolory zostają w profilu zapisanym w pliku: ${fp}` : "";
     }

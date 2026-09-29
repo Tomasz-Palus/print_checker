@@ -2,7 +2,7 @@
 // Jakość liczy serwer (quality.py → detailmap.py) i oddaje gotowy werdykt; tu tylko pokazanie
 // go po ludzku i nawigacja po słabych miejscach na podglądzie (w rzeczywistej wielkości wydruku).
 import { $, esc, fmtMm, api, chapter, plural } from "./util.js";
-import { S, changed, head, scaleK, printMm, isPdf, flattenSettled, roleSettled, template, STEP_NAME, fontWarnings, inkNow, factsKey, layoutRisks, THIN_PRINT_MM } from "./state.js";
+import { S, changed, head, scaleK, printMm, isPdf, flattenSettled, roleSettled, template, STEP_NAME, fontWarnings, inkNow, factsKey, layoutRisks, THIN_PRINT_MM, geoKey } from "./state.js";
 import { detailBlock } from "./settings.js";
 import * as viewer from "./viewer.js";
 
@@ -37,9 +37,23 @@ async function poll(key) {
 
 export function qualitySettled() {
   if (!flattenSettled()) return false;
+  if (!risksSeen()) return false;
   if (S.settle.quality || S.qual.err) return true;
   const d = S.qual.data;
   return !!d && d.status === "done" && (d.verdict === "ok" || d.verdict === "vector");
+}
+// Cienkie linie / tekst poza obszarem bezpiecznym: rozdział czeka na „Rozumiem, dalej” (Tomasz 29.09).
+// Dopóki analiza wersji z ostateczną geometrią się nie wczytała (null) — też czekamy, inaczej
+// Akceptacja pojawiała się i znikała.
+const riskCount = () => {
+  if (S.factsCache[geoKey()]?.error) return 0;              // analiza się nie udała — nie blokujemy
+  const L = layoutRisks();
+  return L ? L.thin.length + L.unsafe.length : null;
+};
+function risksSeen() {
+  if (!isPdf()) return true;
+  const n = riskCount();
+  return n === 0 || (n !== null && !!S.settle.quRisk);
 }
 
 // ------------------------------------------------------------------ jakość: opis
@@ -64,6 +78,11 @@ const areaLabel = (a) => a.reason === "jpeg" ? "mocna kompresja JPEG — obejrzy
 $("quShow").querySelector("button").addEventListener("click", () => {
   S.settle.quality = "seen";
   if (nav === null) openNav(0); else closeNav();
+  changed();
+});
+
+$("quRiskOk").querySelector("button").addEventListener("click", () => {
+  S.settle.quRisk = "seen";
   changed();
 });
 
@@ -95,7 +114,7 @@ export function renderQuality() {
   const key = qualKey();
   if (S.qual.key !== key) {
     S.qual = { key, data: null, err: "" };
-    delete S.settle.quality;
+    delete S.settle.quality; delete S.settle.quRisk;
     closeNav();
     poll(key);
   }
@@ -141,7 +160,6 @@ export function renderQuality() {
     }
     if (scaleK() > 1) note += `${note ? " " : ""}Plik w skali 1:10 drukuje się 10× większy — żeby wyszło ${REQ} ppi, w pliku trzeba ${REQ * 10} ppi.`;
   }
-  chapter("ch-qual", st, sum);
   // cienkie linie i tekst przy krawędzi (Tomasz 29.09 — „edge cases”): tylko informacja, poprawia się
   // w rozdziale Wymiar (przesunięcie, wielkość) albo u klienta
   const L = layoutRisks(), lr = [];
@@ -158,6 +176,9 @@ export function renderQuality() {
       + `w rozdziale Wymiar wydruku albo poproś klienta o poprawkę.`);
   $("quRisk").innerHTML = lr.length ? lr.join("<br>") + ` <span class="muted">(zaznaczone na podglądzie)</span>` : "";
   $("quRisk").hidden = !lr.length;
+  $("quRiskOk").hidden = !lr.length || !!S.settle.quRisk;
+  if (lr.length && !S.settle.quRisk && st === "done") { st = "todo"; }
+  chapter("ch-qual", st, sum);
   $("quSay").innerHTML = say;
   $("quNote").innerHTML = note; $("quNote").hidden = !note;
   $("quErr").hidden = true;

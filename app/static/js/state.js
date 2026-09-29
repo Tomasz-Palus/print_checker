@@ -283,24 +283,71 @@ export const THIN_PRINT_MM = 0.25;   // cieńsza kreska na wydruku może się ni
 
 // Cienkie linie i tekst poza obszarem bezpiecznym (Tomasz 29.09 — „edge cases”). Liczone na wersji
 // z ostateczną geometrią; ramki w ułamkach strony. null — jeszcze nie wiadomo.
+// Czerwone kontury wytycznych (klasa „safe” w SVG szablonu, współrzędne w pt strony wytycznych) jako
+// Path2D — każdy kontur osobno i wypełniony, więc ramka narysowana jako pierścień (kontur zewnętrzny
+// + wewnętrzny) daje swoje wnętrze, a kilka osobnych stref — sumę. Drobne czerwone elementy (strzałki,
+// podpisy) pomijamy: kontur musi mieć co najmniej 10 % szerokości i wysokości strony.
+const _zones = new Map();
+let _hit = null;
+const hitCtx = () => (_hit ||= document.createElement("canvas").getContext("2d"));
+export function safeZones(t) {
+  const key = `${S.guidelines?.hash}:${S.tplIndex}`;
+  if (_zones.has(key)) return _zones.get(key);
+  const out = [];
+  try {
+    const W = t.page_width_pt, H = t.page_height_pt;
+    for (const m of (t.svg || "").matchAll(/<path class="safe" d="([^"]+)"/g)) {
+      for (const sub of m[1].split(/(?=M)/)) {               // nasz SVG ma tylko bezwzględne M/L/C/H/V/Z
+        const tok = sub.match(/[MLCHVZ]|-?\d*\.?\d+(?:e-?\d+)?/gi) || [];
+        let cmd = "", x = 0, y = 0, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, nums = [];
+        const add = (px, py) => { x0 = Math.min(x0, px); y0 = Math.min(y0, py); x1 = Math.max(x1, px); y1 = Math.max(y1, py); };
+        const flush = () => {
+          if (cmd === "H") nums.forEach((v) => { x = v; add(x, y); });
+          else if (cmd === "V") nums.forEach((v) => { y = v; add(x, y); });
+          else for (let i = 0; i + 1 < nums.length; i += 2) { x = nums[i]; y = nums[i + 1]; add(x, y); }
+          nums = [];
+        };
+        for (const k of tok) {
+          if (/^[MLCHVZ]$/i.test(k)) { flush(); cmd = k.toUpperCase(); } else nums.push(parseFloat(k));
+        }
+        flush();
+        if (x1 - x0 >= 0.1 * W && y1 - y0 >= 0.1 * H) out.push(new Path2D(sub));
+      }
+    }
+  } catch (_) { /* brak Path2D / zły SVG — bez sprawdzania */ }
+  // zapas: prostokąty z serwera (safe_mm), gdyby SVG nie dało się odczytać
+  if (!out.length && t.safe_mm?.length) {
+    const pt = 72 / 25.4;
+    for (const r of t.safe_mm) { const p = new Path2D(); p.rect(r[0] * pt, r[1] * pt, (r[2] - r[0]) * pt, (r[3] - r[1]) * pt); out.push(p); }
+  }
+  _zones.set(key, out);
+  return out;
+}
+
 export function layoutRisks() {
   const a = S.factsCache[geoKey()];
   if (!a || a.error || !S.job) return null;
   const k = scaleK();
   const thin = (a.thin_lines || []).filter((b) => b[4] === 0 || b[4] * k < THIN_PRINT_MM)
     .map((b) => ({ box: b, w: b[4] * k }));
-  // obszar bezpieczny z wytycznych (czerwona ramka) — szablon leży na środku strony, jak na podglądzie
+  // Obszar bezpieczny = WNĘTRZE czerwonych linii z wytycznych, w ich prawdziwym kształcie (Tomasz 29.09:
+  // „wytyczne mają różne obszary ochronne w różnych miejscach, często o nieregularnych kształtach”).
+  // Szablon leży na środku strony, jak na podglądzie. Wiersz tekstu jest bezpieczny, gdy jego rogi,
+  // środki boków i środek leżą wewnątrz któregoś czerwonego konturu.
   const t = template(), v = geoVersion(), pm = v?.pages_mm?.[S.page];
   let unsafe = [], safeKnown = false;
-  if (t && t.safe_mm?.length && pm && !t.dims_missing) {
+  const zones = t && pm && !t.dims_missing ? safeZones(t) : [];
+  if (zones.length) {
     safeKnown = true;
     const tw = t.page_width_pt * 25.4 / 72, th = t.page_height_pt * 25.4 / 72;
-    const ox = (pm[0] - tw) / 2, oy = (pm[1] - th) / 2, tol = 0.5;
-    const rects = t.safe_mm.map((r) => [r[0] + ox - tol, r[1] + oy - tol, r[2] + ox + tol, r[3] + oy + tol]);
+    const ox = (pm[0] - tw) / 2, oy = (pm[1] - th) / 2, pt = 72 / 25.4;
+    const inside = (xmm, ymm) => zones.some((z) => hitCtx().isPointInPath(z, (xmm - ox) * pt, (ymm - oy) * pt));
     unsafe = (a.text_boxes || []).filter((b) => {
       const x0 = b[0] * pm[0], y0 = b[1] * pm[1], x1 = x0 + b[2] * pm[0], y1 = y0 + b[3] * pm[1];
       if (x1 <= 0 || y1 <= 0 || x0 >= pm[0] || y0 >= pm[1]) return false;      // poza stroną — i tak się nie drukuje
-      return !rects.some((r) => x0 >= r[0] && y0 >= r[1] && x1 <= r[2] && y1 <= r[3]);
+      const xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;
+      return ![[x0, y0], [x1, y0], [x0, y1], [x1, y1], [xm, y0], [xm, y1], [x0, ym], [x1, ym], [xm, ym]]
+        .every(([x, y]) => inside(x, y));
     }).map((b) => ({ box: b }));
   }
   return { thin, unsafe, safeKnown };
