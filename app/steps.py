@@ -14,13 +14,14 @@ import math
 import os
 
 import pikepdf
+from decimal import Decimal
 import pymupdf
 
 import frames
 import gs
 
 MM = 25.4 / 72.0
-ORDER = ["frames", "trim", "resize", "cmyk", "overprint", "outline", "flatten"]
+ORDER = ["frames", "trim", "resize", "cmyk", "black", "overprint", "outline", "flatten"]
 
 
 def run(name: str, src: str, dst: str, params: dict, job) -> dict:
@@ -601,6 +602,130 @@ def _raster_cmyk(src: str, dst: str, profile: str) -> dict:
 
 
 # ----------------------------------------------------------------------------
+# czerń (za dużo farby) — rozdział Kolory
+# ----------------------------------------------------------------------------
+RICH_BLACK = (0.78, 0.85, 0.90, 1.0)   # zalecana czerń Adsystem (Tomasz 29.09) — 353 %
+
+
+def _cs_kind(cs, resources) -> str:
+    """„reg” — Registration (separacja /All), „cmyk” — CMYK (urządzenia albo ICC z 4 kanałami),
+    „” — inne."""
+    try:
+        if isinstance(cs, pikepdf.Name):
+            n = str(cs)
+            if n in ("/DeviceCMYK", "/CMYK"):
+                return "cmyk"
+            csd = resources.get("/ColorSpace") if resources is not None else None
+            if csd is not None and cs in csd:
+                return _cs_kind(csd[cs], resources)
+            return ""
+        if isinstance(cs, pikepdf.Array) and len(cs):
+            fam = str(cs[0])
+            if fam == "/Separation" and str(cs[1]) == "/All":
+                return "reg"
+            if fam == "/ICCBased" and int(cs[1].get("/N", 0)) == 4:
+                return "cmyk"
+            if fam == "/DeviceCMYK":
+                return "cmyk"
+    except Exception:
+        pass
+    return ""
+
+
+def _heavy_cmyk(v) -> bool:
+    import analyze
+    return len(v) == 4 and sum(v) > analyze.HEAVY_SUM and v[3] >= analyze.HEAVY_K
+
+
+def _fix_black(pdf, container, resources, st: dict, done: set, depth=0) -> int:
+    """Podmienia w treści jednolite czernie z za dużą ilością farby na RICH_BLACK: kolory `k`/`K`,
+    `sc`/`scn` w CMYK i kolor „Registration” (jego `cs` zamieniamy na DeviceCMYK, a odcień t na
+    t × RICH_BLACK). Stan kolorów przechodzi do form (forma dziedziczy go po wywołaniu).
+    Obrazy i przejścia tonalne zostają — tych się nie poprawi (Tomasz: „jak plik jest rastrowy,
+    to nie poprawimy”)."""
+    key = container.objgen if not isinstance(container, pikepdf.Page) else container.obj.objgen
+    if depth > 12 or key in done:
+        return 0
+    done.add(key)
+    try:
+        ops = list(pikepdf.parse_content_stream(container))
+    except Exception:
+        return 0
+    n, out, stack, changed = 0, [], [], False
+    st = dict(st)
+    xobj = resources.get("/XObject") if resources is not None else None
+    def num(xs):
+        out = []
+        for x in xs:
+            try:
+                out.append(float(x))
+            except (TypeError, ValueError):
+                pass
+        return out
+
+    def rb(t=1.0):
+        return [Decimal(f"{c * t:.4f}") for c in RICH_BLACK]
+    for operands, op in ops:
+        o = str(op)
+        if o == "q":
+            stack.append(dict(st))
+        elif o == "Q":
+            if stack:
+                st = stack.pop()
+        elif o in ("k", "K"):
+            side = "f" if o == "k" else "s"
+            st[side] = "cmyk"
+            v = num(operands)
+            if _heavy_cmyk(v):
+                operands, n, changed = rb(), n + 1, True
+        elif o in ("g", "G", "rg", "RG"):
+            st["f" if o.islower() else "s"] = ""
+        elif o in ("cs", "CS"):
+            side = "f" if o == "cs" else "s"
+            kind = _cs_kind(operands[0], resources) if operands else ""
+            st[side] = kind
+            if kind == "reg":
+                operands, changed = [pikepdf.Name("/DeviceCMYK")], True
+        elif o in ("sc", "scn", "SC", "SCN"):
+            side = "f" if o in ("sc", "scn") else "s"
+            v = num(operands)
+            if st.get(side) == "reg" and len(v) == 1:
+                t = v[0]
+                operands, changed = rb(t), True
+                if t * 4 > 3.6:
+                    n += 1
+            elif st.get(side) == "cmyk" and _heavy_cmyk(v):
+                operands, n, changed = rb(), n + 1, True
+        elif o == "Do" and xobj is not None and operands and operands[0] in xobj:
+            xo = xobj[operands[0]]
+            if str(xo.get("/Subtype", "")) == "/Form":
+                n += _fix_black(pdf, xo, xo.get("/Resources") or resources, st, done, depth + 1)
+        out.append(pikepdf.ContentStreamInstruction(operands, op))
+    if changed:
+        data = pikepdf.unparse_content_stream(out)
+        if isinstance(container, pikepdf.Page):
+            container.obj.Contents = pdf.make_stream(data)
+        else:
+            container.write(data)
+    return n
+
+
+def step_black(src, dst, p, job) -> dict:
+    """„Popraw czerń” (rozdział Kolory, Tomasz 29.09): jednolite czarne pola, napisy i linie z za
+    dużą ilością farby (np. 100/100/100/100 albo kolor „Registration” = 400 %) dostają zalecaną
+    czerń Adsystem C78 M85 Y90 K100. Obrazów i przejść tonalnych nie ruszamy."""
+    page = int(p.get("page", 0))
+    with pikepdf.open(src) as pdf:
+        pg = pdf.pages[page]
+        n = _fix_black(pdf, pg, pg.obj.get("/Resources"), {"f": "", "s": ""}, set())
+        if not n:
+            raise ValueError("Nie ma jednolitej czerni z za dużą ilością farby — to obrazy albo przejścia "
+                             "tonalne, tych program nie poprawi.")
+        pdf.save(dst)
+    return {"text": f"czerń poprawiona w {n} {'miejscu' if n == 1 else 'miejscach'}: C78 M85 Y90 K100 (353 %)"}
+
+
+# ----------------------------------------------------------------------------
 # overprint
 # ----------------------------------------------------------------------------
 def step_overprint(src, dst, p, job) -> dict:
@@ -905,6 +1030,6 @@ def step_flatten(src, dst, p, job) -> dict:
     return {"text": text, "fonts_subst": warn}
 
 
-STEPS = {"frames": step_frames, "trim": step_trim, "resize": step_resize, "cmyk": step_cmyk,
+STEPS = {"frames": step_frames, "trim": step_trim, "resize": step_resize, "cmyk": step_cmyk, "black": step_black,
          "overprint": step_overprint, "outline": step_outline, "flatten": step_flatten}
 

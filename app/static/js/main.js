@@ -418,6 +418,7 @@ function render() {
   // tylko „Cofnij" — cofa do niego (Tomasz 25.09). Wybór, „Pokaż, jak wydrukuje" i suwaki są
   // tylko w rozdziałach, nad którymi się teraz pracuje.
   for (const [name, id] of Object.entries(STEP_CH)) {
+    if (name === "black") continue;        // dodatkowa poprawka w Kolorach — rozdział prowadzi „cmyk”
     const ch = $(id), step = stepIndex(name) > 0;
     const decided = step || (!!S.settle[name] && S.settle[name] !== "auto");
     ch.classList.toggle("past", !ch.hidden && decided && !lastTwo.includes(ch) && ch !== pin);

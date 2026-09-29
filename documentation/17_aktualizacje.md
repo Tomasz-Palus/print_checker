@@ -892,3 +892,28 @@ Numery jak w `18_przeglad_kodu.md`.
     pewne jest tylko „Wyłącz overprint”.
   - Sprawdzone (Playwright): Kolory → „farba 400 %”, Overprint → tylko biel, Fonty → nic,
     rozwinięcie Kolorów nagłówkiem → znowu farba, zwinięcie → nic.
+
+## 0.6.1 — poprawa czerni w Kolorach, biel z overprintem tylko CMYK (Tomasz 29.09)
+
+- **Biel z overprintem — tylko CMYK 0/0/0/0** (Tomasz 29.09: w Acrobacie, Podgląd wyjściowy
+  z symulacją nadruku, biel w skali szarości z overprintem NIE znika — tak samo jak u nas).
+  `analyze._white` liczy już tylko CMYK 0/0/0/0 przy OPM 1. Biel RGB po zamianie na CMYK staje się
+  0/0/0/0 i wtedy wyłapie ją analiza nowej wersji. Plik testowy ma poprawione opisy.
+- **„Popraw czerń” w rozdziale Kolory** (Tomasz 29.09: „niech się pojawi taki button, gdy jest to
+  zalecane … czerń C78 M85 Y90 K100 … tylko gdy warstwa ma jednolity kolor czarny, jak plik jest
+  rastrowy, to nie poprawimy”).
+  - Nowa poprawka `black` (steps.ORDER: … cmyk, black, overprint …), `steps.step_black` /
+    `_fix_black`. W treści strony i form podmienia jednolite czernie z za dużą ilością farby na
+    C78 M85 Y90 K100:
+    - `k` / `K` i `sc` / `scn` w CMYK (urządzenia albo ICC z 4 kanałami), gdy suma > 360 % i K ≥ 85 %;
+    - kolor „Registration” (separacja /All): `cs` → DeviceCMYK, odcień t → t × zalecana czerń.
+  - Obrazów i przejść tonalnych nie rusza.
+  - `analyze.heavy_black` — ile takich pól, napisów i linii jest na stronie. Przycisk pokazuje się,
+    gdy suma farb przekracza limit (`ink.py`), jest co poprawić, decyzja o kolorach już zapadła
+    i nie ma późniejszych poprawek. Po poprawie: „Czerń poprawiona …” + „Cofnij poprawę czerni”.
+    Gdy nadmiar farby zostaje (obraz) — informacja, że tego program nie poprawi.
+  - `ink.TAC_LIMIT` 330 → **360 %**, żeby zalecana czerń (353 %) nie dawała ostrzeżenia. Czerń
+    z RGB po zamianie ma ok. 316 %.
+  - Sprawdzone: plik testowy (czerń 4 × 100 % i „Registration”) → 2 miejsca poprawione, suma farb
+    400 % → 353 %, bez ostrzeżenia. Czerń 60/50/50/100 nietknięta. Playwright: przycisk
+    dopiero po wyborze w rzędzie Kolory, po poprawie ramki znikają, błędów JS brak.

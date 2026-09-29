@@ -221,7 +221,14 @@
       <div class="ch-b">
         <p class="say" id="coSay"></p>
         <div class="note" id="coNote"></div>
-        <div class="box warn" id="coInk" hidden></div>
+        <div class="box warn" id="coInk" hidden>
+          <div id="coInkTxt"></div>
+          <!-- „Popraw czerń” (Tomasz 29.09): jednolite czernie z za dużą ilością farby → C78 M85 Y90 K100 -->
+          <div class="row" id="bkRow" hidden>
+            <button class="btn primary" id="bkDo" type="button">Popraw czerń</button>
+            <button class="btn" id="bkUndo" type="button" hidden>Cofnij poprawę czerni</button>
+          </div>
+        </div>
         <div class="box bad" id="coErr" hidden></div>
         <!-- wybór w rzędach (Tomasz 24.09): w każdym rzędzie jeden przycisk, wybrany = niebieski -->
         <div class="seg rowsel" id="coAct">

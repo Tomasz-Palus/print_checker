@@ -89,6 +89,7 @@ class Analyzer:
         self.overprint_uses = 0
         self.white_op = []              # biały z overprintem — w druku znika: [x0,y0,x1,y1] w pt strony
         self._ov_in = {}                # stan overprintu przekazywany do formy
+        self.heavy_black = 0            # jednolite czernie ponad limit farby (CMYK / Registration) — da się poprawić
         self.thin = []                  # cienkie kreski: [x0,y0,x1,y1, grubość w mm PLIKU] (0 = hairline)
         self._lw_in = 1.0               # grubość linii przekazywana do formy
         self.transparency = Counter()   # rodzaj -> liczba
@@ -373,12 +374,18 @@ class Analyzer:
                         if wmm < THIN_FILE_MM and len(self.thin) < 400 and not _template_color(stroke_cs, stroke_v):
                             self.thin.append([round(v, 2) for v in pbox] + [round(wmm, 4)])
                     if pbox is not None and o != "n":
+                        if (o not in ("S", "s") and _heavy(fill_cs, fill_v)) or \
+                                (o not in ("f", "F", "f*") and _heavy(stroke_cs, stroke_v)):
+                            self.heavy_black += 1
                         if o not in ("S", "s") and ov.get("op") and _white(fill_cs, fill_v, ov.get("OPM", 0)):
                             self._white_hit(pbox)
                         elif o not in ("f", "F", "f*") and ov.get("OP") and _white(stroke_cs, stroke_v, ov.get("OPM", 0)):
                             self._white_hit(pbox)
                     pbox = None
                     continue
+                if o in ("Tj", "TJ", "'", '"') and tr not in (3, 7) and \
+                        _heavy(*((fill_cs, fill_v) if tr in (0, 2, 4, 6) else (stroke_cs, stroke_v))):
+                    self.heavy_black += 1
                 if o in ("Tj", "TJ", "'", '"') and tr not in (3, 7) and ov.get("op" if tr in (0, 2, 4, 6) else "OP"):
                     cs_, v_ = (fill_cs, fill_v) if tr in (0, 2, 4, 6) else (stroke_cs, stroke_v)
                     if _white(cs_, v_, ov.get("OPM", 0)):
@@ -572,16 +579,28 @@ def _template_color(cs: dict, v: list) -> bool:
     return False
 
 
-def _white(cs: dict, v: list, opm: int) -> bool:
-    """Czy farba to BIEL, która z overprintem zniknie. CMYK 0/0/0/0 znika tylko przy OPM 1
-    (zera nie zakrywają tła — tak zapisuje Illustrator); biel w skali szarości maluje tylko
-    kanał K, więc kolorowe tło pod nią zostaje; biel RGB znika po zamianie na CMYK. Kolor
-    dodatkowy („White” do druku białą farbą) jest celowy — nie liczymy."""
+HEAVY_SUM = 3.6         # suma farb (1 = 100 %) ponad limit drukarni — jak ink.TAC_LIMIT
+HEAVY_K = 0.85          # i dużo czerni: to „czarne” pole, a nie ciemny kolor
+
+
+def _heavy(cs: dict, v: list) -> bool:
+    """Jednolita czerń z za dużą ilością farby: CMYK (np. 100/100/100/100) albo kolor
+    „Registration” (separacja All = 100 % każdej farby). Tę da się poprawić (steps.step_black)."""
     fam = cs.get("family")
-    if fam == "Gray":
-        return len(v) >= 1 and v[0] >= 0.999
-    if fam == "RGB":
-        return len(v) >= 3 and min(v[:3]) >= 0.999
+    if fam == "CMYK" and len(v) >= 4:
+        return sum(v[:4]) > HEAVY_SUM and v[3] >= HEAVY_K
+    if fam == "Spot" and cs.get("spot") == "All":
+        return len(v) >= 1 and v[0] * 4 > HEAVY_SUM
+    return False
+
+
+def _white(cs: dict, v: list, opm: int) -> bool:
+    """Czy farba to BIEL, która z overprintem zniknie: CMYK 0/0/0/0 przy OPM 1 (zera nie zakrywają
+    tła — tak zapisuje Illustrator). Kolor dodatkowy („White” do druku białą farbą) jest celowy."""
+    fam = cs.get("family")
+    # Skala szarości i RGB z overprintem ZAKRYWAJĄ tło — tak liczy Ghostscript i tak pokazuje
+    # Acrobat („Podgląd wyjściowy” z symulacją nadruku, Tomasz 29.09). RGB zamienione na CMYK
+    # daje 0/0/0/0 — to wyłapie analiza wersji po zamianie kolorów.
     if fam == "CMYK":
         return len(v) >= 4 and max(v[:4]) <= 0.001 and opm == 1
     return False
@@ -862,6 +881,7 @@ def _summarize_pdf(an: Analyzer, pages, intents, meta, coverage=None, page_sizes
         "overprint_uses": an.overprint_uses,
         "white_overprint": getattr(an, "white_boxes", []),
         "thin_lines": getattr(an, "thin_boxes", []),
+        "heavy_black": an.heavy_black,
         "transparency": dict(an.transparency),
         "fonts": [{"name": n, "embedded": e, "uses": c} for (n, e), c in an.fonts.most_common()],
         "parse_warnings": an.unknown_ops + (1 if an.truncated else 0),

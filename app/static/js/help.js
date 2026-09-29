@@ -72,8 +72,10 @@ export const HELP = {
     miesza kolory, a potem je przelicza; po zamianie jest odwrotnie. Wynik w tych miejscach potrafi
     się wyraźnie różnić — porównaj suwakiem.<br><br>
     <b>Za dużo farby:</b> program liczy, ile farby maszyna położy w jednym miejscu (suma C+M+Y+K).
-    Powyżej 330 % (limit profilu FOGRA39) farba może nie schnąć i się rozmazywać — zwykle to czerń
-    100/100/100/100 albo kolor „Registration”. Program tylko ostrzega: poprawić musi grafik albo klient.`,
+    Powyżej 360 % farba może nie schnąć i się rozmazywać — zwykle to czerń 100/100/100/100 albo kolor
+    „Registration”. Gdy to <b>jednolita</b> czerń (pole, napis, linia), przycisk <b>Popraw czerń</b> zamienia ją
+    na zalecaną czerń Adsystem <b>C78 M85 Y90 K100</b> (353 %). Czerni w obrazie ani w przejściu tonalnym
+    program nie poprawi — wtedy trzeba poprosić klienta.`,
   op: `<b>Overprint</b> (nadruk) każe farbie kłaść się NA tło zamiast je zakrywać. Czerwony napis
     na czarnym tle wychodzi wtedy prawie czarny, choć na ekranie był czerwony. Większość
     programów na ekranie tego nie pokazuje — nasz podgląd pokazuje (to już wydruk).<br><br>

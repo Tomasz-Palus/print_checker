@@ -1,9 +1,9 @@
 """Suma farb (TAC — total area coverage): ile farby maszyna położy w jednym miejscu.
 
 Za dużo farby (np. czerń 100/100/100/100 = 400 %, kolor „Registration”, ciemne tło złożone
-ze wszystkich farb) nie schnie, rozmazuje się i odbija. Profil Coated FOGRA39 dopuszcza
-330 % — tyle maksymalnie daje zamiana kolorów RGB na CMYK (czerń RGB → ok. 316 %), więc
-powyżej to zawsze CMYK / kolor dodatkowy wpisany ręcznie w projekcie (Tomasz 29.09, „edge cases”).
+ze wszystkich farb) nie schnie, rozmazuje się i odbija. Limit 360 % przepuszcza zalecaną czerń
+Adsystem (C78 M85 Y90 K100 = 353 %) i czerń z RGB po zamianie (ok. 316 %), więc powyżej to
+zawsze CMYK / kolor dodatkowy wpisany ręcznie w projekcie (Tomasz 29.09, „edge cases”).
 
 Liczymy na wydruku (render CMYK FOGRA39 z symulacją overprintu — overprint dokłada farby),
 w niskiej rozdzielczości: to pola, a nie pojedyncze kreski, są problemem.
@@ -17,7 +17,9 @@ import numpy as np
 
 import gs
 
-TAC_LIMIT = 330          # % — limit profilu Coated FOGRA39
+# % — powyżej zalecanej czerni Adsystem C78 M85 Y90 K100 (= 353 %, Tomasz 29.09), a czerń z RGB
+# po zamianie na FOGRA39 daje ok. 316 %. Wyżej są już czernie 4 × 100 %, „Registration” i podobne.
+TAC_LIMIT = 360
 LONG_PX = 1500           # dłuższy bok renderu
 CELL = 12                # kratka do wyznaczania ramek (px renderu)
 CELL_MIN = 6             # tyle pikseli ponad limit, żeby kratka się liczyła

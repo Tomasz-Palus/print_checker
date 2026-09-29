@@ -4,7 +4,7 @@
 // Każdy z dalszych: fakty o stronie → jedno zdanie → wybór (poprawka albo „Zostaw jak jest").
 import { $, esc, chapter, plural } from "./util.js";
 import { S, changed, hasStep, isPdf, facts, colorNeed, fileProfile, transparencyKinds, flattenPlan, scaleK,
-         sizeSettled, printSettled, colorSettled, overprintSettled, fontsSettled, fontWarnings, inkNow } from "./state.js";
+         sizeSettled, printSettled, colorSettled, overprintSettled, fontsSettled, fontWarnings, inkNow, factsKey } from "./state.js";
 import { applyStep, undoStep } from "./steps.js";
 
 const stepText = (name) => S.job.versions.find((v) => v.step === name)?.text || "";
@@ -81,6 +81,9 @@ document.querySelectorAll("#coProf button").forEach((b) => b.addEventListener("c
   if (!hasStep("cmyk")) { S.choice.cmyk.profile = null; changed(); }   // błąd — wybór wraca
 }));
 
+$("bkDo").addEventListener("click", () => applyStep("black", {}));
+$("bkUndo").addEventListener("click", () => undoStep("black"));
+
 export function renderColor() {
   const el = $("ch-color");
   el.hidden = !printSettled();
@@ -119,15 +122,35 @@ export function renderColor() {
     }
   }
   chapter("ch-color", st, sum);
-  // za dużo farby (ink.py) — tylko informacja: poprawić może grafik / klient (Tomasz 29.09)
-  const ink = inkNow(), ib = ink?.boxes || [];
-  $("coInk").hidden = !ib.length;
-  if (ib.length) $("coInk").innerHTML = `<b>Za dużo farby</b> w ${ib.length} ${plural(ib.length, "miejscu", "miejscach", "miejscach")}: `
-    + `suma farb dochodzi do <b>${ink.max} %</b>, a drukarnia przyjmuje do ${ink.limit} % (czerwone ramki na podglądzie). `
-    + `Farba może nie wyschnąć i się rozmazać. `
-    + (ink.max >= 390 ? `Najczęściej to czerń złożona ze wszystkich farb (100/100/100/100) albo kolor „Registration”. `
-      : `Najczęściej to bardzo ciemne tło złożone ze wszystkich farb. `)
-    + `Poproś klienta o poprawkę — np. czerń 40/30/30/100.`;
+  // Za dużo farby (ink.py). Jednolitą czerń (pola, napisy, linie w CMYK albo „Registration”) da się
+  // poprawić przyciskiem — na zalecaną czerń Adsystem C78 M85 Y90 K100 (Tomasz 29.09); obrazów
+  // i przejść tonalnych nie („jak plik jest rastrowy, to nie poprawimy”).
+  const ink = inkNow(), ib = ink?.boxes || [], fixed = hasStep("black");
+  const ha = S.analysisFor === factsKey() && S.analysis && !S.analysis.error ? S.analysis : null;
+  const heavy = ha?.heavy_black || 0;
+  const later = S.job.versions.some((v) => ["overprint", "outline", "flatten"].includes(v.step));
+  const canFix = !fixed && !!ib.length && heavy > 0 && st === "done" && !later && isPdf();
+  let it = "";
+  if (fixed) {
+    it = `<span class="say ok">Czerń poprawiona</span>${esc(stepText("black").replace(/^czerń poprawiona/, ""))}.`;
+    if (ib.length) it += ` Zostało za dużo farby w ${ib.length} ${plural(ib.length, "miejscu", "miejscach", "miejscach")} `
+      + `(do ${ink.max} %) — to obraz albo przejście tonalne, tego program nie poprawi. Poproś klienta o poprawkę.`;
+  } else if (ib.length) {
+    it = `<b>Za dużo farby</b> w ${ib.length} ${plural(ib.length, "miejscu", "miejscach", "miejscach")}: `
+      + `suma farb dochodzi do <b>${ink.max} %</b>, a drukarnia przyjmuje do ${ink.limit} % (czerwone ramki na podglądzie). `
+      + `Farba może nie wyschnąć i się rozmazać. `
+      + (heavy ? `To jednolita czerń złożona ze wszystkich farb${ink.max >= 390 ? " (100/100/100/100 albo kolor „Registration”)" : ""} — `
+          + `<b>Popraw czerń</b> zamieni ją na zalecaną C78 M85 Y90 K100.`
+          + (later ? ` Najpierw cofnij późniejsze poprawki (Overprint, Fonty, Spłaszczenie).`
+            : st !== "done" ? ` Przycisk pojawi się po wyborze w rzędzie niżej.` : "")
+        : `To obraz albo przejście tonalne — tego program nie poprawi. Poproś klienta o poprawkę (np. czerń C78 M85 Y90 K100).`);
+  }
+  $("coInk").hidden = !it;
+  $("coInk").classList.toggle("warn", !fixed); $("coInk").classList.toggle("ok", fixed);
+  $("coInkTxt").innerHTML = it;
+  $("bkRow").hidden = !(canFix || fixed);
+  $("bkDo").hidden = !canFix; $("bkDo").disabled = !!S.busy;
+  $("bkUndo").hidden = !fixed; $("bkUndo").disabled = !!S.busy;
   $("coSay").innerHTML = say;
   $("coNote").innerHTML = note; $("coNote").hidden = !note;
   $("coErr").hidden = !S.stepErr.cmyk; $("coErr").textContent = S.stepErr.cmyk || "";

@@ -113,11 +113,11 @@ export function roleSettled() {
 
 // ---------------------------------------------------------------- poprawki
 // rozdział z suwakiem danej poprawki
-export const STEP_CH = { frames: "ch-frames", trim: "ch-trim", resize: "ch-size", cmyk: "ch-color", overprint: "ch-op",
+export const STEP_CH = { frames: "ch-frames", trim: "ch-trim", resize: "ch-size", cmyk: "ch-color", black: "ch-color", overprint: "ch-op",
   outline: "ch-fonts", flatten: "ch-flat" };
-export const STEP_ORDER = ["frames", "trim", "resize", "cmyk", "overprint", "outline", "flatten"];
+export const STEP_ORDER = ["frames", "trim", "resize", "cmyk", "black", "overprint", "outline", "flatten"];
 export const STEP_NAME = { frames: "usunięcie szablonu", trim: "przycięcie spadów", resize: "dopasowanie wymiaru",
-  cmyk: "przeliczenie kolorów na CMYK", overprint: "wyłączenie overprintu", outline: "przekształcenie tekstu w krzywe",
+  cmyk: "przeliczenie kolorów na CMYK", black: "poprawienie czerni", overprint: "wyłączenie overprintu", outline: "przekształcenie tekstu w krzywe",
   flatten: "spłaszczenie" };      // rodzaj nijaki — pasuje też w pytaniu „Cofnąć …?"
 export const stepIndex = (name) => S.job ? S.job.versions.findIndex((v) => v.step === name) : -1;
 // Wersja tuż PRZED danym rozdziałem: gdy poprawka jest nałożona — poprzednia w łańcuchu,
