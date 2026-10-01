@@ -1,6 +1,6 @@
 // Start programu: wgrywanie pliku, jedna pętla rysowania rozdziałów i podglądu, ustawienia.
 import { $, esc, fmtMm, fmtBytes, api, ask, chapter, initChapters, plural, shown, revealChapters, markHelp } from "./util.js";
-import { S, changed, onChange, resetJobState, ROT_TXT, head, template, scaleK, printMm, isPdf, sizeSettled, factsKey, STEP_NAME, STEP_CH, stepIndex, fontWarnings, riskMarks, printSettled, geoKey, geoVersion, flattenSettled } from "./state.js";
+import { S, changed, onChange, resetJobState, ROT_TXT, head, template, scaleK, printMm, isPdf, sizeSettled, factsKey, STEP_NAME, STEP_CH, stepIndex, fontWarnings, riskMarks, printSettled, flattenSettled } from "./state.js";
 import { HELP } from "./help.js";
 import * as viewer from "./viewer.js";
 import * as product from "./product.js";
@@ -133,22 +133,6 @@ async function loadInk() {
     if (factsKey() === key) S.ink = { key, data: null, err: e.message };
   }
   if (inkBusy === key) inkBusy = "";
-  changed();
-}
-
-// Analiza wersji z ostateczną geometrią (cienkie linie, obszar bezpieczny — state.layoutRisks).
-// Zwykle już jest w pamięci (była ostatnią wersją); gdy nie — dociągamy ją raz.
-let geoBusy = "";
-async function loadGeoFacts() {
-  const key = geoKey(), v = geoVersion();
-  if (!isPdf() || !flattenSettled() || !key || S.factsCache[key] || geoBusy === key) return;
-  geoBusy = key;
-  try {
-    S.factsCache[key] = await api(`/api/jobs/${S.job.job_id}/analysis?v=${v.id}&page=${S.page}`);
-  } catch (e) {
-    S.factsCache[key] = { error: e.message };
-  }
-  if (geoBusy === key) geoBusy = "";
   changed();
 }
 
@@ -399,7 +383,7 @@ function render() {
   const rot = has ? S.job.file.rot || 0 : 0;
   chapter("ch-file", has ? "done" : "open", has ? esc(S.job.file.name) + (rot ? ` · obrócony ${ROT_TXT[rot]}` : "") : "");
   if (S.fitNext) { S.fitNext = false; viewer.zoomFit(); thumbs(); }
-  if (has) { loadAnalysis(); loadInk(); loadGeoFacts(); fileLine(); }
+  if (has) { loadAnalysis(); loadInk(); fileLine(); }
   fileRot();
   filePrep();
   product.renderPage();

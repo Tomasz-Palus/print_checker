@@ -4,7 +4,7 @@
 // i położeniu z suwaków, margines pusty albo wypełniony tłem z krawędzi / odbiciem lustrzanym.
 // Póki rozdział jest otwarty, podgląd pokazuje FORMAT (zielona ramka), a projekt skaluje się
 // i przesuwa pod nim — to, co poza ramką, jest przyciemnione (zostanie odcięte).
-import { $, fmtMm, chapter } from "./util.js";
+import { $, fmtMm, chapter, brief } from "./util.js";
 import { S, changed, pageMm, targetMm, scaleK, hasStep, beforeStep, trimSettled, sizeMatches, isPdf } from "./state.js";
 import { applyStep, undoStep, stepControls, rotateFile } from "./steps.js";
 
@@ -191,6 +191,10 @@ export function renderSize() {
   if ($("szRot").dataset.html !== rot) { $("szRot").innerHTML = rot; $("szRot").dataset.html = rot; }
   $("szRot").hidden = !rot;
   chapter("ch-size", st, sum);
+  const fk = isPdf() ? k : 1;
+  brief("szBrief", done || ok ? "" : !f ? `<span class="warn">Obraz nie ma zapisanego DPI</span> — wymiar w mm nieznany.`
+    : match ? `<span class="ok">Wymiar się zgadza</span>: ${printT}.`
+    : `${isPdf() ? "Plik" : "Obraz"}: <b>${fmtMm(f.w * fk)} × ${fmtMm(f.h * fk)} mm</b> · wytyczne: <b>${printT}</b>`);
   $("szSay").innerHTML = say;
   $("szCtl").hidden = !edit;
   $("szEditBtn").hidden = !(match && f && !edit && !done && !ok);

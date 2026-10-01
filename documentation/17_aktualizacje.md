@@ -1179,3 +1179,40 @@ Numery jak w `18_przeglad_kodu.md`.
   - bez zmian: „plik sprawdziliśmy przed drukiem — nie wymagał zmian”.
 - Pole jest edytowalne. Tekst nadpisuje się tylko wtedy, gdy zmieni się plik, więc własne poprawki
   zostają. Kopiuj: schowek, a gdy go nie ma — zaznaczenie i kopia.
+
+## 0.6.6 — bez sprawdzania cienkich linii i obszaru bezpiecznego (Tomasz 01.10)
+
+- Tomasz: „usuńmy sprawdzanie tego, co jest poza obszarem bezpiecznym, i cienkie linie — nie chcę, aby to
+  było sprawdzane”.
+- Usunięte (wprowadzone w 0.6.4):
+  - **interfejs:** `state.layoutRisks` / `safeZones` / `geoVersion` / `THIN_PRINT_MM`, `main.loadGeoFacts`,
+    ramki na podglądzie w Jakości, ostrzeżenie `#quRisk`;
+  - **teksty:** pozycje w Pobierz i w opisie dla klienta, krok samouczka „Cienkie linie i krawędzie”,
+    akapit w pomocy Jakości;
+  - **analiza (`analyze.py`):** zbieranie cienkich kresek (`thin_lines`, `THIN_FILE_MM`, `_template_color`)
+    i ramek tekstu (`_text_boxes`) — analiza jest przez to też trochę szybsza.
+- Zostaje „Rozumiem, dalej” w Jakości przy dobrej jakości (lupki i nawigator, 0.6.4).
+- Wytyczne nadal zapisują `safe_mm` (`guidelines.py`, PARSER_VERSION 5). Program z tego nie korzysta;
+  zostaje, żeby nie przeliczać wszystkich pobranych wytycznych od nowa.
+
+## 0.6.6 — krótkie informacje w rozdziałach (Tomasz 01.10)
+
+- Tomasz: „może przywróćmy krótkie informacje do tych rozdziałów, typu że są overprinty, fonty
+  niezamienione na krzywe, kolory takie i takie — podstawowe rzeczy, ale bez większego rozpisywania”.
+- Na górze rozdziału jedna linia z faktami (`.brief`, `util.brief`). Pełny opis zostaje pod „?”.
+- Linia znika, gdy poprawka jest nałożona — wtedy stan mówi nagłówek rozdziału:
+  - **Szablon:** „W projekcie jest szablon z wytycznych: cały + 3 napisy.” / „Linie szablonu są wtopione
+    w obraz” / „Ramki w kolorach wytycznych — nie pasują do szablonu tego produktu.”;
+  - **Spady:** „Plik ma spady 20 mm.”;
+  - **Wymiar:** „Plik: 1040 × 2040 mm · wytyczne: 1015 × 2014 mm” / „Wymiar się zgadza” / „Obraz nie ma
+    zapisanego DPI”;
+  - **Symulacja wydruku:** „Od teraz podgląd pokazuje wydruk — kolory z drukarki i overprint.”;
+  - **Kolory:** „Kolory: RGB, Lab, spot (PANTONE 485 C, …) — do druku potrzebny CMYK.” i „Za dużo farby:
+    do 400 % (limit 360 %).”;
+  - **Overprint:** „Overprint: 2 miejsca · biel z overprintem: 1.”;
+  - **Fonty:** „Tekst w fontach (5) — nie zamieniony na krzywe · nieosadzone: …” (po krzywych: krój zastępczy);
+  - **Spłaszczenie:** „Przezroczystość: półprzezroczystość, tryby mieszania.” / „Bez przezroczystości.”;
+  - **Jakość:** „Za mała rozdzielczość: najsłabszy obraz ≈ 9 ppi (wymagane 120).” / „Jakość w porządku” /
+    „Sam wektor”;
+  - **Pobierz:** „Plik gotowy do druku.”
+- Sprawdzone (Playwright) na `PRINT_CHECKER_TEST_100x200_SZABLON_PASERY.pdf`; cały samouczek przechodzi.

@@ -1,8 +1,8 @@
 // Rozdziały „Jakość wydruku" i „Pobierz plik do druku" (etap 4).
 // Jakość liczy serwer (quality.py → detailmap.py) i oddaje gotowy werdykt; tu tylko pokazanie
 // go po ludzku i nawigacja po słabych miejscach na podglądzie (w rzeczywistej wielkości wydruku).
-import { $, esc, fmtMm, api, chapter, plural } from "./util.js";
-import { S, changed, head, scaleK, printMm, isPdf, flattenSettled, roleSettled, template, STEP_NAME, ROT_TXT, fontWarnings, inkNow, factsKey, layoutRisks, THIN_PRINT_MM, geoKey } from "./state.js";
+import { $, esc, fmtMm, api, chapter, plural, brief } from "./util.js";
+import { S, changed, head, scaleK, printMm, isPdf, flattenSettled, roleSettled, template, STEP_NAME, ROT_TXT, fontWarnings, inkNow, factsKey } from "./state.js";
 import { detailBlock } from "./settings.js";
 import * as viewer from "./viewer.js";
 
@@ -38,27 +38,12 @@ async function poll(key) {
 export function qualitySettled() {
   if (!flattenSettled()) return false;
   if (S.qual.err) return true;
-  if (!risksSeen()) return false;
   // także przy dobrej jakości rozdział czeka na „Rozumiem, dalej” — zostaje otwarty razem z lupkami
   // i nawigatorem, żeby można było obejrzeć projekt z bliska (Tomasz 29.09)
   const d = S.qual.data;
   return !!d && d.status === "done" && !!S.settle.quality;
 }
 const goodVerdict = (d) => !!d && d.status === "done" && (d.verdict === "ok" || d.verdict === "vector");
-// Cienkie linie / tekst poza obszarem bezpiecznym: rozdział czeka na „Rozumiem, dalej” (Tomasz 29.09).
-// Dopóki analiza wersji z ostateczną geometrią się nie wczytała (null) — też czekamy, inaczej
-// Akceptacja pojawiała się i znikała.
-const riskCount = () => {
-  if (S.factsCache[geoKey()]?.error) return 0;              // analiza się nie udała — nie blokujemy
-  const L = layoutRisks();
-  return L ? L.thin.length + L.unsafe.length : null;
-};
-function risksSeen() {
-  if (!isPdf()) return true;
-  const n = riskCount();
-  return n === 0 || (n !== null && !!S.settle.quRisk);
-}
-
 // ------------------------------------------------------------------ jakość: opis
 const areaShort = (a) => {
   const mm = a.mm ? `${fmtMm(a.mm[0])} × ${fmtMm(a.mm[1])} mm` : "";
@@ -85,8 +70,7 @@ $("quShow").querySelector("button").addEventListener("click", () => {
 });
 
 $("quRiskOk").querySelector("button").addEventListener("click", () => {
-  S.settle.quRisk = "seen";
-  if (goodVerdict(S.qual.data)) S.settle.quality = "seen";
+  S.settle.quality = "seen";
   changed();
 });
 
@@ -120,7 +104,7 @@ export function renderQuality() {
   const key = qualKey();
   if (S.qual.key !== key) {
     S.qual = { key, data: null, err: "" };
-    delete S.settle.quality; delete S.settle.quRisk;
+    delete S.settle.quality;
     closeNav();
     poll(key);
   }
@@ -168,25 +152,24 @@ export function renderQuality() {
     }
     if (scaleK() > 1) note += `${note ? " " : ""}Plik w skali 1:10 drukuje się 10× większy — żeby wyszło ${REQ} ppi, w pliku trzeba ${REQ * 10} ppi.`;
   }
-  // cienkie linie i tekst przy krawędzi (Tomasz 29.09 — „edge cases”): tylko informacja, poprawia się
-  // w rozdziale Wymiar (przesunięcie, wielkość) albo u klienta
-  const L = layoutRisks(), lr = [];
-  if (L?.thin.length) {
-    const hair = L.thin.some((x) => x.w === 0), mn = Math.min(...L.thin.map((x) => x.w));
-    lr.push(`<b>Cienkie linie</b> (${L.thin.length} ${plural(L.thin.length, "miejsce", "miejsca", "miejsc")}): `
-      + (hair ? `część ma grubość 0 (hairline) — wydrukuje się najcieńszą kreską, jaką da maszyna, albo wcale. `
-        : `najcieńsza ma ${mn.toFixed(2).replace(".", ",")} mm na wydruku. `)
-      + `Kreski cieńsze niż ${String(THIN_PRINT_MM).replace(".", ",")} mm mogą się nie wydrukować.`);
-  }
-  if (L?.unsafe.length)
-    lr.push(`<b>Tekst poza obszarem bezpiecznym</b> (${L.unsafe.length} ${plural(L.unsafe.length, "wiersz", "wiersze", "wierszy")}): `
-      + `za blisko krawędzi — przy montażu może zostać ucięty albo schowany w ramie. Przesuń albo zmniejsz projekt `
-      + `w rozdziale Wymiar wydruku albo poproś klienta o poprawkę.`);
-  $("quRisk").innerHTML = lr.length ? lr.join("<br>") + ` <span class="muted">(zaznaczone na podglądzie)</span>` : "";
-  $("quRisk").hidden = !lr.length;
-  $("quRiskOk").hidden = !(goodVerdict(d) && !S.settle.quality) && (!lr.length || !!S.settle.quRisk);
-  if (lr.length && !S.settle.quRisk && st === "done") { st = "todo"; }
+  // „Rozumiem, dalej” przy dobrej jakości — rozdział zostaje otwarty z lupkami i nawigatorem (Tomasz 29.09)
+  $("quRiskOk").hidden = !(goodVerdict(d) && !S.settle.quality);
   chapter("ch-qual", st, sum);
+  {
+    let b = "";
+    if (!S.qual.err) {
+      if (!d || d.status === "running") b = `<span class="spin"></span>Sprawdzam jakość obrazów…`;
+      else if (d.verdict === "vector") b = `<span class="ok">Sam wektor</span> — rozdzielczość nie ma znaczenia.`;
+      else if (d.verdict === "ok") b = `<span class="ok">Jakość w porządku</span> — obrazy mają co najmniej ${REQ} ppi.`;
+      else {
+        const g = d.groups.map((x) => d.areas[x.i]).find((x) => x.reason !== "jpeg");
+        b = d.verdict === "bad" && g ? `<span class="warn">Za mała rozdzielczość</span>: najsłabszy obraz ≈ ${Math.round(g.ppi)} ppi (wymagane ${REQ}).`
+          : d.look ? `Do obejrzenia: ${d.look} ${plural(d.look, "miejsce", "miejsca", "miejsc")} wyglądające na powiększone.` : "";
+        if (d.jpeg) b += `${b ? "<br>" : ""}Mocna kompresja JPEG: ${d.jpeg} ${plural(d.jpeg, "obraz", "obrazy", "obrazów")}.`;
+      }
+    }
+    brief("quBrief", b);
+  }
   $("quSay").innerHTML = say;
   $("quNote").innerHTML = note; $("quNote").hidden = !note;
   $("quErr").hidden = true;
@@ -332,7 +315,7 @@ function clientText() {
   // uwagi — to, czego program nie poprawił, a klient powinien wiedzieć
   const fw = fontWarnings(), fl = fw.filter((x) => !x.baked), fb = fw.filter((x) => x.baked);
   const ha = S.analysisFor === factsKey() && S.analysis && !S.analysis.error ? S.analysis : null;
-  const wo = (ha?.white_overprint || []).length, ink = inkNow(), lr = layoutRisks(), d = S.qual.data;
+  const wo = (ha?.white_overprint || []).length, ink = inkNow(), d = S.qual.data;
   const nm = (l) => l.map((x) => x.name).join(", ");
   const g0 = d?.status === "done" && d.groups ? d.groups.map((g) => d.areas[g.i]).find((a) => a.reason !== "jpeg") : null;
   const notes = [
@@ -342,8 +325,6 @@ function clientText() {
     ink?.boxes?.length ? `w ${ink.boxes.length} ${plural(ink.boxes.length, "miejscu", "miejscach", "miejscach")} jest za dużo farby (do ${ink.max} %) — może się rozmazać` : "",
     d?.status === "done" && d.verdict === "bad" && g0 ? `część obrazów ma za małą rozdzielczość (ok. ${Math.round(g0.ppi)} ppi przy wymaganych ${REQ}) — na wydruku będą rozmyte` : "",
     d?.status === "done" && d.verdict !== "bad" && d.look ? `w ${d.look} ${plural(d.look, "miejscu", "miejscach", "miejscach")} obrazy mogą wyglądać na nieostre` : "",
-    lr?.thin.length ? `w ${lr.thin.length} ${plural(lr.thin.length, "miejscu", "miejscach", "miejscach")} są bardzo cienkie linie — mogą się nie wydrukować` : "",
-    lr?.unsafe.length ? `${lr.unsafe.length} ${plural(lr.unsafe.length, "wiersz tekstu leży", "wiersze tekstu leżą", "wierszy tekstu leży")} za blisko krawędzi — może zostać ucięty` : "",
   ].filter(Boolean);
   const li = (l) => l.map((x) => `- ${x}`).join("\n");
   return `Dzień dobry,\n\n`
@@ -411,13 +392,14 @@ export function renderDownload() {
   const left = [["cmyk", "kolory"], ["overprint", "overprint"], ["outline", "tekst w fontach"], ["flatten", "warstwy (bez spłaszczenia)"]]
     .filter(([n]) => S.settle[n] === "skip").map(([, t]) => t);
   const bad = S.qual.data?.verdict === "bad";
+  brief("dlBrief", bad ? `<span class="warn">Obrazy są za małe</span> — na wydruku będą rozmyte.` : `<span class="ok">Plik gotowy do druku.</span>`);
   $("dlSay").innerHTML = bad
     ? `<span class="say warn">Plik można pobrać, ale obrazy są za małe</span> — na wydruku będą rozmyte.`
     : `<span class="say ok">Plik gotowy do druku.</span>`;
   // brak fontu (Tomasz 29.09): można drukować, ale ma być o tym informacja
   const fw = fontWarnings(), fb = fw.filter((f) => f.baked), fl = fw.filter((f) => !f.baked);
   const ha = S.analysisFor === factsKey() && S.analysis && !S.analysis.error ? S.analysis : null;
-  const wo = (ha?.white_overprint || []).length, ink = inkNow(), lrk = layoutRisks();
+  const wo = (ha?.white_overprint || []).length, ink = inkNow();
   const nm = (l) => esc(l.map((f) => f.name).join(", "));
   $("dlSum").innerHTML = (fl.length ? `<li class="warn">Brak fontu w pliku: <b>${nm(fl)}</b> — `
       + `drukarnia podstawi swój krój, litery wyjdą inne.</li>` : "")
@@ -425,8 +407,6 @@ export function renderDownload() {
       + `te litery wyjdą innym krojem niż w projekcie.</li>` : "")
     + (wo ? `<li class="warn">Biel z overprintem (${wo} ${plural(wo, "miejsce", "miejsca", "miejsc")}) — może w druku zniknąć.</li>` : "")
     + (ink?.boxes?.length ? `<li class="warn">Za dużo farby: do ${ink.max} % (limit ${ink.limit} %) — może się rozmazać.</li>` : "")
-    + (lrk?.thin.length ? `<li class="warn">Cienkie linie: ${lrk.thin.length} — mogą się nie wydrukować.</li>` : "")
-    + (lrk?.unsafe.length ? `<li class="warn">Tekst poza obszarem bezpiecznym: ${lrk.unsafe.length} ${plural(lrk.unsafe.length, "wiersz", "wiersze", "wierszy")}.</li>` : "")
     + (done.length ? `<li>Zrobione: ${esc(done.join(", "))}.</li>` : `<li>Bez poprawek.</li>`)
     + (left.length ? `<li>Zostawione jak były: ${esc(left.join(", "))}.</li>` : "")
     + (S.job.file.page_count > 1 ? `<li>Tylko strona ${S.page + 1} z ${S.job.file.page_count}.</li>` : "");

@@ -2,7 +2,7 @@
 // Symulacja wydruku (Tomasz 28.09): od niej podgląd pokazuje WYDRUK, więc dalsze rozdziały nie
 // potrzebują już „Pokaż, jak wydrukuje" — suwak przed/po każdej poprawki porównuje wydruk z wydrukiem.
 // Każdy z dalszych: fakty o stronie → jedno zdanie → wybór (poprawka albo „Zostaw jak jest").
-import { $, esc, chapter, plural } from "./util.js";
+import { $, esc, chapter, plural, brief } from "./util.js";
 import { S, changed, hasStep, isPdf, facts, colorNeed, fileProfile, transparencyKinds, flattenPlan, scaleK,
          sizeSettled, printSettled, colorSettled, overprintSettled, fontsSettled, fontWarnings, inkNow, factsKey } from "./state.js";
 import { applyStep, undoStep } from "./steps.js";
@@ -62,6 +62,7 @@ export function renderPrint() {
   if (el.hidden) return;
   const ok = printSettled();
   chapter("ch-print", ok ? "done" : "todo", ok ? "podgląd = wydruk" : "");
+  brief("prBrief", ok ? "" : "Od teraz podgląd pokazuje <b>wydruk</b> — kolory z drukarki" + (isPdf() ? " i overprint." : "."));
   $("prSay").innerHTML = ok
     ? `<b>Podgląd pokazuje wydruk.</b> <span class="now-only">Suwaki w kolejnych rozdziałach porównują wydruk przed poprawką z wydrukiem po niej.</span>`
     : `Od tego miejsca <b>podgląd pokazuje, jak projekt wyjdzie z drukarki</b>`
@@ -157,6 +158,17 @@ export function renderColor() {
   $("coInk").hidden = !it;
   $("coInk").classList.toggle("warn", !fixed); $("coInk").classList.toggle("ok", fixed);
   $("coInkTxt").innerHTML = it;
+  {
+    let b = "";
+    if (!on && !a) b = loading("kolory");
+    else if (!on && a && !a.error && need.any) {
+      const n = colorNeed(a);
+      const sp = n.spots.length ? `spot (${esc(n.spots.slice(0, 3).join(", "))}${n.spots.length > 3 ? "…" : ""})` : "";
+      b = `Kolory: <b>${[n.rgb && "RGB", n.lab && "Lab", sp, n.other && "inne"].filter(Boolean).join(", ")}</b> — do druku potrzebny CMYK.`;
+    }
+    if (ib.length && !fixed) b += `${b ? "<br>" : ""}<span class="warn">Za dużo farby</span>: do ${ink.max} % (limit ${ink.limit} %).`;
+    brief("coBrief", b);
+  }
   $("bkRow").hidden = !(canFix || fixed);
   $("bkDo").hidden = !canFix; $("bkDo").disabled = !!S.busy;
   $("bkUndo").hidden = !fixed; $("bkUndo").disabled = !!S.busy;
@@ -232,6 +244,9 @@ export function renderOverprint() {
     }
   }
   chapter("ch-op", st, sum);
+  brief("opBrief", on ? "" : !a ? loading("overprint") : a.error || !uses ? ""
+    : `Overprint: <b>${uses} ${plural(uses, "miejsce", "miejsca", "miejsc")}</b>`
+      + (white ? ` · <span class="warn">biel z overprintem: ${white}</span>` : "") + ".");
   $("opSay").innerHTML = say;
   $("opNote").innerHTML = note; $("opNote").hidden = !note;
   $("opErr").hidden = !S.stepErr.overprint; $("opErr").textContent = S.stepErr.overprint || "";
@@ -294,6 +309,13 @@ export function renderFonts() {
     }
   }
   chapter("ch-fonts", st, sum);
+  {
+    const baked = on ? bakedFonts("outline") : [];
+    brief("foBrief", on ? (baked.length ? `<span class="warn">Krój zastępczy</span>: ${esc(baked.join(", "))}.` : "")
+      : !a ? loading("fonty") : a.error || !fonts.length ? ""
+      : `Tekst w fontach (${fonts.length}) — nie zamieniony na krzywe`
+        + (miss.length ? ` · <span class="warn">nieosadzone: ${esc(miss.join(", "))}</span>` : "") + ".");
+  }
   $("foSay").innerHTML = say;
   $("foNote").innerHTML = note; $("foNote").hidden = !note;
   rowsFor("fo", "outline", any || !!c.act, on);
@@ -370,6 +392,9 @@ export function renderFlatten() {
     + `to po spłaszczeniu zostanie na stałe krojem zastępczym (pomarańczowe ramki na podglądzie). `
     + (note || "");
   chapter("ch-flat", st, sum);
+  brief("flBrief", on ? (fb.length ? `<span class="warn">Krój zastępczy</span>: ${esc(fb.join(", "))}.` : "")
+    : !a ? loading("przezroczystość") : a.error || a.flat_image ? ""
+    : kinds.length ? `Przezroczystość: <b>${esc(kinds.join(", "))}</b>.` : "Bez przezroczystości.");
   $("flSay").innerHTML = say;
   $("flNote").innerHTML = note; $("flNote").hidden = !note;
   rowsFor("fl", "flatten", (!!a && !a.error && !a.flat_image) || on || !!c.act, on);

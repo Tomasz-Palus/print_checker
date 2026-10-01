@@ -61,6 +61,9 @@ a { color: var(--accent); }
 .ch-q.alert:not(.on) { border-color: #e8a33d; color: #a15c07; background: #fff6e8; }
 .ch-q.alert::after { content: ""; position: absolute; top: -2px; right: -2px; width: 7px; height: 7px; border-radius: 50%;
   background: #e8a33d; border: 1.5px solid #fff; }
+.brief { margin: 0 0 8px; font-size: 13.5px; line-height: 1.45; color: #1f2933; }
+.brief .warn { color: #a15c07; font-weight: 600; }
+.brief .ok { color: #15803d; }
 .ch-more.on { padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid #dfe4ea; font-size: 13.5px; color: #1f2933; }
 .ch-more .say { margin: 0 0 6px; }
 .ch-more .box { margin-top: 6px; }

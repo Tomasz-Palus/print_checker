@@ -204,13 +204,9 @@ const STEPS = [
       ? `Program ogląda każdy obraz piksel po pikselu — czy na wydruku nie wyjdzie rozmyty. To chwilę potrwa…`
       : ["ok", "vector"].includes(S.qual.data.verdict)
       ? `Obrazy mają dość pikseli — jakość jest <b>w porządku</b>.`
-        + (!$("quRisk").hidden ? ` Są jednak <b>cienkie linie</b> albo <b>tekst przy krawędzi</b> (poza czerwoną
-           ramką wytycznych) — pokazuje je ramkami na podglądzie, a opisuje pod <b>?</b>.` : "")
         + `<br><br>Lupki, rzeczywistą wielkość wydruku i nawigator masz w panelu nad podglądem — obejrzyj projekt
            z bliska, a potem kliknij <b>Rozumiem, dalej</b>.`
       : `Program znalazł miejsca, które na wydruku wyjdą <b>rozmyte</b>.`
-        + (!$("quRisk").hidden ? ` Są też <b>cienkie linie</b> i <b>tekst przy krawędzi</b> (poza czerwoną
-           ramką wytycznych) — pokazuje je ramkami na podglądzie, a opisuje pod <b>?</b>.` : "")
         + `<br><br>Kliknij <b>Pokaż na podglądzie</b>.`,
     wait: () => qualitySettled() || vis("qnav"), skipDone: true },
 
@@ -220,13 +216,6 @@ const STEPS = [
       rzeczywista wielkość i dopasowanie do okna, a w rogu podglądu — nawigator.<br><br>Obrazy o za małej
       rozdzielczości trzeba wymienić na większe — poproś o nie klienta. Gdy obejrzysz, zamknij pasek <b>×</b>.`,
     wait: () => !vis("qnav"), skipDone: true },
-
-  { part: PART2, target: ["ch-qual", "vStage"], anchor: "quRiskOk", title: "Cienkie linie i krawędzie", place: "right",
-    when: () => vis("quRiskOk"),
-    text: `Pod <b>?</b> program pisze o <b>cienkich liniach</b> (mogą się nie wydrukować) i o <b>tekście przy
-      krawędzi</b> — poza czerwoną linią z wytycznych może zostać ucięty. Ramki na podglądzie pokazują te miejsca;
-      lupki i rzeczywistą wielkość masz w panelu nad podglądem.<br><br>Gdy obejrzysz, kliknij <b>Rozumiem, dalej</b>.`,
-    wait: qualitySettled, skipDone: true },
 
   { part: PART2, target: ["ch-acc"], title: "Akceptacja pliku",
     text: `Ostatnie spojrzenie. <b>Opis zmian dla klienta</b> to gotowy tekst do wysłania klientowi — co program

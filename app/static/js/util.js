@@ -139,6 +139,15 @@ export function initChapters(HELP) {
   });
 }
 
+// Krótka linia z faktami na górze rozdziału (Tomasz 01.10: „krótkie informacje typu: są overprinty, fonty
+// niezamienione na krzywe, kolory takie i takie — bez większego rozpisywania”). Reszta opisu jest pod „?”.
+export function brief(id, html) {
+  const el = $(id);
+  if (!el) return;
+  if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+  el.hidden = !html;
+}
+
 // „?” rozdziału zdradza, że jest pod nim coś o tym pliku: kropka (opis), pomarańczowy (ostrzeżenie).
 export function markHelp() {
   document.querySelectorAll(".ch").forEach((ch) => {

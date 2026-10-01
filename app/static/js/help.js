@@ -124,12 +124,6 @@ Gdy strona <b>już jest jednym obrazem</b> (np. eksport z Photoshopa), program n
     wielkości wydruku</b>. Wektor (napisy, kształty) nie ma rozdzielczości i nie jest oceniany.
     Lupki, rzeczywistą wielkość i nawigator masz w panelu nad podglądem — tylko w tym rozdziale,
     także przy dobrej jakości (rozdział czeka wtedy na <b>Rozumiem, dalej</b>).<br><br>
-    Program sprawdza też <b>cienkie linie</b> (cieńsze niż 0,25 mm na wydruku albo „hairline” o grubości 0 —
-    mogą się nie wydrukować) i <b>tekst poza obszarem bezpiecznym</b> (wnętrze czerwonej linii z wytycznych — w jej prawdziwym
-    kształcie, także z zaokrągleniami i kilkoma strefami; przy krawędzi napis może zostać ucięty albo
-    schowany w ramie). Sprawdzany jest tekst zapisany jako tekst — napisy zamienione już na krzywe albo
-    wtopione w zdjęcie program widzi jako grafikę. Zaznacza je na podglądzie; poprawić można
-    w rozdziale Wymiar wydruku (przesunięcie, wielkość) albo u klienta.<br><br>
     <b>Uwaga:</b> ocena jest automatyczna i orientacyjna. Program może ocenić niektóre obrazy
     inaczej niż grafik i nie wychwyci każdego problemu — w razie wątpliwości poproś grafika
     o sprawdzenie.`,
@@ -141,6 +135,6 @@ Gdy strona <b>już jest jednym obrazem</b> (np. eksport z Photoshopa), program n
     jak wydrukuje się teraz — oba tak, jak zrobi to drukarnia (kolory z drukarki, overprint).
     Suwak startuje od „po” — tak, jak plik pójdzie do druku. <b>Opis zmian dla klienta</b> to gotowy tekst
     do wysłania: co program w pliku zmienił (zwykłym językiem) i uwagi, których nie da się poprawić tutaj
-    (brakujący font, za mała rozdzielczość, cienkie linie…). Pole można edytować; <b>Kopiuj</b> kopiuje tekst do schowka. Gdy wszystko gra — <b>Akceptuję plik</b>. Każda późniejsza zmiana
+    (brakujący font, za mała rozdzielczość, za dużo farby…). Pole można edytować; <b>Kopiuj</b> kopiuje tekst do schowka. Gdy wszystko gra — <b>Akceptuję plik</b>. Każda późniejsza zmiana
     pliku zdejmuje akceptację.`,
 };

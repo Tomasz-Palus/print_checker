@@ -1,5 +1,5 @@
 // Rozdziały „Szablon z wytycznych" i „Spady".
-import { $, esc, fmtMm, api, chapter, plural } from "./util.js";
+import { $, esc, fmtMm, api, chapter, plural, brief } from "./util.js";
 import { S, changed, template, hasStep, roleSettled, framesSettled, trimInfo, isPdf } from "./state.js";
 import { applyStep, undoStep, stepControls } from "./steps.js";
 
@@ -74,6 +74,16 @@ export function renderFrames() {
                   : `Bez wytycznych nie ma z czym porównać.`;
   }
   chapter("ch-frames", st, sum);
+  let b = "";
+  if (!on && !S.fscan.err) {
+    if (!d) b = `<span class="spin"></span>Szukam szablonu z wytycznych…`;
+    else if (d.found && !d.hidden) b = `<span class="warn">W projekcie jest szablon z wytycznych</span>: `
+      + `${d.lines >= d.lines_total ? "cały" : `${d.lines} z ${d.lines_total} ramek`}`
+      + (d.texts ? ` + ${d.texts} ${plural(d.texts, "napis", "napisy", "napisów")}` : "") + ".";
+    else if (d.pixels) b = `<span class="warn">Linie szablonu są wtopione w obraz</span> — nie do usunięcia.`;
+    else if (d.foreign) b = `Ramki w kolorach wytycznych — nie pasują do szablonu tego produktu.`;
+  }
+  brief("frBrief", b);
   $("frSay").innerHTML = say;
   $("frNote").innerHTML = note; $("frNote").hidden = !note;
   stepControls("fr", "frames", { canDo: !!d?.found, skip, doLabel: hidden ? "Usuń mimo to" : "Usuń szablon" });
@@ -112,6 +122,8 @@ export function renderTrim() {
       + (i.fits ? " — dokładnie tyle, ile wymagają wytyczne." : " (wymiar dopasujesz w następnym rozdziale).");
   }
   chapter("ch-trim", st, sum);
+  brief("trBrief", !on && i ? `Plik ma <b>spady ${i.bleed.every((v) => Math.abs(v - i.bleed[0]) < 0.3)
+    ? `${fmtMm(i.bleed[0])} mm` : i.bleed.map(fmtMm).join(" / ") + " mm"}</b>.` : "");
   $("trSay").innerHTML = say;
   $("trNote").innerHTML = note; $("trNote").hidden = !note;
   stepControls("tr", "trim", { canDo: !!i, skip: i ? "zostaw spady" : "" });

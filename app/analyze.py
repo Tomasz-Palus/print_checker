@@ -90,7 +90,6 @@ class Analyzer:
         self.white_op = []              # biały z overprintem — w druku znika: [x0,y0,x1,y1] w pt strony
         self._ov_in = {}                # stan overprintu przekazywany do formy
         self.heavy_black = 0            # jednolite czernie ponad limit farby (CMYK / Registration) — da się poprawić
-        self.thin = []                  # cienkie kreski: [x0,y0,x1,y1, grubość w mm PLIKU] (0 = hairline)
         self._lw_in = 1.0               # grubość linii przekazywana do formy
         self.transparency = Counter()   # rodzaj -> liczba
         self.inline_images = 0
@@ -368,11 +367,6 @@ class Analyzer:
                     lw = float(operands[0])
                     continue
                 if o in ("f", "F", "f*", "B", "B*", "b", "b*", "S", "s", "n"):
-                    if pbox is not None and o in ("S", "s", "B", "B*", "b", "b*"):
-                        # grubość kreski na stronie: w × skala macierzy (pierwiastek z wyznacznika)
-                        wmm = lw * abs(ctm[0] * ctm[3] - ctm[1] * ctm[2]) ** 0.5 * MM_PER_PT
-                        if wmm < THIN_FILE_MM and len(self.thin) < 400 and not _template_color(stroke_cs, stroke_v):
-                            self.thin.append([round(v, 2) for v in pbox] + [round(wmm, 4)])
                     if pbox is not None and o != "n":
                         if (o not in ("S", "s") and _heavy(fill_cs, fill_v)) or \
                                 (o not in ("f", "F", "f*") and _heavy(stroke_cs, stroke_v)):
@@ -564,21 +558,6 @@ def _nums(operands) -> list:
     return out or [0.0]
 
 
-THIN_FILE_MM = 0.25     # zbieramy kreski cieńsze w PLIKU; próg na wydruku (× skala) liczy interfejs
-
-
-def _template_color(cs: dict, v: list) -> bool:
-    """Kreska w kolorze linii wytycznych (cyjan / czerwień) — to szablon, nie projekt."""
-    fam = cs.get("family")
-    if fam == "CMYK" and len(v) >= 4:
-        c, m, y, k = v[:4]
-        return (c > 0.9 and m < 0.1 and y < 0.1 and k < 0.1) or (c < 0.1 and m > 0.85 and y > 0.8 and k < 0.1)
-    if fam == "RGB" and len(v) >= 3:
-        r, g, b = v[:3]
-        return (r < 0.1 and g > 0.6 and b > 0.85) or (r > 0.85 and g < 0.2 and b < 0.2)
-    return False
-
-
 HEAVY_SUM = 3.6         # suma farb (1 = 100 %) ponad limit drukarni — jak ink.TAC_LIMIT
 HEAVY_K = 0.85          # i dużo czerni: to „czarne” pole, a nie ciemny kolor
 
@@ -760,34 +739,6 @@ def flat_image(path: str, page: int | None) -> dict | None:
         return None
 
 
-def _text_boxes(path: str, page: int | None, limit: int = 600) -> list:
-    """Widoczny tekst strony: jedna ramka na wiersz [fx, fy, fw, fh] (ułamki strony, y od góry).
-    Do sprawdzenia obszaru bezpiecznego — napis przy krawędzi może zostać ucięty albo schowany
-    w ramie (Tomasz 29.09, „edge cases”)."""
-    if page is None:
-        return []
-    import pymupdf
-    out = []
-    try:
-        d = pymupdf.open(path)
-        try:
-            pg = d[page]
-            W, H = pg.rect.width or 1, pg.rect.height or 1
-            for b in pg.get_text("dict", flags=pymupdf.TEXTFLAGS_TEXT)["blocks"]:
-                for ln in b.get("lines", []):
-                    sp = [s for s in ln.get("spans", []) if s.get("alpha", 255) != 0 and s.get("text", "").strip()]
-                    if not sp or len(out) >= limit:
-                        continue
-                    x0 = min(s["bbox"][0] for s in sp); y0 = min(s["bbox"][1] for s in sp)
-                    x1 = max(s["bbox"][2] for s in sp); y1 = max(s["bbox"][3] for s in sp)
-                    out.append([round(x0 / W, 5), round(y0 / H, 5), round((x1 - x0) / W, 5), round((y1 - y0) / H, 5)])
-        finally:
-            d.close()
-    except Exception as e:
-        print(f"[adChecker] text_boxes: {type(e).__name__}: {e}")
-    return out
-
-
 def analyze_pdf(path: str, only_page: int | None = None) -> dict:
     """`only_page` — fakty tylko o tej stronie (do druku idzie zawsze jedna strona)."""
     pdf = pikepdf.open(path)
@@ -821,12 +772,6 @@ def analyze_pdf(path: str, only_page: int | None = None) -> dict:
             an.white_boxes = getattr(an, "white_boxes", []) + [
                 [round((b[0] - bx0) / pw, 5), round((by1 - b[3]) / ph, 5),
                  round((b[2] - b[0]) / pw, 5), round((b[3] - b[1]) / ph, 5)] for b in an.white_op[w0:]]
-            # cienkie kreski: ramka (ułamki strony, min. 0,2 % boku — kreska pozioma ma zerową
-            # wysokość) i grubość w mm pliku
-            an.thin_boxes = [
-                [round((b[0] - bx0) / pw, 5), round((by1 - b[3]) / ph, 5),
-                 round(max(b[2] - b[0], 0.002 * pw) / pw, 5), round(max(b[3] - b[1], 0.002 * ph) / ph, 5), b[4]]
-                for b in an.thin]
 
         # Realny detal obrazów liczy detailmap.py (rozdział „Jakość wydruku") — tu tylko fakty.
         coverage = {}
@@ -856,7 +801,6 @@ def analyze_pdf(path: str, only_page: int | None = None) -> dict:
     finally:
         pdf.close()
     res["fonts_missing"] = _fonts_missing(path, only_page)
-    res["text_boxes"] = _text_boxes(path, only_page)
     res["flat_image"] = flat_image(path, only_page)
     return res
 
@@ -930,7 +874,6 @@ def _summarize_pdf(an: Analyzer, pages, intents, meta, coverage=None, page_sizes
         },
         "overprint_uses": an.overprint_uses,
         "white_overprint": getattr(an, "white_boxes", []),
-        "thin_lines": getattr(an, "thin_boxes", []),
         "heavy_black": an.heavy_black,
         "transparency": dict(an.transparency),
         "fonts": [{"name": n, "embedded": e, "uses": c} for (n, e), c in an.fonts.most_common()],

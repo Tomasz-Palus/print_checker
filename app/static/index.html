@@ -134,6 +134,7 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
+        <p class="brief" id="frBrief" hidden></p>
         <p class="say" id="frSay" data-more></p>
         <div class="note" id="frNote" data-more></div>
         <div class="box bad" id="frErr" hidden></div>
@@ -151,6 +152,7 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
+        <p class="brief" id="trBrief" hidden></p>
         <p class="say" id="trSay" data-more></p>
         <div class="note" id="trNote" data-more></div>
         <div class="box bad" id="trErr" hidden></div>
@@ -168,6 +170,7 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
+        <p class="brief" id="szBrief" hidden></p>
         <p class="say" id="szSay" data-more></p>
         <div class="box warn" id="szWarn" data-more hidden></div>
         <div class="rot-hint" id="szRot" hidden></div>
@@ -219,6 +222,7 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
+        <p class="brief" id="prBrief" hidden></p>
         <p class="say" id="prSay" data-more></p>
         <div class="mini sim" id="prSimBar" data-sim="print"><span>ekran</span><input type="range" min="0" max="100" value="100"><span>druk</span></div>
         <div class="row"><button class="btn primary" id="prOk" type="button">Rozumiem, dalej</button>
@@ -231,6 +235,7 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
+        <p class="brief" id="coBrief" hidden></p>
         <p class="say" id="coSay" data-more></p>
         <div class="note" id="coNote" data-more></div>
         <div class="box warn" id="coInk" data-more hidden>
@@ -263,6 +268,7 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
+        <p class="brief" id="opBrief" hidden></p>
         <p class="say" id="opSay" data-more></p>
         <div class="note" id="opNote" data-more></div>
         <div class="box bad" id="opErr" hidden></div>
@@ -280,6 +286,7 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
+        <p class="brief" id="foBrief" hidden></p>
         <p class="say" id="foSay" data-more></p>
         <div class="note" id="foNote" data-more></div>
         <div class="box bad" id="foErr" hidden></div>
@@ -297,6 +304,7 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
+        <p class="brief" id="flBrief" hidden></p>
         <p class="say" id="flSay" data-more></p>
         <div class="note" id="flNote" data-more></div>
         <div class="box bad" id="flErr" hidden></div>
@@ -314,12 +322,12 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
+        <p class="brief" id="quBrief" hidden></p>
         <p class="say" id="quSay" data-more></p>
         <div class="bar" id="quBar" hidden><i></i></div>
         <div class="note" id="quNote" data-more></div>
-        <div class="box warn" id="quRisk" data-more hidden></div>
-        <!-- „Rozumiem, dalej”: uwagi o cienkich liniach / obszarze bezpiecznym trzeba przeczytać, a przy dobrej
-             jakości rozdział też czeka — zostaje otwarty z lupkami i nawigatorem (Tomasz 29.09) -->
+        <!-- „Rozumiem, dalej”: przy dobrej jakości rozdział czeka — zostaje otwarty z lupkami i nawigatorem
+             (Tomasz 29.09). Cienkie linie i obszar bezpieczny usunięte w 0.6.6 (Tomasz 01.10). -->
         <div class="row" id="quRiskOk" hidden><button class="btn primary" type="button">Rozumiem, dalej</button></div>
         <div class="box bad" id="quErr" hidden></div>
         <div class="row" id="quRetry" hidden><button class="btn" type="button">Sprawdź jeszcze raz</button></div>
@@ -354,6 +362,7 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
+        <p class="brief" id="dlBrief" hidden></p>
         <p class="say" id="dlSay" data-more></p>
         <ul class="dlsum" id="dlSum" data-more></ul>
         <a class="btn primary big" id="dlDo" href="#" download>Pobierz plik do druku</a>
