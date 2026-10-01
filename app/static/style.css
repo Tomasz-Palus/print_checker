@@ -69,8 +69,9 @@ a { color: var(--accent); }
 .ch-more .box { margin-top: 6px; }
 .acc-client { margin-top: 8px; }
 .acc-client .acc-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; font-size: 13px; }
-.acc-client textarea { width: 100%; box-sizing: border-box; min-height: 120px; resize: vertical; font: inherit; font-size: 12.5px;
-  line-height: 1.45; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; color: #1f2933; }
+.acc-list { margin: 0; padding: 8px 10px 8px 26px; background: #f4f6f9; border-radius: 8px; font-size: 13px; line-height: 1.45;
+  user-select: text; }
+.acc-list li + li { margin-top: 3px; }
 .ch-help { margin: 0 12px 10px; padding: 10px 12px; background: #f6f8fb; border-radius: 8px; color: #3a4452; font-size: 13px; }
 .ch-b { padding: 0 12px 12px 46px; display: grid; grid-template-rows: 1fr; opacity: 1; visibility: visible;
   /* rozwijanie rusza chwilę po zwijaniu — rozdziały zmieniają się po kolei, nie naraz */

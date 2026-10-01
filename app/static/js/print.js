@@ -331,6 +331,24 @@ export function renderFonts() {
 // ------------------------------------------------------------------ spłaszczenie
 document.querySelectorAll("#flAct button").forEach((b) => b.addEventListener("click", () => setAct("flatten", b.dataset.v)));
 
+// Kiedy spłaszczać (Tomasz 01.10: „komunikat, kiedy można spłaszczyć, a kiedy to bez sensu — żeby było
+// wiadomo, co kliknąć”). Zasada z 25.09: spłaszczamy tylko, gdy to konieczne — drukarnia zwykle robi to
+// lepiej. Konieczne, gdy przezroczystość spotyka kolor dodatkowy albo overprint (u drukarni szwy i jasne
+// obwódki) albo gdy są tryby mieszania / maski (różne RIP-y liczą je różnie). Przy brakującym foncie nie —
+// spłaszczenie utrwaliłoby krój zastępczy. {rec: "fix"|"keep", why}
+function flattenAdvice(a, kinds, live) {
+  if (!a || a.error || a.flat_image) return null;
+  if (live.length) return { rec: "keep", why: `brakuje fontu ${esc(live.join(", "))} — spłaszczenie utrwaliłoby krój zastępczy` };
+  if (!kinds.length) return { rec: "keep", why: "projekt nie ma przezroczystości — nie ma czego spłaszczać" };
+  const spots = (a.color?.spots || []).length > 0, op = (a.overprint_uses || 0) > 0;
+  if (spots || op) return { rec: "fix", why: `przezroczystość styka się z ${spots ? "kolorem dodatkowym" : "overprintem"} — `
+    + "drukarnie robią w takich miejscach szwy i jasne obwódki" };
+  if (kinds.some((k) => k === "tryby mieszania" || k === "maski"))
+    return { rec: "fix", why: `są ${kinds.filter((k) => k === "tryby mieszania" || k === "maski").join(" i ")} — `
+      + "różne drukarnie liczą je różnie; po spłaszczeniu wydruk będzie taki jak podgląd" };
+  return { rec: "keep", why: `zwykła przezroczystość (${esc(kinds.join(", "))}) — drukarnia spłaszczy ją bez problemu` };
+}
+
 export function renderFlatten() {
   const el = $("ch-flat");
   el.hidden = !fontsSettled() || !isPdf();
@@ -392,9 +410,16 @@ export function renderFlatten() {
     + `to po spłaszczeniu zostanie na stałe krojem zastępczym (pomarańczowe ramki na podglądzie). `
     + (note || "");
   chapter("ch-flat", st, sum);
+  const adv = on ? null : flattenAdvice(a, kinds, live);
   brief("flBrief", on ? (fb.length ? `<span class="warn">Krój zastępczy</span>: ${esc(fb.join(", "))}.` : "")
-    : !a ? loading("przezroczystość") : a.error || a.flat_image ? ""
-    : kinds.length ? `Przezroczystość: <b>${esc(kinds.join(", "))}</b>.` : "Bez przezroczystości.");
+    : !a ? loading("przezroczystość") : !adv ? ""
+    : `<b>Zalecane: ${adv.rec === "fix" ? "Spłaszcz projekt" : "Zostaw jak jest"}.</b> ${adv.why[0].toUpperCase() + adv.why.slice(1)}.`);
+  // zalecany przycisk z dopiskiem, jak „FOGRA39 (zalecany)” w Kolorach
+  $("flAct").querySelectorAll("button").forEach((btn) => {
+    const base = btn.dataset.v === "fix" ? "Spłaszcz projekt" : "Zostaw jak jest";
+    const t = adv && adv.rec === btn.dataset.v ? `${base} (zalecane)` : base;
+    if (btn.textContent !== t) btn.textContent = t;
+  });
   $("flSay").innerHTML = say;
   $("flNote").innerHTML = note; $("flNote").hidden = !note;
   rowsFor("fl", "flatten", (!!a && !a.error && !a.flat_image) || on || !!c.act, on);

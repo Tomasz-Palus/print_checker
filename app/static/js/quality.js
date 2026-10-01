@@ -260,10 +260,9 @@ $("acOk").querySelector("button").addEventListener("click", () => {
   S.sim = null;
   changed();
 });
-// Opis zmian DLA KLIENTA (Tomasz 01.10: „opis, który można skopiować i wysłać do klienta, żeby wiedział,
-// co zostało poprawione”). Zwykłym językiem, bez nazw technicznych tam, gdzie się da. Pole jest edytowalne:
-// tekst nadpisujemy tylko wtedy, gdy zmieni się plik (inaczej poprawki użytkownika by znikały).
-const cap = (t) => t ? t[0].toUpperCase() + t.slice(1) : t;
+// Co zostało zrobione — punktami (Tomasz 01.10: „nie jako wiadomość dla klienta, tylko wypisz punktami, co
+// zostało zrobione, i tyle; to informacja dla użytkownika, a jak będzie chciał, skopiuje punkty i wyśle dalej”).
+// Zwykłym językiem, bez nazw technicznych tam, gdzie się da.
 const mmTxt = (v) => {
   const p = v?.pages_mm?.[S.page], k = isPdf() ? scaleK() : 1;
   return p ? `${fmtMm(p[0] * k)} × ${fmtMm(p[1] * k)} mm` : "";
@@ -271,72 +270,57 @@ const mmTxt = (v) => {
 function stepLine(v) {
   const t = v.text || "";
   switch (v.step) {
-    case "frames": return "usunęliśmy elementy szablonu z wytycznych, które zostały w projekcie (ramki i opisy)";
-    case "trim": return `przycięliśmy spady — projekt ma wymiar netto ${mmTxt(v)}`;
+    case "frames": return "Usunięto elementy szablonu z wytycznych (ramki i opisy)";
+    case "trim": return `Przycięto spady — wymiar netto ${mmTxt(v)}`;
     case "resize": {
       const z = +(t.match(/w skali (\d+) %/)?.[1] || 100);
-      return `dopasowaliśmy projekt do formatu ${mmTxt(v)}` + (z !== 100 ? ` (projekt w skali ${z} %)` : "")
-        + (/przycięte/.test(t) ? ", część projektu przy krawędziach została przycięta" : "")
-        + (/odbiciem lustrzanym/.test(t) ? ", brakujący margines uzupełniliśmy lustrzanym odbiciem projektu"
-          : /tłem z krawędzi/.test(t) ? ", brakujący margines uzupełniliśmy tłem z krawędzi projektu"
-          : /PUSTE PASY/.test(t) ? ", na brzegach zostały puste (białe) pasy" : "");
+      return `Dopasowano projekt do formatu ${mmTxt(v)}` + (z !== 100 ? ` (skala ${z} %)` : "")
+        + (/przycięte/.test(t) ? ", część przy krawędziach przycięta" : "")
+        + (/odbiciem lustrzanym/.test(t) ? ", margines uzupełniony odbiciem lustrzanym"
+          : /tłem z krawędzi/.test(t) ? ", margines uzupełniony tłem z krawędzi"
+          : /PUSTE PASY/.test(t) ? ", na brzegach puste pasy" : "");
     }
     case "cmyk": {
       const pf = t.match(/przez profil ([^;(]+)/)?.[1]?.trim();
-      return /^kolory dodatkowe/.test(t) ? "przeliczyliśmy kolory dodatkowe (spot) na CMYK — reszta kolorów została bez zmian"
-        : `przeliczyliśmy kolory do druku (CMYK${pf ? `, profil ${pf}` : ""})`;
+      return /^kolory dodatkowe/.test(t) ? "Przeliczono kolory dodatkowe (spot) na CMYK"
+        : `Przeliczono kolory na CMYK${pf ? ` (profil ${pf})` : ""}`;
     }
-    case "black": return "czerń złożoną ze wszystkich farb zamieniliśmy na zalecaną do druku czerń C78 M85 Y90 K100 — przy zbyt dużej ilości farby wydruk mógłby się rozmazać";
-    case "overprint": return "wyłączyliśmy nadruk (overprint) — elementy wydrukują się tak, jak widać je na ekranie";
+    case "black": return "Zamieniono czerń złożoną ze wszystkich farb na C78 M85 Y90 K100";
+    case "overprint": return "Wyłączono overprint (nadruk)";
     case "outline": {
       const m = t.match(/\(\d+ fon[^:]*: ([^)]*)\)/);
-      return "zamieniliśmy tekst na krzywe" + (m ? ` (fonty: ${m[1]})` : "") + " — litery wydrukują się dokładnie tak, jak w projekcie";
+      return "Zamieniono tekst na krzywe" + (m ? ` (fonty: ${m[1]})` : "");
     }
-    case "flatten": return "spłaszczyliśmy projekt do jednego obrazu w rozdzielczości druku — cienie i przezroczystości wydrukują się tak jak na podglądzie";
+    case "flatten": {
+      const ppi = t.match(/\((\d+) ppi na wydruku\)/)?.[1];
+      return `Spłaszczono projekt do jednego obrazu${ppi ? ` (${ppi} ppi na wydruku)` : ""}`;
+    }
     default: return t;
   }
 }
 function prepLine(t) {
-  if (/^warstwy \(\d+\) — wszystkie się drukują/.test(t) || /UserUnit|zabezpieczenie pliku/.test(t)) return "";   // nic się nie zmieniło w wyglądzie
-  if (/^warstwy, które się nie drukują/.test(t)) return "usunęliśmy warstwy oznaczone w pliku jako niedrukowane";
-  if (/^warstwy ukryte na ekranie, ale drukowane/.test(t)) return "warstwy ukryte w pliku, ale ustawione do druku, zostały w projekcie (tak, jak wydrukowałaby je drukarnia)";
+  if (/^warstwy \(\d+\) — wszystkie się drukują/.test(t) || /UserUnit|zabezpieczenie pliku/.test(t)) return "";   // wygląd bez zmian
+  if (/^warstwy, które się nie drukują/.test(t)) return "Usunięto warstwy oznaczone jako niedrukowane";
+  if (/^warstwy ukryte na ekranie, ale drukowane/.test(t)) return "Zostawiono warstwy ukryte na ekranie, ale ustawione do druku";
   const a = t.match(/^adnotacje, które się drukują: (.*?) — /);
-  if (a) return `elementy Acrobata ustawione do druku (${a[1]}) wpisaliśmy na stałe w projekt`;
+  if (a) return `Wpisano w projekt elementy Acrobata ustawione do druku (${a[1]})`;
   const b = t.match(/^adnotacje, które się nie drukują: (.*?) — /);
-  if (b) return `usunęliśmy komentarze Acrobata, które się nie drukują (${b[1]})`;
-  if (/^plik był uszkodzony/.test(t)) return "plik był uszkodzony — naprawiliśmy go przy otwarciu; prosimy sprawdzić, czy niczego w nim nie brakuje";
-  return t;
+  if (b) return `Usunięto niedrukowane komentarze Acrobata (${b[1]})`;
+  if (/^plik był uszkodzony/.test(t)) return "Naprawiono uszkodzony plik";
+  return t ? t[0].toUpperCase() + t.slice(1) : t;
 }
-function clientText() {
-  const f = S.job.file, rot = f.rot || 0, pr = printMm();
-  const what = [S.product?.name, S.product ? template()?.role : "", pr ? `${fmtMm(pr.w)} × ${fmtMm(pr.h)} mm` : ""].filter(Boolean).join(", ");
-  const done = [rot ? `obróciliśmy projekt ${ROT_TXT[rot]}` : "",
+function doneLines() {
+  const f = S.job.file, rot = f.rot || 0;
+  return [rot ? `Obrócono plik ${ROT_TXT[rot]}` : "",
     ...(f.prepared || []).map(prepLine), ...S.job.versions.slice(1).map(stepLine)].filter(Boolean);
-  // uwagi — to, czego program nie poprawił, a klient powinien wiedzieć
-  const fw = fontWarnings(), fl = fw.filter((x) => !x.baked), fb = fw.filter((x) => x.baked);
-  const ha = S.analysisFor === factsKey() && S.analysis && !S.analysis.error ? S.analysis : null;
-  const wo = (ha?.white_overprint || []).length, ink = inkNow(), d = S.qual.data;
-  const nm = (l) => l.map((x) => x.name).join(", ");
-  const g0 = d?.status === "done" && d.groups ? d.groups.map((g) => d.areas[g.i]).find((a) => a.reason !== "jpeg") : null;
-  const notes = [
-    fl.length ? `w pliku brakuje fontu ${nm(fl)} — przy druku zostanie podstawiony inny krój` : "",
-    fb.length ? `litery fontu ${nm(fb)} mają kształt kroju zastępczego (fontu nie było w pliku)` : "",
-    wo ? `biały element z nadrukiem (overprint) może w druku zniknąć` : "",
-    ink?.boxes?.length ? `w ${ink.boxes.length} ${plural(ink.boxes.length, "miejscu", "miejscach", "miejscach")} jest za dużo farby (do ${ink.max} %) — może się rozmazać` : "",
-    d?.status === "done" && d.verdict === "bad" && g0 ? `część obrazów ma za małą rozdzielczość (ok. ${Math.round(g0.ppi)} ppi przy wymaganych ${REQ}) — na wydruku będą rozmyte` : "",
-    d?.status === "done" && d.verdict !== "bad" && d.look ? `w ${d.look} ${plural(d.look, "miejscu", "miejscach", "miejscach")} obrazy mogą wyglądać na nieostre` : "",
-  ].filter(Boolean);
-  const li = (l) => l.map((x) => `- ${x}`).join("\n");
-  return `Dzień dobry,\n\n`
-    + (done.length ? `przygotowując plik „${f.name}” do druku${what ? ` (${what})` : ""}, `
-        + `wprowadziliśmy następujące zmiany:\n${li(done)}\n`
-      : `plik „${f.name}” sprawdziliśmy przed drukiem — nie wymagał zmian.\n`)
-    + (notes.length ? `\nUwagi do projektu:\n${li(notes)}\n` : "");
 }
 $("acCopy").addEventListener("click", async () => {
-  const ta = $("acClientTxt"), b = $("acCopy");
-  try { await navigator.clipboard.writeText(ta.value); }
-  catch (_) { ta.select(); document.execCommand("copy"); }
+  const txt = doneLines().map((x) => `- ${x}`).join("\n"), b = $("acCopy");
+  try { await navigator.clipboard.writeText(txt); }
+  catch (_) {                                      // bez dostępu do schowka — przez ukryte pole tekstowe
+    const ta = document.createElement("textarea");
+    ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove();
+  }
   b.textContent = "Skopiowano ✓";
   setTimeout(() => { b.textContent = "Kopiuj"; }, 1500);
 });
@@ -357,11 +341,10 @@ export function renderAccept() {
       + `Obejrzyj go jeszcze raz — tak, jak zrobi to drukarnia — i jeśli wszystko gra, zaakceptuj plik.`
     : `Porównaj, jak plik wydrukowałby się <b>bez poprawek</b> i jak wydrukuje się <b>teraz</b> — `
       + `z kolorami i overprintem tak, jak zrobi to drukarnia. Jeśli wszystko gra, zaakceptuj plik.`;
-  const txt = clientText(), ta = $("acClientTxt");
-  if (ta.dataset.src !== txt) {                    // tylko gdy zmienił się plik — własne poprawki zostają
-    ta.dataset.src = txt; ta.value = txt;
-    ta.rows = Math.min(18, txt.split("\n").length + 1);
-  }
+  const dl = doneLines();
+  const html = dl.length ? dl.map((x) => `<li>${esc(x)}</li>`).join("") : "<li>Bez zmian — plik nie wymagał poprawek</li>";
+  if ($("acList").dataset.html !== html) { $("acList").innerHTML = html; $("acList").dataset.html = html; }
+  $("acCopy").hidden = !dl.length;
   $("acClient").hidden = false;
   const b = $("acShow").querySelector("button");
   b.classList.toggle("on", S.sim === "final");

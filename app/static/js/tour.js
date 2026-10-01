@@ -193,10 +193,12 @@ const STEPS = [
     wait: fontsSettled, skipDone: true },
 
   { part: PART2, target: ["ch-flat"], title: "Spłaszczenie", when: isPdf,
-    text: twoStep("flatten", `Cienie i półprzezroczyste elementy drukarnia łączy w jedno przy druku i zwykle robi
+    text: () => twoStep("flatten", `Cienie i półprzezroczyste elementy drukarnia łączy w jedno przy druku i zwykle robi
       to dobrze. <b>Spłaszczenie</b> robi to tutaj — cała strona staje się jednym obrazem, ale tekst i linie
-      przestają być wektorowe. Dlatego używaj go <b>tylko wtedy, gdy to konieczne</b>. Tu zostawiamy to
-      drukarni.`, "Zostaw jak jest"),
+      przestają być wektorowe. Dlatego używaj go <b>tylko wtedy, gdy to konieczne</b>.<br><br>Program podpowiada
+      na górze rozdziału, co kliknąć, i oznacza przycisk <b>(zalecane)</b>.`,
+      [...document.querySelectorAll("#flAct button")].find((b) => /zalecane/.test(b.textContent))?.dataset.v === "fix"
+        ? "Spłaszcz projekt" : "Zostaw jak jest")(),
     wait: flattenSettled, skipDone: true },
 
   { part: PART2, target: ["ch-qual"], title: "Jakość wydruku",
@@ -218,8 +220,8 @@ const STEPS = [
     wait: () => !vis("qnav"), skipDone: true },
 
   { part: PART2, target: ["ch-acc"], title: "Akceptacja pliku",
-    text: `Ostatnie spojrzenie. <b>Opis zmian dla klienta</b> to gotowy tekst do wysłania klientowi — co program
-      poprawił i na co zwrócić uwagę. Możesz go poprawić i skopiować przyciskiem <b>Kopiuj</b>.<br><br>
+    text: `Ostatnie spojrzenie. <b>Co zostało zrobione</b> — lista poprawek w pliku. Przyciskiem <b>Kopiuj</b>
+      skopiujesz punkty, np. żeby wysłać je dalej.<br><br>
       Kliknij <b>Pokaż wydruk przed i po</b> — suwak porówna wydruk bez poprawek z wydrukiem po nich.`,
     wait: () => S.accShown === head()?.id || acceptSettled(), skipDone: true },
 

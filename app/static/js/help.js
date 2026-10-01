@@ -112,8 +112,14 @@ export const HELP = {
     krojem zastępczym — program ostrzeże i zaznaczy go na podglądzie.<br><br>
 Gdy strona <b>już jest jednym obrazem</b> (np. eksport z Photoshopa), program niczego nie spłaszcza —
     przeliczanie gotowych pikseli dałoby tylko drobne ząbki na krawędziach.<br><br>
-    Wybierasz <b>Zostaw jak jest</b> albo <b>Spłaszcz projekt</b>. Gdy projekt nie ma
-    przezroczystości, wystarczy <b>Zostaw jak jest</b>.`,
+    <b>Co kliknąć</b> — program podpowiada na górze rozdziału i oznacza przycisk „(zalecane)”:<br>
+    • <b>Zostaw jak jest</b>, gdy nie ma przezroczystości, gdy to zwykła półprzezroczystość albo obrazy
+    z przezroczystym tłem (drukarnia spłaszczy je bez problemu) i gdy brakuje fontu (spłaszczenie
+    utrwaliłoby krój zastępczy);<br>
+    • <b>Spłaszcz projekt</b>, gdy przezroczystość styka się z kolorem dodatkowym albo overprintem (tam
+    drukarnie robią szwy i jasne obwódki) albo gdy są tryby mieszania lub maski (różne drukarnie liczą
+    je różnie).<br>
+    Zawsze spłaszcz, gdy drukarnia o to prosi.`,
   qual: `Program otwiera każdy obraz w projekcie i czyta jego piksele. Sprawdza dwie rzeczy:<br><br>
     1) czy obraz ma <b>dość pikseli</b> na swój rozmiar na wydruku — wytyczne wymagają
     <b>120 ppi</b> (w pliku 1:10 to 1200 ppi w pliku). Za mało = rozmycie i schodki, trzeba
@@ -133,8 +139,7 @@ Gdy strona <b>już jest jednym obrazem</b> (np. eksport z Photoshopa), program n
   acc: `Ostatnie spojrzenie przed pobraniem. <b>Pokaż wydruk przed i po</b> porównuje, jak plik
     wydrukowałby się bez poprawek z rozdziałów Kolory, Overprint, Fonty i Spłaszczenie, z tym,
     jak wydrukuje się teraz — oba tak, jak zrobi to drukarnia (kolory z drukarki, overprint).
-    Suwak startuje od „po” — tak, jak plik pójdzie do druku. <b>Opis zmian dla klienta</b> to gotowy tekst
-    do wysłania: co program w pliku zmienił (zwykłym językiem) i uwagi, których nie da się poprawić tutaj
-    (brakujący font, za mała rozdzielczość, za dużo farby…). Pole można edytować; <b>Kopiuj</b> kopiuje tekst do schowka. Gdy wszystko gra — <b>Akceptuję plik</b>. Każda późniejsza zmiana
+    Suwak startuje od „po” — tak, jak plik pójdzie do druku. <b>Co zostało zrobione</b> to lista poprawek w pliku,
+    zwykłym językiem. <b>Kopiuj</b> kopiuje punkty do schowka — np. żeby wysłać je dalej. Gdy wszystko gra — <b>Akceptuję plik</b>. Każda późniejsza zmiana
     pliku zdejmuje akceptację.`,
 };

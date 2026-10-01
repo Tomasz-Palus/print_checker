@@ -1216,3 +1216,44 @@ Numery jak w `18_przeglad_kodu.md`.
     „Sam wektor”;
   - **Pobierz:** „Plik gotowy do druku.”
 - Sprawdzone (Playwright) na `PRINT_CHECKER_TEST_100x200_SZABLON_PASERY.pdf`; cały samouczek przechodzi.
+
+## 0.6.7 — Akceptacja: „Co zostało zrobione” punktami (Tomasz 01.10)
+
+- Tomasz: „opis dla klienta to nie do końca o to mi chodziło — nie rób tego jako wiadomości dla klienta,
+  tylko wypisz punktami, co zostało zrobione, i tyle. To informacja dla użytkownika, a jak będzie chciał,
+  to po prostu te punkty skopiuje, żeby wysłać dalej”.
+- Zamiast pola z wiadomością („Dzień dobry…”, „Uwagi do projektu”) jest lista **„Co zostało zrobione”**
+  z przyciskiem **Kopiuj**. Kopiuj wstawia do schowka punkty w formie „- …”.
+- Punkty zwykłym językiem, w formie bezosobowej (`stepLine`, `prepLine`, `doneLines`), np.:
+  - „Przycięto spady — wymiar netto 1000 × 2000 mm”;
+  - „Dopasowano projekt do formatu 1015 × 2014 mm, na brzegach puste pasy”;
+  - „Przeliczono kolory na CMYK (profil Coated FOGRA39)”;
+  - „Zamieniono czerń złożoną ze wszystkich farb na C78 M85 Y90 K100”;
+  - „Wyłączono overprint (nadruk)”;
+  - „Zamieniono tekst na krzywe (fonty: …)”;
+  - „Usunięto niedrukowane komentarze Acrobata (…)”;
+  - „Obrócono plik o 90° w prawo”.
+- Bez poprawek: „Bez zmian — plik nie wymagał poprawek”. Uwagi (rozdzielczość, fonty…) zostają w rozdziałach
+  i w Pobierz.
+- Samouczek i pomoc „?” zaktualizowane.
+
+## 0.6.7 — Spłaszczenie: podpowiedź, co kliknąć (Tomasz 01.10)
+
+- Tomasz: „rozdział Spłaszczenie — może dajmy jakiś komunikat, kiedy można spłaszczyć, a kiedy to bez
+  sensu, żeby było wiadomo, co kliknąć”.
+- Na górze rozdziału: „**Zalecane: Spłaszcz projekt / Zostaw jak jest.** Powód.”, a zalecany przycisk ma
+  dopisek „(zalecane)”, jak FOGRA39 w Kolorach. Logika w `print.flattenAdvice` — reguły w kolejności:
+  1. brakuje fontu → **Zostaw** (spłaszczenie utrwaliłoby krój zastępczy);
+  2. brak przezroczystości → **Zostaw** (nie ma czego spłaszczać);
+  3. przezroczystość + kolor dodatkowy (spot nieprzeliczony na CMYK) albo overprint (niewyłączony) →
+     **Spłaszcz** (u drukarni szwy i jasne obwódki);
+  4. tryby mieszania albo maski → **Spłaszcz** (różne RIP-y liczą je różnie; po spłaszczeniu wydruk = podgląd);
+  5. sama półprzezroczystość / obrazy z przezroczystym tłem → **Zostaw** (drukarnia spłaszczy bez problemu).
+- Zasada z 25.09 („spłaszczać tylko, gdy konieczne”) zostaje — reguły 3–4 to właśnie przypadki konieczne.
+  „Zawsze spłaszcz, gdy drukarnia o to prosi” — w pomocy „?”.
+- Samouczek: krok Spłaszczenie każe kliknąć zalecany przycisk.
+- Sprawdzone (Playwright):
+  - `PRINT_CHECKER_TEST_100x200` z kolorami zostawionymi → Spłaszcz (kolor dodatkowy);
+  - po CMYK i wyłączonym overprincie → Spłaszcz (tryby mieszania);
+  - `Test_edge_1strona` → Zostaw (brak przezroczystości);
+  - cały samouczek przechodzi.
