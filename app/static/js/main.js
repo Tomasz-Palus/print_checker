@@ -1,5 +1,5 @@
 // Start programu: wgrywanie pliku, jedna pętla rysowania rozdziałów i podglądu, ustawienia.
-import { $, esc, fmtMm, fmtBytes, api, ask, chapter, initChapters, plural, shown, revealChapters } from "./util.js";
+import { $, esc, fmtMm, fmtBytes, api, ask, chapter, initChapters, plural, shown, revealChapters, markHelp } from "./util.js";
 import { S, changed, onChange, resetJobState, ROT_TXT, head, template, scaleK, printMm, isPdf, sizeSettled, factsKey, STEP_NAME, STEP_CH, stepIndex, fontWarnings, riskMarks, printSettled, geoKey, geoVersion, flattenSettled } from "./state.js";
 import { HELP } from "./help.js";
 import * as viewer from "./viewer.js";
@@ -222,12 +222,15 @@ function viewHeader(e) {
   const ch = h.closest(".ch");
   // Rozdział rozwinięty (np. jeden z dwóch ostatnich), ale nie „bieżący”: klik w nagłówek robi go
   // bieżącym (ramki na podglądzie, lupki), zamiast go zwinąć — zwija dopiero drugi klik.
-  const cur = currentChapter();
-  if (!ch.classList.contains("open") && cur !== ch.id && ch.dataset.st === "done" && e.type === "click") ch.classList.add("open");
+  // Decyzja zapada PRZED przełączeniem w nagłówku (nasłuch w fazie przechwytywania): do 0.6.4 była
+  // liczona po nim — zwinięty już rozdział nie był „bieżący”, więc rozwijał się z powrotem
+  // i żadnego rozdziału nie dało się zwinąć (Tomasz 30.09).
+  if (e.type === "click" && ch.dataset.st === "done" && ch.classList.contains("open") && currentChapter() !== ch.id)
+    ch.classList.remove("open");             // przełącznik w nagłówku zaraz go rozwinie z powrotem
   setTimeout(() => { S.viewCh = ch.classList.contains("open") ? ch.id : null; changed(); }, 0);
 }
-document.addEventListener("click", viewHeader);
-document.addEventListener("keydown", viewHeader);
+document.addEventListener("click", viewHeader, true);
+document.addEventListener("keydown", viewHeader, true);
 
 function scene() {
   const sc = sceneBase();
@@ -457,6 +460,7 @@ function render() {
   if (S.cmp && !keep?.querySelector(`input[data-step="${S.cmp.step}"]`)) S.cmp = null;
   if (S.sim && !keep?.matches(`.sim[data-sim="${S.sim}"]`)) S.sim = null;
   revealChapters();
+  markHelp();
   // numery rozdziałów po kolei, licząc tylko widoczne
   let n = 0;
   document.querySelectorAll(".ch:not([hidden]) .ch-ico").forEach((ico) => {

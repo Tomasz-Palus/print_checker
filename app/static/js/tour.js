@@ -82,8 +82,9 @@ const STEPS = [
 
   { part: PART2, target: ["side"], title: "Rozdziały",
     text: `Po lewej są <b>rozdziały</b>. Idziesz po kolei, z góry na dół — następny otwiera się, gdy skończysz
-      poprzedni. Zielony ✓ znaczy „gotowe”.<br><br>Przy każdym rozdziale jest <b>?</b> — pod nim krótkie
-      wyjaśnienie, gdy czegoś nie wiesz.` },
+      poprzedni. Zielony ✓ znaczy „gotowe”.<br><br>Przy każdym rozdziale jest <b>?</b> — pod nim program pisze,
+      co znalazł w tym pliku, a niżej jest krótkie wyjaśnienie. <b>Pomarańczowy „?”</b> znaczy, że jest tam
+      ostrzeżenie, które warto przeczytać.` },
 
   { part: PART2, target: ["view"], title: "Podgląd",
     text: `Po prawej widzisz projekt. Kółkiem myszy przewijasz, lupkami powiększasz, a
@@ -168,7 +169,7 @@ const STEPS = [
     wait: () => S.cmp?.step === "cmyk" && S.cmp.v < 50, manual: true, optional: "Pomiń" },
 
   // 0.6.1: za dużo farby — jednolitą czerń 4 × 100 % program poprawia na zalecaną C78 M85 Y90 K100
-  { part: PART2, target: ["ch-color", "vStage"], anchor: "coInk", title: "Za dużo farby", place: "right",
+  { part: PART2, target: ["ch-color", "vStage"], anchor: "bkRow", title: "Za dużo farby", place: "right",
     when: () => vis("bkDo") || hasStep("black"),
     text: () => hasStep("black")
       ? `Czerń poprawiona — ramki zniknęły. Poprawka ma własne <b>Cofnij</b>.`
@@ -203,13 +204,13 @@ const STEPS = [
       ? `Program ogląda każdy obraz piksel po pikselu — czy na wydruku nie wyjdzie rozmyty. To chwilę potrwa…`
       : ["ok", "vector"].includes(S.qual.data.verdict)
       ? `Obrazy mają dość pikseli — jakość jest <b>w porządku</b>.`
-        + (vis("quRisk") ? ` Niżej program pisze jednak o <b>cienkich liniach</b> albo <b>tekście przy krawędzi</b>
-           (poza czerwoną ramką wytycznych) — pokazuje je ramkami na podglądzie.` : "")
+        + (!$("quRisk").hidden ? ` Są jednak <b>cienkie linie</b> albo <b>tekst przy krawędzi</b> (poza czerwoną
+           ramką wytycznych) — pokazuje je ramkami na podglądzie, a opisuje pod <b>?</b>.` : "")
         + `<br><br>Lupki, rzeczywistą wielkość wydruku i nawigator masz w panelu nad podglądem — obejrzyj projekt
            z bliska, a potem kliknij <b>Rozumiem, dalej</b>.`
       : `Program znalazł miejsca, które na wydruku wyjdą <b>rozmyte</b>.`
-        + (vis("quRisk") ? ` Niżej pisze też o <b>cienkich liniach</b> i <b>tekście przy krawędzi</b> (poza czerwoną
-           ramką wytycznych) — pokazuje je ramkami na podglądzie.` : "")
+        + (!$("quRisk").hidden ? ` Są też <b>cienkie linie</b> i <b>tekst przy krawędzi</b> (poza czerwoną
+           ramką wytycznych) — pokazuje je ramkami na podglądzie, a opisuje pod <b>?</b>.` : "")
         + `<br><br>Kliknij <b>Pokaż na podglądzie</b>.`,
     wait: () => qualitySettled() || vis("qnav"), skipDone: true },
 
@@ -220,16 +221,17 @@ const STEPS = [
       rozdzielczości trzeba wymienić na większe — poproś o nie klienta. Gdy obejrzysz, zamknij pasek <b>×</b>.`,
     wait: () => !vis("qnav"), skipDone: true },
 
-  { part: PART2, target: ["ch-qual", "vStage"], anchor: "quRisk", title: "Cienkie linie i krawędzie", place: "right",
+  { part: PART2, target: ["ch-qual", "vStage"], anchor: "quRiskOk", title: "Cienkie linie i krawędzie", place: "right",
     when: () => vis("quRiskOk"),
-    text: `Pod oceną obrazów program pisze o <b>cienkich liniach</b> (mogą się nie wydrukować) i o <b>tekście przy
+    text: `Pod <b>?</b> program pisze o <b>cienkich liniach</b> (mogą się nie wydrukować) i o <b>tekście przy
       krawędzi</b> — poza czerwoną linią z wytycznych może zostać ucięty. Ramki na podglądzie pokazują te miejsca;
       lupki i rzeczywistą wielkość masz w panelu nad podglądem.<br><br>Gdy obejrzysz, kliknij <b>Rozumiem, dalej</b>.`,
     wait: qualitySettled, skipDone: true },
 
   { part: PART2, target: ["ch-acc"], title: "Akceptacja pliku",
-    text: `Ostatnie spojrzenie. Kliknij <b>Pokaż wydruk przed i po</b> — suwak porówna wydruk bez poprawek
-      z wydrukiem po nich.`,
+    text: `Ostatnie spojrzenie. <b>Opis zmian dla klienta</b> to gotowy tekst do wysłania klientowi — co program
+      poprawił i na co zwrócić uwagę. Możesz go poprawić i skopiować przyciskiem <b>Kopiuj</b>.<br><br>
+      Kliknij <b>Pokaż wydruk przed i po</b> — suwak porówna wydruk bez poprawek z wydrukiem po nich.`,
     wait: () => S.accShown === head()?.id || acceptSettled(), skipDone: true },
 
   { part: PART2, target: ["ch-acc", "vStage"], anchor: "acSimBar", title: "Przed i po",

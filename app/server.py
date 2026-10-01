@@ -404,8 +404,11 @@ def api_step(jid):
     try:
         job.apply(name, params)
     except ValueError as e:
+        print(f"[poprawka {name}] {e}")            # do dziennika — przy zgłoszeniu widać, co się stało
         return err(str(e))
     except Exception as e:
+        import traceback
+        print(f"[poprawka {name}] {type(e).__name__}: {e}\n{traceback.format_exc()}")
         return err(f"Poprawka nie powiodła się: {type(e).__name__}: {e}", 500)
     return jsonify(job.to_json())
 

@@ -109,9 +109,16 @@ export function initChapters(HELP) {
     const q = ch.querySelector(".ch-q"), help = ch.querySelector(".ch-help");
     const key = ch.id.replace("ch-", "");
     if (q && help) {
+      // Minimalny wygląd (Tomasz 01.10): opisy z rozdziału (oznaczone data-more) mieszkają pod „?” —
+      // na górze to, co program napisał o TYM pliku, pod spodem stała pomoc rozdziału. Elementy tylko
+      // zmieniają miejsce: kod dalej wpisuje do nich tekst po id.
+      const more = document.createElement("div"), stat = document.createElement("div");
+      more.className = "ch-more"; stat.className = "ch-static";
+      ch.querySelectorAll(".ch-b [data-more]").forEach((el) => more.appendChild(el));
+      help.append(more, stat);
       q.onclick = (e) => {
         e.stopPropagation();
-        if (help.hidden) help.innerHTML = HELP[key] || "";
+        if (help.hidden) stat.innerHTML = HELP[key] || "";
         help.hidden = !help.hidden;
         q.classList.toggle("on", !help.hidden);
       };
@@ -129,6 +136,18 @@ export function initChapters(HELP) {
         if (ch.dataset.st === "done") ch.classList.toggle("open");
       });
     }
+  });
+}
+
+// „?” rozdziału zdradza, że jest pod nim coś o tym pliku: kropka (opis), pomarańczowy (ostrzeżenie).
+export function markHelp() {
+  document.querySelectorAll(".ch").forEach((ch) => {
+    const q = ch.querySelector(".ch-q"), more = ch.querySelector(".ch-more");
+    if (!q || !more) return;
+    const items = [...more.children].filter((el) => !el.hidden && el.textContent.trim());
+    more.classList.toggle("on", items.length > 0);
+    q.classList.toggle("has", items.length > 0);
+    q.classList.toggle("alert", items.some((el) => el.classList.contains("warn") || !!el.querySelector(".say.warn, .warn")));
   });
 }
 

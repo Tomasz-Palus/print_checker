@@ -139,7 +139,8 @@ Gdy strona <b>już jest jednym obrazem</b> (np. eksport z Photoshopa), program n
   acc: `Ostatnie spojrzenie przed pobraniem. <b>Pokaż wydruk przed i po</b> porównuje, jak plik
     wydrukowałby się bez poprawek z rozdziałów Kolory, Overprint, Fonty i Spłaszczenie, z tym,
     jak wydrukuje się teraz — oba tak, jak zrobi to drukarnia (kolory z drukarki, overprint).
-    Suwak startuje od „po” — tak, jak plik pójdzie do druku. Nad przyciskiem jest lista tego, co program
-    w pliku zmienił, a co zostawił bez zmian. Gdy wszystko gra — <b>Akceptuję plik</b>. Każda późniejsza zmiana
+    Suwak startuje od „po” — tak, jak plik pójdzie do druku. <b>Opis zmian dla klienta</b> to gotowy tekst
+    do wysłania: co program w pliku zmienił (zwykłym językiem) i uwagi, których nie da się poprawić tutaj
+    (brakujący font, za mała rozdzielczość, cienkie linie…). Pole można edytować; <b>Kopiuj</b> kopiuje tekst do schowka. Gdy wszystko gra — <b>Akceptuję plik</b>. Każda późniejsza zmiana
     pliku zdejmuje akceptację.`,
 };

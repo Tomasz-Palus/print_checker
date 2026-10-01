@@ -1107,3 +1107,75 @@ Numery jak w `18_przeglad_kodu.md`.
   - PDF 2-stronicowy: obie strony obrócone;
   - obrót po nałożonym CMYK: pytanie → poprawki cofnięte, rozdziały od Wymiaru w dół od nowa;
   - cały samouczek przechodzi.
+
+## 0.6.5 — rozwinięty rozdział da się znowu zwinąć (Tomasz 30.09)
+
+- **Błąd** (Tomasz: „jak rozwinę jakiś rozdział, to potem nie mogę go zwinąć z powrotem”):
+  - Od 0.6.x klik w nagłówek rozdziału rozwiniętego, ale nie „bieżącego”, robi go bieżącym (ramki,
+    lupki) zamiast go zwijać. `main.viewHeader` sprawdzał to jednak PO przełączeniu w nagłówku.
+  - Rozdział był już wtedy zwinięty, więc nie był „bieżący”, i program rozwijał go z powrotem. Żadnego
+    zaliczonego rozdziału nie dało się zwinąć.
+  - Teraz decyzja zapada przed przełączeniem (nasłuch w fazie przechwytywania):
+    - zwinięty rozdział — klik rozwija;
+    - rozwinięty, ale nie bieżący — pierwszy klik robi go bieżącym, drugi zwija;
+    - rozwinięty i bieżący — klik zwija.
+- Sprawdzone (Playwright): Plik, Produkt, Szablon — rozwiń / zwiń / rozwiń; Spady (jeden z dwóch
+  ostatnich) — bieżący / zwiń / rozwiń.
+
+## 0.6.5 — „Popraw czerń” nie działała (obraz w treści strony) (Tomasz 01.10)
+
+- **Błąd** (Tomasz: „button Popraw czerń nie działa”, plik `PRINT_CHECKER_TEST_100x200_SZABLON_PASERY.pdf`):
+  - U mnie (Ghostscript 10.02 i zbudowany 10.07.1) przycisk działał. Dopiero plik z Twojego folderu
+    roboczego (wersja po zamianie na CMYK) pokazał przyczynę: `don't know how to encode value PdfInlineImage`.
+  - Strona miała obrazki wpisane wprost w treść (BI … ID … EI). `steps._fix_black` rozbierał każdą
+    instrukcję na (operandy, operator) i składał z powrotem — obrazka w treści tak złożyć się nie da.
+  - Błąd szedł do przeglądarki, ale rozdział Kolory pokazywał tylko błędy zamiany na CMYK — przycisk
+    „nic nie robił”.
+- Poprawki:
+  - obraz w treści przepisywany bez zmian — w `steps._fix_black` i w `prepare._strip_oc` (warstwy przy
+    wgraniu, ten sam wzór);
+  - błąd „Popraw czerń” pokazany w rozdziale Kolory;
+  - błędy poprawek trafiają do dziennika `adchecker.log` (`[poprawka black] …`).
+- Sprawdzone na Twojej wersji po CMYK: „czerń poprawiona w 3 miejscach”, 4 obrazki w treści
+  bit w bit te same.
+
+## 0.6.5 — minimalny wygląd: opisy pod „?” (Tomasz 01.10)
+
+- Tomasz: „chcę, aby domyślne UI było jak najbardziej minimalistyczne — opisy dodatkowe dajmy pod
+  buttony ze znakiem zapytania. Zostawmy tylko to w pierwszym rozdziale i na samym końcu to, co
+  zostało poprawione”.
+- **Opisy przeniesione pod „?”**:
+  - elementy oznaczone `data-more` (zdania o pliku, notatki, ostrzeżenia: za dużo farby, biel
+    z overprintem, cienkie linie, jakość…) `util.initChapters` przenosi do panelu „?”;
+  - na górze panelu jest to, co program napisał o tym pliku, pod kreską stała pomoc rozdziału;
+  - elementy zachowują id — kod rozdziałów wpisuje do nich tekst jak dotąd.
+- **W rozdziałach zostają**:
+  - przyciski, suwaki i błędy;
+  - opis suwaków w Wymiarze;
+  - podpowiedź „Plik leży bokiem — obróć go” (to akcja, osobny element `#szRot`);
+  - rozdział Plik bez zmian;
+  - w Akceptacji opis dla klienta.
+- **Pomarańczowy „?” z kropką** (`util.markHelp`): pod znakiem zapytania jest ostrzeżenie o tym pliku
+  (np. za dużo farby, biel z overprintem, jakość, cienkie linie). Zwykły opis nie ma znaku — jest prawie
+  w każdym rozdziale.
+- Samouczek: krok „Rozdziały” tłumaczy „?” i pomarańczowy „?”; kotwice przeniesione (Za dużo farby →
+  przyciski czerni, Cienkie linie → „Rozumiem, dalej”). Cały samouczek przechodzi.
+
+## 0.6.5 — Akceptacja: opis zmian dla klienta do skopiowania (Tomasz 01.10)
+
+- Tomasz: „fajnie, jakby ten opis na końcu był taki, który można skopiować i wysłać do klienta, żeby
+  wiedział, co zostało poprawione”.
+- Zamiast listy technicznej — pole **„Opis zmian dla klienta”** z przyciskiem **Kopiuj**:
+  - „Dzień dobry, przygotowując plik „…” do druku (produkt, rola, wymiar), wprowadziliśmy następujące zmiany:”
+    — każda poprawka zwykłym językiem (`stepLine`), np. „dopasowaliśmy projekt do formatu 1015 × 2014 mm,
+    brakujący margines uzupełniliśmy tłem z krawędzi projektu”;
+  - zmiany przy wczytaniu (`prepLine`): usunięte warstwy niedrukowane i komentarze Acrobata, elementy
+    Acrobata wpisane w stronę, naprawiony plik. Pomijane to, co nie zmienia wyglądu (połączone warstwy,
+    UserUnit, zdjęte hasło);
+  - obrót pliku;
+  - **„Uwagi do projektu”** — czego program nie poprawił: brakujący font, krój zastępczy, biel
+    z overprintem, za dużo farby, za mała rozdzielczość / nieostre miejsca, cienkie linie, tekst przy
+    krawędzi;
+  - bez zmian: „plik sprawdziliśmy przed drukiem — nie wymagał zmian”.
+- Pole jest edytowalne. Tekst nadpisuje się tylko wtedy, gdy zmieni się plik, więc własne poprawki
+  zostają. Kopiuj: schowek, a gdy go nie ma — zaznaczenie i kopia.

@@ -162,7 +162,10 @@ export function renderColor() {
   $("bkUndo").hidden = !fixed; $("bkUndo").disabled = !!S.busy;
   $("coSay").innerHTML = say;
   $("coNote").innerHTML = note; $("coNote").hidden = !note;
-  $("coErr").hidden = !S.stepErr.cmyk; $("coErr").textContent = S.stepErr.cmyk || "";
+  // błąd zamiany na CMYK albo „Popraw czerń” — do 0.6.5 ten drugi nie był nigdzie pokazany i przycisk
+  // „nic nie robił” (Tomasz 01.10)
+  const ce = S.stepErr.cmyk || S.stepErr.black || "";
+  $("coErr").hidden = !ce; $("coErr").textContent = ce;
   const rows = need.any || !!c.act;
   $("coAct").hidden = !rows;
   pick("coAct", on ? "convert" : c.act);

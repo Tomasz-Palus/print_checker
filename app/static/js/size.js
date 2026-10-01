@@ -129,7 +129,7 @@ $("szR11").onclick = () => setRatio(1);
 $("szX10").onclick = () => setRatio(10);
 $("szEditBtn").onclick = () => { S.sizeEdit = true; changed(); };
 $("szUndo").onclick = () => undoStep("resize");
-$("szSay").addEventListener("click", (e) => {                 // „obróć” z podpowiedzi o pliku bokiem
+$("szRot").addEventListener("click", (e) => {                 // „obróć” z podpowiedzi o pliku bokiem
   const b = e.target.closest("button[data-deg]");
   if (b) rotateFile(+b.dataset.deg);
 });
@@ -179,14 +179,17 @@ export function renderSize() {
       + ". Ustaw, jak projekt ma się zmieścić w formacie.";
   }
   // plik leży bokiem względem formatu (poziomy zamiast pionowego) — obrót pasuje lepiej niż skalowanie
+  let rot = "";
   if (!done && !ok && f && t && !match) {
     const land = (a) => a.w > a.h * 1.03, port = (a) => a.h > a.w * 1.03;
     const e = (w, h) => Math.abs(Math.log((w / h) / (t.w / t.h)));
     if (((land(f) && port(t)) || (port(f) && land(t))) && e(f.h, f.w) < e(f.w, f.h))
-      say += `<div class="rot-hint">Plik leży <b>bokiem</b> względem formatu — obróć go:`
-        + `<button class="btn" type="button" data-deg="90">⟳ 90° w prawo</button>`
-        + `<button class="btn" type="button" data-deg="-90">⟲ 90° w lewo</button></div>`;
+      rot = `Plik leży <b>bokiem</b> — obróć go:`
+        + `<button class="btn small" type="button" data-deg="90">⟳ 90° w prawo</button>`
+        + `<button class="btn small" type="button" data-deg="-90">⟲ 90° w lewo</button>`;
   }
+  if ($("szRot").dataset.html !== rot) { $("szRot").innerHTML = rot; $("szRot").dataset.html = rot; }
+  $("szRot").hidden = !rot;
   chapter("ch-size", st, sum);
   $("szSay").innerHTML = say;
   $("szCtl").hidden = !edit;

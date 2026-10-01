@@ -61,7 +61,7 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
-        <p class="say">Plik ma kilka stron, a do druku idzie jedna. Którą bierzemy?</p>
+        <p class="say" data-more>Plik ma kilka stron, a do druku idzie jedna. Którą bierzemy?</p>
         <select class="sel" id="pgSelect"></select>
         <div class="row"><button class="btn primary" id="pgConfirm" type="button">Wybierz tę stronę</button></div>
       </div>
@@ -76,7 +76,7 @@
           <div class="muted" id="pCandLabel"></div>
           <div class="name" id="pCandName"></div>
           <div class="code" id="pCandCode"></div>
-          <div class="box warn" id="pCandWarn" hidden></div>
+          <div class="box warn" id="pCandWarn" data-more hidden></div>
           <div class="row"><button class="btn primary" id="pConfirm" type="button">✓ Potwierdź</button>
             <button class="btn" id="pOther" type="button">Inny produkt</button></div>
         </div>
@@ -110,7 +110,7 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
-        <p class="say" id="rSay"></p>
+        <p class="say" id="rSay" data-more></p>
         <div id="rBody" hidden>
           <select class="sel" id="rSelect"></select>
           <div id="rDims" hidden>
@@ -120,11 +120,11 @@
               <label>wysokość [mm]<input type="number" id="rH" min="1" step="0.1"></label>
             </div>
           </div>
-          <div class="note" id="rInfo"></div>
+          <div class="note" id="rInfo" data-more></div>
           <div class="row"><button class="btn primary" id="rConfirm" type="button">Zatwierdź</button>
             <a class="btn" id="rPdf" href="#" target="_blank" rel="noopener">PDF wytycznych ↗</a></div>
         </div>
-        <div class="box warn" id="rStale" hidden></div>
+        <div class="box warn" id="rStale" data-more hidden></div>
         <div class="box bad" id="rErr" hidden></div>
       </div>
     </section>
@@ -134,8 +134,8 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
-        <p class="say" id="frSay"></p>
-        <div class="note" id="frNote"></div>
+        <p class="say" id="frSay" data-more></p>
+        <div class="note" id="frNote" data-more></div>
         <div class="box bad" id="frErr" hidden></div>
         <div class="row">
           <button class="btn primary" id="frDo" type="button">Usuń szablon</button>
@@ -151,8 +151,8 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
-        <p class="say" id="trSay"></p>
-        <div class="note" id="trNote"></div>
+        <p class="say" id="trSay" data-more></p>
+        <div class="note" id="trNote" data-more></div>
         <div class="box bad" id="trErr" hidden></div>
         <div class="row">
           <button class="btn primary" id="trDo" type="button">Przytnij spady</button>
@@ -168,8 +168,9 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
-        <p class="say" id="szSay"></p>
-        <div class="box warn" id="szWarn" hidden></div>
+        <p class="say" id="szSay" data-more></p>
+        <div class="box warn" id="szWarn" data-more hidden></div>
+        <div class="rot-hint" id="szRot" hidden></div>
         <div id="szCtl" hidden>
           <div class="sl-lbl">Wielkość projektu <span><input type="number" id="szPct" min="5" max="1000" step="0.1"> %</span></div>
           <input type="range" class="sl" id="szRange" min="10" max="500" value="100" step="1">
@@ -218,7 +219,7 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
-        <p class="say" id="prSay"></p>
+        <p class="say" id="prSay" data-more></p>
         <div class="mini sim" id="prSimBar" data-sim="print"><span>ekran</span><input type="range" min="0" max="100" value="100"><span>druk</span></div>
         <div class="row"><button class="btn primary" id="prOk" type="button">Rozumiem, dalej</button>
           <button class="btn" id="prUndo" type="button" hidden>Cofnij</button></div>
@@ -230,9 +231,9 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
-        <p class="say" id="coSay"></p>
-        <div class="note" id="coNote"></div>
-        <div class="box warn" id="coInk" hidden>
+        <p class="say" id="coSay" data-more></p>
+        <div class="note" id="coNote" data-more></div>
+        <div class="box warn" id="coInk" data-more hidden>
           <div id="coInkTxt"></div>
         </div>
         <div class="box bad" id="coErr" hidden></div>
@@ -262,8 +263,8 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
-        <p class="say" id="opSay"></p>
-        <div class="note" id="opNote"></div>
+        <p class="say" id="opSay" data-more></p>
+        <div class="note" id="opNote" data-more></div>
         <div class="box bad" id="opErr" hidden></div>
         <div class="seg rowsel" id="opAct">
           <button type="button" data-v="fix">Wyłącz overprint</button>
@@ -279,8 +280,8 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
-        <p class="say" id="foSay"></p>
-        <div class="note" id="foNote"></div>
+        <p class="say" id="foSay" data-more></p>
+        <div class="note" id="foNote" data-more></div>
         <div class="box bad" id="foErr" hidden></div>
         <div class="seg rowsel" id="foAct">
           <button type="button" data-v="fix">Zamień na krzywe</button>
@@ -296,8 +297,8 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
-        <p class="say" id="flSay"></p>
-        <div class="note" id="flNote"></div>
+        <p class="say" id="flSay" data-more></p>
+        <div class="note" id="flNote" data-more></div>
         <div class="box bad" id="flErr" hidden></div>
         <div class="seg rowsel" id="flAct">
           <button type="button" data-v="fix">Spłaszcz projekt</button>
@@ -313,10 +314,10 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
-        <p class="say" id="quSay"></p>
+        <p class="say" id="quSay" data-more></p>
         <div class="bar" id="quBar" hidden><i></i></div>
-        <div class="note" id="quNote"></div>
-        <div class="box warn" id="quRisk" hidden></div>
+        <div class="note" id="quNote" data-more></div>
+        <div class="box warn" id="quRisk" data-more hidden></div>
         <!-- „Rozumiem, dalej”: uwagi o cienkich liniach / obszarze bezpiecznym trzeba przeczytać, a przy dobrej
              jakości rozdział też czeka — zostaje otwarty z lupkami i nawigatorem (Tomasz 29.09) -->
         <div class="row" id="quRiskOk" hidden><button class="btn primary" type="button">Rozumiem, dalej</button></div>
@@ -324,7 +325,7 @@
         <div class="row" id="quRetry" hidden><button class="btn" type="button">Sprawdź jeszcze raz</button></div>
         <div class="seg rowsel" id="quShow" hidden><button type="button">Pokaż na podglądzie</button></div>
         <details class="more" id="quListBox" hidden><summary>Lista miejsc</summary><ol class="qlist" id="quList"></ol></details>
-        <p class="note" id="quNotice">Ocena jakości jest automatyczna i orientacyjna. Program może ocenić
+        <p class="note" id="quNotice" data-more>Ocena jakości jest automatyczna i orientacyjna. Program może ocenić
           niektóre obrazy inaczej niż grafik i nie wychwyci każdego problemu. Jeśli jakość jest w tym
           projekcie szczególnie ważna albo masz wątpliwości, poproś grafika o sprawdzenie.</p>
       </div>
@@ -335,8 +336,13 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
-        <p class="say" id="acSay"></p>
-        <div class="box" id="acChanges" hidden></div>
+        <p class="say" id="acSay" data-more></p>
+        <!-- opis zmian do skopiowania i wysłania klientowi (Tomasz 01.10) — jedyny opis zostawiony w rozdziale -->
+        <div class="acc-client" id="acClient" hidden>
+          <div class="acc-h"><b>Opis zmian dla klienta</b>
+            <button class="btn small" id="acCopy" type="button">Kopiuj</button></div>
+          <textarea id="acClientTxt" spellcheck="false"></textarea>
+        </div>
         <div class="seg rowsel" id="acShow"><button type="button">Pokaż wydruk przed i po</button></div>
         <div class="mini sim" id="acSimBar" data-sim="final" hidden><span>przed poprawkami</span><input type="range" min="0" max="100" value="100"><span>po</span></div>
         <div class="seg rowsel" id="acOk" hidden><button type="button">Akceptuję plik</button></div>
@@ -348,11 +354,11 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
-        <p class="say" id="dlSay"></p>
-        <ul class="dlsum" id="dlSum"></ul>
+        <p class="say" id="dlSay" data-more></p>
+        <ul class="dlsum" id="dlSum" data-more></ul>
         <a class="btn primary big" id="dlDo" href="#" download>Pobierz plik do druku</a>
         <div class="note" id="dlName"></div>
-        <p class="note">Masz wątpliwości co do pliku? Przed wysłaniem do druku pokaż go grafikowi.</p>
+        <p class="note" data-more>Masz wątpliwości co do pliku? Przed wysłaniem do druku pokaż go grafikowi.</p>
       </div>
     </section>
 

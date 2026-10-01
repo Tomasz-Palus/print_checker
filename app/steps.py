@@ -760,7 +760,14 @@ def _fix_black(pdf, container, resources, st: dict, done: set, depth=0) -> int:
 
     def rb(t=1.0):
         return [Decimal(f"{c * t:.4f}") for c in RICH_BLACK]
-    for operands, op in ops:
+    for ins in ops:
+        # obraz wpisany w treść (BI … ID … EI) przepisujemy bez zmian — rozebrany na (operandy, operator)
+        # nie dał się złożyć z powrotem („don't know how to encode value PdfInlineImage”) i „Popraw czerń”
+        # padała po cichu (Tomasz 01.10, plik z gs 10.07)
+        if isinstance(ins, pikepdf.ContentStreamInlineImage):
+            out.append(ins)
+            continue
+        operands, op = ins.operands, ins.operator
         o = str(op)
         if o == "q":
             stack.append(dict(st))

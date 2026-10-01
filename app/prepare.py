@@ -101,7 +101,14 @@ def _strip_oc(pdf, container, resources, L: _Layers, done: set, stats: dict, dep
     props = resources.get("/Properties") if resources is not None else None
     xobj = resources.get("/XObject") if resources is not None else None
     out, skip, changed = [], 0, False      # skip = głębokość znaczników wewnątrz ukrytej warstwy
-    for operands, op in ops:
+    for ins in ops:
+        # obraz wpisany w treść (BI … ID … EI) przepisujemy bez zmian — rozebrany na (operandy, operator)
+        # nie dał się złożyć z powrotem („don't know how to encode value PdfInlineImage”) i „Popraw czerń”
+        # padała po cichu (Tomasz 01.10, plik z gs 10.07)
+        if isinstance(ins, pikepdf.ContentStreamInlineImage):
+            out.append(ins)
+            continue
+        operands, op = ins.operands, ins.operator
         o = str(op)
         if skip:
             changed = True
