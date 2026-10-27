@@ -26,9 +26,11 @@ let zoom = "fit";          // "fit" albo px ekranu na mm ramki
 let bounds = { x: 0, y: 0, w: 1, h: 1 };   // obszar canvasu w mm ramki
 let margin = { x: PAD, y: PAD };
 let hilite = null, hiliteTimer = null;
-// Powiększanie (lupki, Ctrl+kółko, Z, rzeczywista wielkość) i nawigator — tylko przy rozdziale
-// „Jakość wydruku” (Tomasz 28.09). Poza nim podgląd jest zawsze dopasowany do okna.
+// Powiększanie (lupki, Ctrl+kółko, Z, rzeczywista wielkość) i nawigator — od 27.10 w każdym rozdziale
+// (Tomasz: „chciałbym też np. przy symulacji wydruku”; doc 20). Pełna jakość liczy się dopiero przy
+// pierwszym przybliżeniu warstwy (Layer.full), a w „Jakości wydruku” — od razu (`prefetch`).
 let zoomAllowed = false;
+let prefetch = false;
 const listeners = [];
 export const onViewChange = (fn) => listeners.push(fn);
 
@@ -37,12 +39,13 @@ const live = new Map();    // klucz → Layer
 const queue = [];
 let inflight = 0;
 
-// F/O: pełna piramida (tylko przy „Jakości wydruku”, gdzie wolno przybliżać) albo sam podgląd całości
-const layerKey = (s) => `${s.vid}|${s.page}|${Math.round(s.pageMm.w * s.k * 10)}x${Math.round(s.pageMm.h * s.k * 10)}|${s.op ? 1 : 0}${s.pr ? 1 : 0}|${zoomAllowed ? "F" : "O"}`;
+// Ta sama warstwa przed i po pierwszym przybliżeniu — przejście na pełną jakość zmienia tylko widok na serwerze
+const layerKey = (s) => `${s.vid}|${s.page}|${Math.round(s.pageMm.w * s.k * 10)}x${Math.round(s.pageMm.h * s.k * 10)}|${s.op ? 1 : 0}${s.pr ? 1 : 0}`;
 
 class Layer {
   constructor(spec) {
-    this.spec = spec; this.key = layerKey(spec); this.full = zoomAllowed;
+    this.spec = spec; this.key = layerKey(spec); this.full = prefetch;
+    this.miss = new Map(); this.regionAt = "";
     this.el = document.createElement("div"); this.el.className = "layer shadow";
     this.ov = document.createElement("img"); this.ov.className = "ov"; this.ov.alt = ""; this.ov.draggable = false;
     this.tilesEl = document.createElement("div"); this.tilesEl.className = "tiles";
@@ -99,14 +102,21 @@ class Layer {
     const p = this.plan;
     const w = this.spec.rect.w * z;
     const need = w * Math.min(window.devicePixelRatio || 1, 2);
+    // pierwsze przybliżenie tej warstwy: dopiero teraz zamawiamy pełną jakość (doc 20)
+    if (p && !this.full && need > p.ov[0] * 1.15) { this.full = true; this.tries = 0; this.poll(true); return; }
     if (!p || !p.levels.length || need <= p.ov[0] * 1.15 || this.ovLevel === 0) { this.clearTiles(); return; }
     const full = this.state === "done";
     let lvl = 0;
-    if (full) for (let i = p.levels.length - 1; i >= 0; i--) if (p.levels[i].w >= need) { lvl = i; break; }
+    for (let i = p.levels.length - 1; i >= 0; i--) if (p.levels[i].w >= need) { lvl = i; break; }
     const L = p.levels[lvl], k = w / L.w;
-    const rows = full ? L.rows : Math.max(0, this.done - 1);     // pasma, które już są policzone
-    const x0 = Math.max(0, Math.floor((vp.x - lx) / k / TILE) - 1), x1 = Math.min(L.cols - 1, Math.floor((vp.x + vp.w - lx) / k / TILE) + 1);
-    const y0 = Math.max(0, Math.floor((vp.y - ly) / k / TILE) - 1), y1 = Math.min(L.rows - 1, rows - 1, Math.floor((vp.y + vp.h - ly) / k / TILE) + 1);
+    // Piramida jeszcze się liczy (Ghostscript, strona z maskami — minuty): widoczny kawałek zamawiamy osobno
+    // (render.gs_block, kilka sekund); brakujące kafle przeglądarka dociąga przy kolejnych odświeżeniach.
+    const vx0 = Math.max(0, Math.floor((vp.x - lx) / k / TILE)), vx1 = Math.min(L.cols - 1, Math.floor((vp.x + vp.w - lx) / k / TILE));
+    const vy0 = Math.max(0, Math.floor((vp.y - ly) / k / TILE)), vy1 = Math.min(L.rows - 1, Math.floor((vp.y + vp.h - ly) / k / TILE));
+    if (!full && this.view) this.wantRegion(lvl, vx0, vy0, vx1, vy1);
+    const m = full ? 1 : 0;           // zapas wokół widoku — dopiero gdy piramida gotowa (inaczej 404 za 404)
+    const x0 = Math.max(0, vx0 - m), x1 = Math.min(L.cols - 1, vx1 + m);
+    const y0 = Math.max(0, vy0 - m), y1 = Math.min(L.rows - 1, vy1 + m);
     const keep = new Set();
     const cx = (vp.x + vp.w / 2 - lx) / k / TILE, cy = (vp.y + vp.h / 2 - ly) / k / TILE;
     for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
@@ -114,6 +124,7 @@ class Layer {
       keep.add(key);
       const t = this.tiles.get(key);
       if (t) { if (t.el) place(t.el, L, k, tx, ty); continue; }
+      if (!full && Date.now() - (this.miss.get(key) || 0) < 1500) continue;    // niedawno jeszcze nie było
       const rec = { lvl, tx, ty, L, k, d: Math.hypot(tx + .5 - cx, ty + .5 - cy), el: null };
       this.tiles.set(key, rec);
       queue.push({ layer: this, key, rec });
@@ -122,6 +133,19 @@ class Layer {
       if (!keep.has(key)) { t.el?.remove(); t.dead = true; this.tiles.delete(key); }
     }
     pump();
+  }
+  // Widoczny prostokąt kafli przy liczącej się piramidzie — po chwili bez ruchu (przewijanie nie zamawia
+  // wycinka za każdym pikselem); serwer liczy zawsze ostatnie zamówienie.
+  wantRegion(lvl, x0, y0, x1, y1) {
+    const at = `${this.view}|${lvl}|${x0},${y0},${x1},${y1}`;
+    if (at === this.regionAt) return;
+    this.regionAt = at;
+    clearTimeout(this.regionTimer);
+    this.regionTimer = setTimeout(() => {
+      if (this.dead || this.state === "done" || !S.job) return;
+      fetch(`/api/jobs/${S.job.job_id}/view/${this.view}/region`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lvl, x0, y0, x1, y1 }) }).catch(() => {});
+    }, 450);                          // przybliżanie kółkiem: zamawiamy dopiero, gdy widok stanie
   }
   clearTiles() { for (const t of this.tiles.values()) { t.el?.remove(); t.dead = true; } this.tiles.clear(); }
   kill() {
@@ -147,10 +171,15 @@ function pump() {
     img.alt = ""; img.draggable = false;
     const fin = () => { inflight--; pump(); };
     img.onload = () => {
-      if (!rec.dead && !layer.dead) { rec.el = img; place(img, rec.L, rec.k, rec.tx, rec.ty); layer.tilesEl.appendChild(img); }
+      // skala z chwili zamówienia bywa już nieaktualna (przybliżanie kółkiem trwa) — kafel kładzie draw()
+      // w bieżącej; bez tego spóźnione kafle zostawały w starej skali (Tomasz 27.10, widok poza „Jakością”)
+      if (!rec.dead && !layer.dead) { rec.el = img; place(img, rec.L, rec.k, rec.tx, rec.ty); layer.tilesEl.appendChild(img); draw(); }
       fin();
     };
-    img.onerror = () => { if (layer.tiles.get(key) === rec) layer.tiles.delete(key); fin(); };   // jeszcze nie ma — spróbujemy przy następnym rysowaniu
+    img.onerror = () => {      // jeszcze nie ma — spróbujemy przy następnym rysowaniu (nie częściej niż co 1,5 s)
+      if (layer.tiles.get(key) === rec) { layer.tiles.delete(key); layer.miss.set(key, Date.now()); }
+      fin();
+    };
     img.src = layer.tileUrl(`L${rec.lvl}_${rec.tx}_${rec.ty}.jpg`);
   }
 }
@@ -461,6 +490,7 @@ function naviGo(e) {
 navi.addEventListener("pointerdown", (e) => { e.preventDefault(); e.stopPropagation(); navi.setPointerCapture(e.pointerId); navi.dataset.drag = "1"; naviGo(e); });
 navi.addEventListener("pointermove", (e) => { if (navi.dataset.drag) naviGo(e); });
 navi.addEventListener("pointerup", () => { navi.dataset.drag = ""; });
+export function setPrefetch(on) { prefetch = !!on; if (prefetch) for (const l of live.values()) if (!l.full) { l.full = true; l.tries = 0; l.poll(true); } }
 export function setZoomAllowed(on) {
   if (on === zoomAllowed) return;
   zoomAllowed = on;

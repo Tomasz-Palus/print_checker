@@ -416,8 +416,10 @@ function render() {
   // (ostatni) rozdział albo gdy przeglądamy słabe miejsca (Tomasz 28.09)
   // także gdy „Jakość wydruku” rozwinięto ponownie nagłówkiem (ramki cienkich linii i obszaru bezpiecznego)
   const qualMode = !!S.job && (chs[chs.length - 1]?.id === "ch-qual" || navOpen() || currentChapter() === "ch-qual");
-  viewer.showTools(qualMode);
-  viewer.setZoomAllowed(qualMode);
+  // przybliżanie w każdym rozdziale (Tomasz 27.10, doc 20); w „Jakości” pełna jakość liczy się od razu
+  viewer.showTools(!!S.job);
+  viewer.setZoomAllowed(!!S.job);
+  viewer.setPrefetch(qualMode);
   const pin = chs.find((ch) => ch.id === S.pin) || null;
   const autoKey = [...lastTwo, pin].map((ch) => ch?.id || "").join("|");
   if (autoKey !== lastAuto) {

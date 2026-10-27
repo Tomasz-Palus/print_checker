@@ -1,14 +1,20 @@
 // Rozdziały „Szablon z wytycznych" i „Spady".
 import { $, esc, fmtMm, api, chapter, plural, brief } from "./util.js";
-import { S, changed, template, hasStep, roleSettled, framesSettled, trimInfo, isPdf } from "./state.js";
+import { S, changed, template, hasStep, roleSettled, framesSettled, trimInfo, isPdf, printMm, scaleK } from "./state.js";
 import { applyStep, undoStep, stepControls } from "./steps.js";
 
 // ------------------------------------------------------------------ szablon z wytycznych
 // Program porównuje CAŁY szablon z wytycznych tego produktu (ramki, kolory, położenie) z tym,
 // co jest w pliku. Szukamy raz, na oryginale — usuwanie szablonu jest pierwszą poprawką.
+// Obraz bez DPI: wymiar wydruku (w jednostkach pliku) — serwerowi potrzebny tylko do progu grubości linii
+function rasterMm() {
+  if (isPdf()) return null;
+  const p = printMm(), k = scaleK();
+  return p ? { w: p.w / k, h: p.h / k } : null;
+}
 function scanKey() {
-  const t = S.product ? template() : null;
-  return [S.job.job_id, S.page, S.guidelines?.hash || "", t ? t.page : -1].join("|");
+  const t = S.product ? template() : null, r = rasterMm();
+  return [S.job.job_id, S.page, S.guidelines?.hash || "", t ? t.page : -1, r ? `${r.w}x${r.h}` : ""].join("|");
 }
 async function scan() {
   const key = scanKey();
@@ -16,7 +22,8 @@ async function scan() {
   const t = S.product ? template() : null;
   try {
     const d = await api(`/api/jobs/${S.job.job_id}/frames?page=${S.page}`
-      + (t && S.guidelines?.hash ? `&gl=${encodeURIComponent(S.guidelines.hash)}&glpage=${t.page}` : ""));
+      + (t && S.guidelines?.hash ? `&gl=${encodeURIComponent(S.guidelines.hash)}&glpage=${t.page}` : "")
+      + (rasterMm() ? `&w_mm=${rasterMm().w}&h_mm=${rasterMm().h}` : ""));
     if (S.fscan.key === key) S.fscan.data = d;
   } catch (e) {
     if (S.fscan.key === key) S.fscan.err = e.message;
@@ -26,7 +33,9 @@ async function scan() {
 
 $("frDo").onclick = () => {
   const t = template();
-  applyStep("frames", { gl: S.guidelines?.hash || "", glpage: t ? t.page : -1 });
+  const d = S.fscan.data;
+  // ramki niepasujące do szablonu usuwamy tylko wtedy, gdy szablonu produktu w pliku nie ma (Tomasz 27.10)
+  applyStep("frames", { gl: S.guidelines?.hash || "", glpage: t ? t.page : -1, foreign: !d?.found && !!d?.foreign });
 };
 $("frUndo").onclick = () => undoStep("frames");
 $("frSkip").onclick = () => { if (S.job) { S.settle.frames = "skip"; changed(); } };
@@ -47,8 +56,10 @@ export function renderFrames() {
   const d = S.fscan.data, on = hasStep("frames");
   let st = "open", sum = "", say = "", note = "", skip = "", hidden = false;
   if (on) {
-    st = "done"; sum = "usunięty";
-    say = `<span class="say ok">Szablon usunięty z projektu.</span> <span class="now-only">Suwakiem niżej porównasz przed i po.</span>`;
+    const fr = !!S.job.versions.find((v) => v.step === "frames")?.text?.startsWith("usunięte ramki");
+    st = "done"; sum = fr ? "ramki usunięte" : "usunięty";
+    say = `<span class="say ok">${fr ? "Ramki w kolorach wytycznych usunięte" : "Szablon usunięty"} z projektu.</span> `
+      + `<span class="now-only">Suwakiem niżej porównasz przed i po — jeśli zniknęło coś z projektu, kliknij „Cofnij”.</span>`;
   } else if (S.fscan.err) {
     const sk = S.settle.frames === "unchecked";
     st = sk ? "done" : "todo"; sum = sk ? "niesprawdzony" : "";
@@ -77,9 +88,15 @@ export function renderFrames() {
     skip = "rozumiem, idę dalej";
   } else if (d.foreign) {
     st = S.settle.frames ? "done" : "todo"; sum = "do obejrzenia";
-    say = `W pliku są ramki w kolorach wytycznych, ale <b>nie pasują do szablonu tego produktu</b> — nie usuwam. `
-      + `Obejrzyj je na podglądzie.`;
-    skip = "rozumiem, idę dalej";
+    say = `W pliku ${d.foreign === 1 ? "jest ramka" : "są ramki"} w kolorach wytycznych, ale <b>nie pasują do szablonu `
+      + `tego produktu</b> (np. inna wersja szablonu albo inny produkt). Obejrzyj je na podglądzie: jeśli to resztki `
+      + `szablonu, kliknij <b>Usuń te ramki</b>; jeśli to część projektu — <b>Zostaw jak jest</b>.`;
+    skip = "zostaw jak jest";
+  } else if (d.raster) {
+    // obraz: szablonu wektorowego w nim nie ma; sprawdzone tylko linie wtopione w piksele (Tomasz 27.10)
+    st = "done"; sum = d.checked ? "czysto" : "nie dotyczy";
+    say = d.checked ? `<span class="say ok">W obrazie nie ma linii szablonu z wytycznych.</span>`
+      : `Obraz bez zapisanego wymiaru — linie szablonu sprawdzę, gdy będzie znany wymiar wydruku.`;
   } else {
     st = "done"; sum = d.known ? "czysto" : "nie dotyczy";
     say = d.known ? `<span class="say ok">W projekcie nie ma szablonu z wytycznych.</span>`
@@ -93,7 +110,7 @@ export function renderFrames() {
       + `${d.lines >= d.lines_total ? "cały" : `${d.lines} z ${d.lines_total} ramek`}`
       + (d.texts ? ` + ${d.texts} ${plural(d.texts, "napis", "napisy", "napisów")}` : "") + ".";
     else if (d.pixels) b = `<span class="warn">Linie szablonu są wtopione w obraz</span> — nie do usunięcia.`;
-    else if (d.foreign) b = `Ramki w kolorach wytycznych — nie pasują do szablonu tego produktu.`;
+    else if (d.foreign) b = `Ramki w kolorach wytycznych — nie pasują do szablonu tego produktu. Usuń je albo zostaw.`;
   }
   if (!on && S.fscan.err && !S.settle.frames) b = `<span class="warn">Nie udało się sprawdzić szablonu</span>.`;
   brief("frBrief", b);
@@ -101,8 +118,10 @@ export function renderFrames() {
   $("frChk").querySelectorAll("button").forEach((x) => { x.disabled = !!S.busy; });
   $("frSay").innerHTML = say;
   $("frNote").innerHTML = note; $("frNote").hidden = !note;
-  stepControls("fr", "frames", { canDo: !!d?.found, skip, doLabel: hidden ? "Usuń mimo to" : "Usuń szablon" });
-  $("frDo").hidden = on || !d?.found || !!S.settle.frames;
+  const foreign = !d?.found && !!d?.foreign;
+  stepControls("fr", "frames", { canDo: !!d?.found || foreign, skip,
+    doLabel: hidden ? "Usuń mimo to" : foreign ? "Usuń te ramki" : "Usuń szablon" });
+  $("frDo").hidden = on || !(d?.found || foreign) || !!S.settle.frames;
   $("frDo").classList.toggle("primary", !hidden);
 }
 

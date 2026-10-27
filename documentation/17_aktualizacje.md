@@ -1329,3 +1329,30 @@ Numery jak w `18_przeglad_kodu.md`.
 - Do sprawdzenia u Tomasza: założenie, że RIP drukarni bez deklaracji miesza w CMYK (tak robi
   Ghostscript; tak też zakłada podgląd „symulacja druku”). Gdyby
   drukarnia mieszała w RGB, wydruk wyszedłby jak dawny podgląd.
+
+## 0.6.10 — szablon i DPI w obrazach JPG/PNG/TIFF (Tomasz 27.10)
+
+- Rozdział „Szablon z wytycznych” przy obrazie pisał „nie dotyczy — bez wytycznych nie ma z czym
+  porównać”, choć wytyczne produktu były wczytane (adWall L 200, JPG bez DPI). Serwer dla obrazu od
+  razu odpowiadał `known: False` i niczego nie sprawdzał.
+- Teraz `/frames` dla obrazu szuka linii wytycznych wtopionych w piksele (`frames.in_pixels`); obraz bez
+  DPI dostaje do progu grubości linii wymiar wydruku z interfejsu (`w_mm`, `h_mm`). Wynik: „W obrazie
+  nie ma linii szablonu” albo „Linie … wtopione w obraz”. Sprawdzone na JPG bez DPI: czysty → czysto,
+  z cyjanową ramką → wtopione.
+- „Obraz nie ma zapisanego DPI”, choć Windows we „Właściwościach” pokazuje 96 dpi: w JFIF pliku
+  jednostka gęstości = 0 (same proporcje pikseli, bez DPI), a 96 dpi to wartość zastępcza Windowsa.
+  Program działa dobrze — dopisana o tym uwaga w rozdziale „Wymiar wydruku”.
+- Ramki w kolorach wytycznych, które nie pasują do szablonu produktu („do obejrzenia”), można teraz
+  usunąć (Tomasz 27.10, Skolae na adWall Vario Prosta Light 300 — cyjanowa ramka przy krawędzi
+  i czerwona wcięta). Przycisk „Usuń te ramki” obok „Zostaw jak jest”: `step_frames` z `foreign: true`
+  wycina dokładnie ramki policzone jako obce (`frames.find` → `foreign_targets`, kształty w kolorach
+  wytycznych przy krawędzi strony), napisy i reszta projektu zostają. Tylko gdy szablonu produktu
+  w pliku nie znaleziono; suwak przed/po i „Cofnij” jak przy szablonie. Sprawdzone: obie ramki
+  usunięte, tło i element projektu nietknięte; bez kliknięcia — jak dawniej.
+- Spłaszczanie dużego projektu „stało” na 5 % (Tomasz 27.10, adWall Vario Prosta Light 400, 4030 × 2270 mm,
+  20 MB zdjęć z maskami): zanim Ghostscript odda pierwszy wiersz, wczytuje cały projekt — przy takim
+  wydruku (ok. 200 Mpx, z nadpróbkowaniem 4× tyle) to minuty. Wtedy pasek pulsuje, a opis liczy czas
+  („Ghostscript czyta projekt… 1:25 — przy dużym projekcie to może potrwać kilka minut”).
+- Przybliżanie podglądu we wszystkich rozdziałach (Tomasz 27.10) — opis i pomiary w
+  `20_przyblizanie_kafelki.md` (kafle MuPDF na żądanie dla stron bez miękkich masek, wycinek Ghostscripta
+  przy przybliżeniu dla pozostałych).
