@@ -155,6 +155,9 @@ export function renderColor() {
                  + `<span class="now-only"> Suwakiem porównasz wydruk przed zamianą i po niej.</span>`
                : S.busy ? "Zamieniam kolory na CMYK…" : "Wybierz profil kolorów, który zostanie zapisany w pliku.";
       if (on) note = esc(stepText("cmyk"));
+    } else if (c.act === "keep" && colorNeed(a)?.rgbBlend) {
+      sum = "przeliczy spłaszczenie";
+      say = "Kolory zostają — przeliczy je spłaszczenie (rozdział „Spłaszczenie”), dokładnie tak, jak wygląda projekt.";
     } else if (c.act === "keep") {
       sum = "zostawione";
       say = "Kolory zostają jak są — drukarnia przeliczy je sama. Podgląd pokazuje, jak wyjdą z drukarki.";
@@ -163,7 +166,12 @@ export function renderColor() {
       const what = [n.rgb && "<b>RGB</b>", n.lab && "<b>Lab</b>",
         n.spots.length && `<b>dodatkowe</b> (spot: ${esc(n.spots.slice(0, 3).join(", "))}${n.spots.length > 3 ? "…" : ""})`,
         n.other && "<b>inne</b>"].filter(Boolean);
-      say = what.length
+      say = n.rgbBlend
+        ? `W projekcie są kolory ${what.join(" i ")} i <b>przezroczystość liczona w RGB</b> (np. półprzezroczysta `
+          + `nakładka). Zamiana kolorów na CMYK <b>przed</b> jej policzeniem zmieniłaby wygląd — np. zielona nakładka `
+          + `na zdjęciu wyszłaby beżowa. Kliknij <b>Zostaw jak jest</b>: kolory przeliczy <b>spłaszczenie</b> — policzy `
+          + `przezroczystość jak w projekcie i zapisze wynik w CMYK.`
+        : what.length
         ? `W projekcie są kolory ${what.join(" i ")}. Drukujemy w CMYK — lepiej przeliczyć je tutaj `
           + `i zobaczyć wynik, niż zdać się na drukarnię. Podgląd pokazuje teraz, jak przeliczy je drukarnia.`
         : n.group ? `Kolory są w CMYK, ale <b>przezroczystość miesza się w RGB</b> — trzeba zamienić na CMYK.`
@@ -407,6 +415,9 @@ function flattenAdvice(a, kinds, live) {
   if (!a || a.error || a.flat_image) return null;
   if (live.length) return { rec: "keep", why: `brakuje fontu ${esc(live.join(", "))} — spłaszczenie utrwaliłoby krój zastępczy` };
   if (!kinds.length) return { rec: "keep", why: "projekt nie ma przezroczystości — nie ma czego spłaszczać" };
+  // kolory RGB w przezroczystości liczonej w RGB — tylko spłaszczenie przeliczy je bez zmiany wyglądu (Tomasz 27.10)
+  if (colorNeed(a)?.rgbBlend) return { rec: "fix", why: "przezroczystość jest liczona w RGB, a kolory są jeszcze w RGB — "
+    + "spłaszczenie policzy ją dokładnie jak w projekcie i zapisze wynik w CMYK" };
   const spots = (a.color?.spots || []).length > 0, op = (a.overprint_uses || 0) > 0;
   if (spots || op) return { rec: "fix", why: `przezroczystość styka się z ${spots ? "kolorem dodatkowym" : "overprintem"} — `
     + "drukarnie robią w takich miejscach szwy i jasne obwódki" };

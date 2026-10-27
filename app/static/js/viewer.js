@@ -507,6 +507,53 @@ export function setZoomAllowed(on) {
 // Pływający panel (#vTools): lupki i nawigacja tylko przy „Jakości wydruku” (main.render → showTools),
 // a pasek wczytywania zawsze, gdy coś się liczy — w tym samym miejscu (Tomasz 28.09).
 let toolsOn = false;
+// Panel da się przesuwać (Tomasz 27.10): przeciąganie za uchwyt albo puste miejsce panelu, położenie
+// zapamiętane w przeglądarce (ułamek szerokości/wysokości podglądu — przetrwa zmianę okna); dwuklik w uchwyt
+// — z powrotem na środek.
+{
+  const panel = $("vTools"), KEY = "adcheck.vtoolsPos";
+  const box = () => panel.offsetParent?.getBoundingClientRect();
+  const put = (fx, fy) => {
+    const b = box();
+    if (!b) return;
+    const x = Math.max(0, Math.min(b.width - panel.offsetWidth, fx * b.width));
+    const y = Math.max(0, Math.min(b.height - panel.offsetHeight, fy * b.height));
+    panel.classList.add("moved");
+    panel.style.left = x + "px"; panel.style.top = y + "px";
+  };
+  let pos = null;
+  try { pos = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (_) { pos = null; }
+  const restore = () => { if (pos && !panel.hidden) put(pos.x, pos.y); };
+  window.addEventListener("resize", restore);
+  new MutationObserver(restore).observe(panel, { attributes: true, attributeFilter: ["hidden"] });
+  let drag = null;
+  panel.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || e.target.closest("button, input, a")) return;
+    const r = panel.getBoundingClientRect();
+    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    panel.setPointerCapture(e.pointerId); panel.classList.add("drag"); e.preventDefault();
+  });
+  panel.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const b = box();
+    if (!b) return;
+    put((e.clientX - drag.dx - b.left) / b.width, (e.clientY - drag.dy - b.top) / b.height);
+  });
+  const end = () => {
+    if (!drag) return;
+    drag = null; panel.classList.remove("drag");
+    const b = box();
+    if (!b) return;
+    pos = { x: parseFloat(panel.style.left) / b.width, y: parseFloat(panel.style.top) / b.height };
+    try { localStorage.setItem(KEY, JSON.stringify(pos)); } catch (_) { /* tylko wygoda */ }
+  };
+  panel.addEventListener("pointerup", end);
+  panel.addEventListener("pointercancel", end);
+  $("vGrip").addEventListener("dblclick", () => {
+    pos = null; panel.classList.remove("moved"); panel.style.left = ""; panel.style.top = "";
+    try { localStorage.removeItem(KEY); } catch (_) { /* tylko wygoda */ }
+  });
+}
 export function showTools(on) { toolsOn = !!on; floatPanel(); }
 function floatPanel() {
   $("vtZoom").hidden = !toolsOn;

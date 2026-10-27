@@ -283,6 +283,13 @@ select.sel.small { width: auto; padding: 4px 8px; margin: 6px 0 0 24px; font-siz
   max-width: calc(100% - 24px); display: flex; flex-direction: column; gap: 6px; background: #fff;
   border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; box-shadow: 0 4px 18px rgba(0,0,0,.12); }
 .vt-row { display: flex; align-items: center; gap: 6px; justify-content: center; height: 30px; }
+/* panel da się przesuwać (Tomasz 27.10): uchwyt ⋮⋮ albo puste miejsce panelu */
+.vtools { cursor: move; }
+.vtools .btn, .vtools .qn-t { cursor: pointer; }
+.vtools.moved { transform: none; }
+.vtools.drag { box-shadow: 0 8px 28px rgba(0,0,0,.2); user-select: none; }
+.vgrip { position: absolute; left: 10px; top: 6px; color: var(--muted); font-size: 14px; letter-spacing: -2px; line-height: 30px;
+  padding: 0 4px; user-select: none; }
 .vt-row.qnav { border-top: 1px solid var(--line); padding-top: 6px; height: 46px; }
 /* opis miejsca: zawsze dwie linie wysokości (krótszy — wyśrodkowany), dłuższy ucięty „…” */
 .qnav .qn-t { flex: 1; min-width: 0; height: 36px; font-size: 13px; line-height: 18px; padding: 0 4px; text-align: center;

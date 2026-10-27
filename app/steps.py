@@ -368,10 +368,9 @@ def _raster_resize(src: str, dst: str, p: dict) -> dict:
     im.seek(0)
     info = dict(im.info)
     import pdfutil
-    d0 = pdfutil.raster_dpi(im)
-    if not d0:
-        raise ValueError("Obraz nie ma zapisanej rozdzielczości (DPI), więc nie wiadomo, ile ma milimetrów — "
-                         "ustaw ją w programie graficznym.")
+    import render
+    # bez zapisanego DPI — umowne 120 ppi, jak przy wgraniu (render.inspect, Tomasz 27.10); wynik dostaje DPI
+    d0 = pdfutil.raster_dpi(im) or (render.ASSUMED_PPI, render.ASSUMED_PPI)
     d0 = (float(d0[0]), float(d0[1]))
     jpg = os.path.splitext(src)[1].lower() in (".jpg", ".jpeg")
     im = _gray8(im)
@@ -707,6 +706,14 @@ def _declare_cmyk_blend(page_obj) -> bool:
     return False
 
 
+REAL_TRANSPARENCY = ("krycie", "tryb mieszania", "maska", "obraz z maską")
+
+
+def real_transparency(facts: dict) -> bool:
+    """Czy na stronie coś się naprawdę miesza (sama grupa przezroczystości niczego nie miesza)."""
+    return any(k.startswith(REAL_TRANSPARENCY) for k in (facts.get("transparency") or {}))
+
+
 def color_need(facts: dict) -> dict:
     """Co w kolorach strony trzeba przeliczyć: {rgb, lab, spots:[nazwy], other}. Gray obok
     CMYK nie jest problemem (drukuje się czarną farbą)."""
@@ -745,7 +752,19 @@ def step_cmyk(src, dst, p, job) -> dict:
     with open(icc_path, "wb") as fh:
         fh.write(data)
 
-    need = color_need(_page_facts(job, src, page))
+    facts = _page_facts(job, src, page)
+    need = color_need(facts)
+    # Grupa RGB przy PRAWDZIWEJ przezroczystości zostaje RGB (Tomasz 27.10, strony.pdf: zielona nakładka 46 %
+    # na łososiowym zdjęciu po przestawieniu mieszania na CMYK wychodziła beżowa — 145/185/98 → 184/181/122).
+    # Tak ją zaprojektowano i tak policzy ją RIP (grupa z /CS jest wiążąca). Przestawiamy tylko grupy, w których
+    # nic się nie miesza — tam CMYK niczego nie zmienia w wyglądzie, a ratuje czystą czerń (przegląd 09.10, A4).
+    fix_groups = not real_transparency(facts)
+    if not fix_groups and facts.get("group_rgb") and (need["rgb"] or need["lab"] or need["other"]):
+        # obiekty przeliczone na CMYK PRZED zmieszaniem w RGB — inny wygląd (zieleń RGB nakładki → zieleń do druku,
+        # nakładka 46 % na zdjęciu beżowa zamiast zielonej). Wiernie: spłaszczenie (miesza jak projekt, wynik CMYK).
+        raise ValueError("W projekcie jest przezroczystość liczona w RGB — zamiana kolorów przed jej policzeniem "
+                         "zmieniłaby wygląd (np. zielona nakładka wyszłaby beżowa). Zostaw kolory, a w rozdziale "
+                         "„Spłaszczenie” spłaszcz projekt — przeliczy kolory dokładnie tak, jak wygląda projekt.")
     # SZYBKA ŚCIEŻKA: strona jest już w CMYK-u, są tylko kolory dodatkowe z alternatywą CMYK.
     # Wartości CMYK zostawiamy w spokoju — przeliczanie CMYK-u na CMYK ODDALA plik od
     # Photoshopa (zmierzone: średnio 9/255 zamiast 1,3/255, bo Ghostscript przebudowuje
@@ -753,7 +772,7 @@ def step_cmyk(src, dst, p, job) -> dict:
     # 0,15/0,35/0,85/0,05 daje 0,149/0,349/0,847/0,047 — jak Photoshop).
     fast = not need["rgb"] and not need["lab"] and not need["other"] and need["spot_alt_ok"]
     with pikepdf.open(src) as _pdf:
-        groups = _rgb_groups(_pdf.pages[page].obj)
+        groups = _rgb_groups(_pdf.pages[page].obj) if fix_groups else 0
     if fast and not need["spots"]:
         if not groups and not need["blend"]:
             raise ValueError("Kolory na tej stronie są już w CMYK-u — nie ma czego zamieniać.")
@@ -815,8 +834,10 @@ def step_cmyk(src, dst, p, job) -> dict:
             _rm(fsrc2 if fsrc2 != src else None)
     try:
         def doc_fn(pdf):
-            # grupy przezroczystości strony i form → CMYK (pdfwrite zostawia RGB; przegląd 09.10, A4)
-            _rgb_groups(pdf.pages[page].obj, fix=True)
+            # grupy przezroczystości strony i form → CMYK (pdfwrite zostawia RGB; przegląd 09.10, A4) —
+            # chyba że coś się w nich naprawdę miesza (wygląd zostaje jak w projekcie, wyżej)
+            if fix_groups:
+                _rgb_groups(pdf.pages[page].obj, fix=True)
             if need["blend"]:                            # pdfwrite grupy strony nie dopisze (Tomasz 27.10)
                 _declare_cmyk_blend(pdf.pages[page].obj)
             if profile == PROFILE_NONE:
@@ -833,6 +854,8 @@ def step_cmyk(src, dst, p, job) -> dict:
         text = f"kolory zamienione na CMYK przez profil {name}"
     text += {PROFILE_KEEP: "; profil kolorystyczny z pliku zostaje",
              PROFILE_NONE: "; plik bez deklaracji profilu"}.get(profile, f"; profil pliku: {name}")
+    if not fix_groups and facts.get("group_rgb"):
+        text += "; przezroczystość miesza się w RGB, tak jak w projekcie — zostawiona (w CMYK zmieniłyby się kolory nakładek)"
     if subs:
         text += ("; UWAGA: brak fontu " + ", ".join(n.split("+")[-1] for n in subs[:4])
                  + " — zostaje nieosadzony, drukarnia podstawi swój krój")

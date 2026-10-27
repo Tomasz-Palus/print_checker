@@ -150,6 +150,11 @@ export function renderSize() {
   if (el.hidden) return;
   const f = fileMm(), t = targetMm(), k = scaleK(), done = hasStep("resize"), ok = S.settle.resize === "ok";
   const match = sizeMatches(), edit = editing();
+  // obraz bez zapisanego DPI: wymiar z umownych 120 ppi (render.ASSUMED_PPI, Tomasz 27.10)
+  const ppiAssumed = !isPdf() && !done ? S.job.file.pages[S.page]?.dpi_assumed : 0;
+  const assumedTxt = ppiAssumed ? ` Obraz nie ma zapisanej rozdzielczości (DPI) — program przyjmuje <b>${ppiAssumed} ppi</b>, `
+    + `tyle potrzeba do druku. (Windows we „Właściwościach” pokazuje wtedy 96 dpi — to jego wartość zastępcza, `
+    + `nie zapisana w pliku.)` : "";
   const printT = t ? `${fmtMm(t.w * k)} × ${fmtMm(t.h * k)} mm` : "";
   let st, sum, say;
   if (done) {
@@ -180,6 +185,7 @@ export function renderSize() {
       : `${isPdf() ? "Plik" : "Obraz"} ma <b>${fmtMm(f.w)} × ${fmtMm(f.h)} mm</b>, a wytyczne wymagają <b>${fmtMm(t.w)} × ${fmtMm(t.h)} mm</b>`)
       + ". Ustaw, jak projekt ma się zmieścić w formacie.";
   }
+  if (!done && !ok) say += assumedTxt;
   // plik leży bokiem względem formatu (poziomy zamiast pionowego) — obrót pasuje lepiej niż skalowanie
   let rot = "";
   if (!done && !ok && f && t && !match) {
@@ -196,7 +202,8 @@ export function renderSize() {
   const fk = isPdf() ? k : 1;
   brief("szBrief", done || ok ? "" : !f ? `<span class="warn">Obraz nie ma zapisanego DPI</span> — wymiar w mm nieznany.`
     : match ? `<span class="ok">Wymiar się zgadza</span>: ${printT}.`
-    : `${isPdf() ? "Plik" : "Obraz"}: <b>${fmtMm(f.w * fk)} × ${fmtMm(f.h * fk)} mm</b> · wytyczne: <b>${printT}</b>`);
+    : `${isPdf() ? "Plik" : "Obraz"}${ppiAssumed ? ` (bez DPI, przyjęte ${ppiAssumed} ppi)` : ""}: `
+      + `<b>${fmtMm(f.w * fk)} × ${fmtMm(f.h * fk)} mm</b> · wytyczne: <b>${printT}</b>`);
   $("szSay").innerHTML = say;
   $("szCtl").hidden = !edit;
   $("szEditBtn").hidden = !(match && f && !edit && !done && !ok);
