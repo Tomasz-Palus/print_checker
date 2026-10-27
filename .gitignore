@@ -1,5 +1,6 @@
 # Na GitHub idzie TYLKO to, co jest wymienione niżej. Reszta folderu print_checker to pliki
 # klientów (przykladowe projekty), kopie zapasowe, spakowane wersje i pliki robocze.
+# narzedzia/ — skrypty do testów i pomiarów (nie wchodzą do instalatora).
 /*
 !/.gitignore
 !/.github/
@@ -7,6 +8,7 @@
 !/app/
 !/documentation/
 !/packaging/
+!/narzedzia/
 
 # w programie — bez plików roboczych i tego, co program sam pobiera
 /app/work/
