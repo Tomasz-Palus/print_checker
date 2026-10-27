@@ -78,3 +78,33 @@ plikach (Ghostscript czyta przy każdym kafelku całą stronę).
   silnik liczy inaczej — MuPDF dla stron z maskami odpada. Który wynik jest prawdziwy (Acrobat / RIP
   drukarni), musi sprawdzić Tomasz w Acrobacie: ma to znaczenie także dla druku, bo spłaszczenie liczy
   Ghostscript.
+
+### Kto ma rację — Acrobat (Tomasz 27.10)
+
+Zrzut z Acrobata (adWall 400, twarz przy kurtynie): granice pasów proste i pionowe, bez ukośnego klina —
+**jak Ghostscript**. MuPDF źle liczy te maski. Wniosek: podgląd i spłaszczenie (Ghostscript) zgadzają się
+z Acrobatem; MuPDF tylko dla stron bez miękkich masek.
+
+## Krok 2 — zrobione (0.6.10)
+
+**Przybliżanie w każdym rozdziale** (`main.js`: `setZoomAllowed(!!S.job)`, lupki i „Rzeczywista wielkość”
+zawsze). Pełna jakość warstwy zamawiana dopiero przy pierwszym przybliżeniu (`Layer.full`); w „Jakości
+wydruku” od razu, jak dawniej (`viewer.setPrefetch`).
+
+Silnik wybiera serwer (`server.mupdf_tiles_ok`):
+
+| strona | widok | czas (kontener, 2 rdzenie) |
+|---|---|---|
+| bez miękkich masek i bez RGB/Lab/Indexed, bez symulacji overprintu („ekran” — także bez mieszania w RGB) | **kafle MuPDF na żądanie** (`views` z `lazy`, `render.build_lazy` / `lazy_tile`): podgląd całości od razu, kafel liczony przy pierwszym zapytaniu, otwarty plik trzymany w pamięci (`render._doc_cached`) | widok gotowy ~0,3–1 s, kafel ~0,04 s (Volvo); pierwszy ostry obraz po przybliżeniu ~0,7 s |
+| pozostałe (maski, RGB przed „Zamień na CMYK”, overprint) | piramida Ghostscripta jak dawniej + **wycinek widoku** (`views.region`, `render.gs_block`): przy przybliżeniu najpierw liczy się tylko widoczny prostokąt kafli (bez nadpróbkowania, pasmami), piramida czeka, aż wycinek się skończy | adWall 400 (21 MB, maski): wycinek 7 s (mocne przybliżenie) – 14–20 s (średnie; czas rośnie z polem strony, nie z liczbą pikseli); cała piramida ~6,5 min w tle |
+
+Inne:
+- „Krzywe” nie zmieniają wyglądu — widok bierze poprzednią wersję (`api_view`), nic się nie liczy od nowa.
+- Kafel, który doszedł po zmianie przybliżenia, kładł się w starej skali (błąd był wcześniej, rzadko
+  widoczny) — po wczytaniu kafla `draw()`.
+- `text_as_curves` z blokadą na plik (piramida i wycinek prosiły o kopię naraz).
+- `-dMaxBitmap` duży (cały wycinek w pamięci — ścieżka bezpieczna przy overprincie) liczył wycinek 2,5×
+  dłużej — w `gs_block` bez overprintu mały (pasmami).
+
+Zostało (krok 3–4): kafle między wersjami dla spłaszczenia / usunięcia szablonu / spadów, liczenie
+piramidy zaraz po wgraniu.

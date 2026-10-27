@@ -433,6 +433,146 @@ def _gs_region(path, page_index, page_rect, clip, px_per_pt, smooth, gray) -> by
 
 
 # ----------------------------------------------------------------------------
+# kafelki MuPDF na żądanie (przybliżanie poza „Jakością”, doc 20)
+# ----------------------------------------------------------------------------
+# Strona bez miękkich masek i bez kolorów do przeliczenia (RGB, Lab…) wychodzi z MuPDF tak samo jak
+# z Ghostscripta (doc 20: zmierzone na korpusie i plikach Tomasza), a kafel 1024 px liczy się w setne
+# części sekundy zamiast pół sekundy – kilkunastu. Dlatego taki widok nie ma piramidy liczonej z góry:
+# kafel powstaje, gdy przeglądarka o niego poprosi. Piksele idą do CMYK i na ekran tym samym profilem
+# co symulacja druku (proof_rgb) — DeviceCMYK przechodzi 1:1, jak w Ghostscripcie.
+_docs: "dict[str, pymupdf.Document]" = {}      # otwarte pliki — rozpakowane obrazy zostają w pamięci MuPDF
+MAX_DOCS = 4
+
+
+def _doc_cached(path: str) -> pymupdf.Document:
+    """Pod MUPDF_LOCK. Najdawniej używany plik wypada (słownik trzyma kolejność)."""
+    d = _docs.pop(path, None)
+    if d is None:
+        d = open_doc(path)
+        _interpolate(d)
+        while len(_docs) >= MAX_DOCS:
+            _docs.pop(next(iter(_docs))).close()
+    _docs[path] = d
+    return d
+
+
+def forget_docs(prefix: str) -> None:
+    """Zamyka pliki z katalogu zadania (cofnięta wersja, usunięte zadanie) — Windows nie skasuje otwartego."""
+    with MUPDF_LOCK:
+        for p in [p for p in _docs if os.path.abspath(p).startswith(os.path.abspath(prefix))]:
+            _docs.pop(p).close()
+
+
+def mupdf_region(path: str, page: int, ppp: float, box: tuple, size: tuple, sim_src: str) -> Image.Image | None:
+    """Wycinek strony w pikselach `box` = (x0, y0, x1, y1) przy `ppp` px na pt, dokładnie `size` px.
+    None, gdy MuPDF zgłasza błąd (za duży obraz itp.) — wtedy liczy Ghostscript."""
+    x0, y0, x1, y1 = box
+    with MUPDF_LOCK:
+        pg = _doc_cached(path)[page]
+        pymupdf.TOOLS.mupdf_warnings(reset=True)
+        pix = pg.get_pixmap(matrix=pymupdf.Matrix(ppp, ppp), alpha=False, colorspace=pymupdf.csCMYK,
+                            clip=pymupdf.Rect(x0 / ppp, y0 / ppp, x1 / ppp, y1 / ppp))
+        if _mupdf_failed(pymupdf.TOOLS.mupdf_warnings(reset=True)):
+            return None
+        im = Image.frombytes("CMYK", (pix.width, pix.height), pix.samples)
+    if im.size != size:                     # zaokrąglenie wycinka w MuPDF bywa ±1 px
+        im = im.crop((0, 0, size[0], size[1])) if im.width >= size[0] and im.height >= size[1] \
+            else im.resize(size, Image.BILINEAR)
+    return proof_rgb(im, sim_src)
+
+
+def build_lazy(src: str, page: int, pl: dict, out: str) -> tuple[str, int] | None:
+    """Widok z kafelkami na żądanie: tylko podgląd całości (ov.jpg) MuPDF-em. Zwraca (plik z tekstem
+    na krzywych, strona) — z niego liczą się kafelki — albo None, gdy MuPDF nie daje rady."""
+    os.makedirs(out, exist_ok=True)
+    cur, cpage = text_as_curves(src, page)     # jak podgląd Ghostscripta: kształt liter z krzywych
+    ow, oh = pl["ov"]
+    # profil symulacji z pliku na krzywych — jak piramida Ghostscripta (build liczy z tej samej kopii)
+    im = mupdf_region(cur, cpage, pl["px_per_pt"] * ow / pl["w"], (0, 0, ow, oh), (ow, oh), cur)
+    if im is None:
+        return None
+    _save(os.path.join(out, "ov.jpg"), im)
+    return cur, cpage
+
+
+def lazy_tile(cur: str, cpage: int, pl: dict, lvl: int, tx: int, ty: int, out: str, sim_src: str) -> str | None:
+    """Kafel L{lvl}_{tx}_{ty}.jpg policzony teraz (albo gotowy z dysku). None — poza piramidą / błąd MuPDF."""
+    if not 0 <= lvl < len(pl["levels"]):
+        return None
+    L = pl["levels"][lvl]
+    if not (0 <= tx < L["cols"] and 0 <= ty < L["rows"]):
+        return None
+    path = os.path.join(out, f"L{lvl}_{tx}_{ty}.jpg")
+    if os.path.exists(path):
+        return path
+    x0, y0 = tx * TILE, ty * TILE
+    x1, y1 = min(L["w"], x0 + TILE), min(L["h"], y0 + TILE)
+    im = mupdf_region(cur, cpage, pl["px_per_pt"] * L["w"] / pl["w"], (x0, y0, x1, y1), (x1 - x0, y1 - y0), sim_src)
+    if im is None:
+        return None
+    _save(path, im)
+    return path
+
+
+REGION_MAX_TILES = 12        # tyle kafli najwięcej w jednym wycinku (ekran ~ 2×2 – 3×3)
+
+
+def gs_block(src: str, page: int, pl: dict, lvl: int, box: tuple, op: bool, proof: bool, out: str) -> int:
+    """Wycinek piramidy Ghostscriptem — kafle L{lvl}_{tx}_{ty} z prostokąta kafli `box` = (tx0, ty0, tx1, ty1),
+    zanim policzy się cała piramida (doc 20: adWall 400 z maskami — piramida 6,5 min, widoczny kawałek ~5 s).
+
+    Szybciej niż piramida, bo: tylko widoczny kawałek, bez nadpróbkowania (wygładzanie Ghostscripta) i pasmami
+    (`-dMaxBitmap` mały — cały wycinek w pamięci liczył się 2,5× dłużej). Przy symulacji overprintu zostaje
+    ścieżka bezpieczna z _gs_args (błąd gs: overprint + wygładzanie + pasma gubi treść). Kafle, które już są
+    (z piramidy, w pełnej jakości), zostają. Zwraca liczbę zapisanych kafli."""
+    L = pl["levels"][lvl]
+    tx0, ty0 = max(0, box[0]), max(0, box[1])
+    tx1, ty1 = min(L["cols"] - 1, box[2]), min(L["rows"] - 1, box[3])
+    if tx1 < tx0 or ty1 < ty0 or (tx1 - tx0 + 1) * (ty1 - ty0 + 1) > REGION_MAX_TILES:
+        return 0
+    todo = [(tx, ty) for ty in range(ty0, ty1 + 1) for tx in range(tx0, tx1 + 1)
+            if not os.path.exists(os.path.join(out, f"L{lvl}_{tx}_{ty}.jpg"))]
+    if not todo:
+        return 0
+    os.makedirs(out, exist_ok=True)              # wycinek bywa przed piramidą (ona zakłada katalog później)
+    cur, cpage = text_as_curves(src, page)
+    ppp = pl["px_per_pt"] * L["w"] / pl["w"]
+    x0, y0 = tx0 * TILE, ty0 * TILE
+    x1, y1 = min(L["w"], (tx1 + 1) * TILE), min(L["h"], (ty1 + 1) * TILE)
+    with MUPDF_LOCK:
+        d = open_doc(cur)
+        try:
+            ph = d[cpage].rect.height
+        finally:
+            d.close()
+    cw, ch = (x1 - x0) / ppp, (y1 - y0) / ppp
+    args = _gs_args(cur, cpage, ppp * 72, op, proof, x1 - x0, y1 - y0, 1)[:-5]
+    if not op:
+        args = [a for a in args if not a.startswith("-dMaxBitmap=")] + ["-dMaxBitmap=10000000"]
+    tx_, ty_ = -x0 / ppp, -(ph - y1 / ppp)
+    p = gs.stream(args + ["-dFIXEDMEDIA", f"-dDEVICEWIDTHPOINTS={cw:.4f}", f"-dDEVICEHEIGHTPOINTS={ch:.4f}",
+                          "-sOutputFile=-", "-c", f"<</Install {{{tx_:.4f} {ty_:.4f} translate}}>> setpagedevice "
+                          "0 0 .setfilladjust2", "-f", gs.arg_path(cur)], timeout=600)
+    try:
+        W, H, nc = _head(p)
+        a = np.frombuffer(_read(p, W * H * nc, "wycinek"), np.uint8).reshape(H, W, nc)
+    finally:
+        _close(p)
+    im = _img(a, cur)                        # profil symulacji jak w piramidzie (ta sama kopia na krzywych)
+    if im.size != (x1 - x0, y1 - y0):
+        im = im.resize((x1 - x0, y1 - y0), Image.LANCZOS)
+    n = 0
+    for tx, ty in todo:
+        path = os.path.join(out, f"L{lvl}_{tx}_{ty}.jpg")
+        if os.path.exists(path):                 # piramida zdążyła w międzyczasie
+            continue
+        l, t = tx * TILE - x0, ty * TILE - y0
+        _save(path, im.crop((l, t, min(l + TILE, im.width), min(t + TILE, im.height))))
+        n += 1
+    return n
+
+
+# ----------------------------------------------------------------------------
 # symulacja druku: CMYK (FOGRA39) → ekran
 # ----------------------------------------------------------------------------
 _tf: dict = {}
@@ -699,6 +839,20 @@ def text_as_curves(src: str, page: int) -> tuple[str, int]:
     ~1200 dpi, gdzie problemu nie ma — więc podgląd pokazuje kształt z krzywych.
     Strona bez fontów idzie bez zmian. Plik liczony raz na wersję i stronę."""
     out = f"{os.path.splitext(src)[0]}_p{page}_krzywe.pdf"
+    if os.path.exists(out):
+        return out, 0
+    # piramida i wycinek przybliżenia (gs_block) proszą o tę kopię naraz — liczy ją jeden, drugi czeka
+    with _curves_lock:
+        lk = _curves_locks.setdefault(out, threading.Lock())
+    with lk:
+        return _text_as_curves(src, page, out)
+
+
+_curves_lock = threading.Lock()
+_curves_locks: dict = {}
+
+
+def _text_as_curves(src: str, page: int, out: str) -> tuple[str, int]:
     if os.path.exists(out):
         return out, 0
     try:

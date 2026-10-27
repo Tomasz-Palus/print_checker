@@ -7,6 +7,7 @@ być prawdziwa — nie ma czego unieważniać ani nadpisywać w trakcie oglądan
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import threading
 import time
@@ -33,13 +34,16 @@ def _public(key: str, pl: dict, e: dict) -> dict:
 
 
 def request(job, vid: str, src: str, page: int, print_mm: tuple, op: bool, proof: bool, start: bool,
-            full: bool = True) -> dict:
+            full: bool = True, lazy: bool = False) -> dict:
     """Stan widoku; przy `start` — zamawia liczenie (albo je wznawia po błędzie/przerwaniu).
 
     `full=False` — sam podgląd całej strony (ov.jpg, dłuższy bok 2048 px), bez kafelków do
     przybliżania. Przybliżać można tylko w „Jakości wydruku” (Tomasz 28.09), więc poza nią pełna
-    piramida (120 ppi wydruku, dla KAŻDEJ wersji i każdej strony suwaka przed/po) liczyła się na
-    darmo — to ją pokazywał pasek „pełna jakość” przy suwakach."""
+    darmo — to ją pokazywał pasek „pełna jakość” przy suwakach.
+
+    `lazy=True` (doc 20, Tomasz 27.10 — przybliżanie wszędzie): strona, którą MuPDF rysuje tak samo jak
+    Ghostscript (server.mupdf_tiles_ok) — bez piramidy liczonej z góry: od razu podgląd całości,
+    a kafelki powstają, gdy przeglądarka o nie poprosi (`tile`)."""
     pk = (job.id, vid, page, round(print_mm[0], 2), round(print_mm[1], 2))
     pl = _plans.get(pk)
     if pl is None:
@@ -67,7 +71,8 @@ def request(job, vid: str, src: str, page: int, print_mm: tuple, op: bool, proof
             _plans[pk] = pl
     if not full:
         pl = {**pl, "levels": []}                 # render.build: bez poziomów = sam podgląd całości
-    key = key_of(vid, page, op, proof, pl["w"]) + ("" if full else "_ov")
+    lazy = lazy and full and bool(pl["levels"]) and not render.is_raster(src)
+    key = key_of(vid, page, op, proof, pl["w"]) + ("" if full else "_ov") + ("_mu" if lazy else "")
     out = os.path.join(job.dir, "view_" + key)
     with _lock:
         e = _views.get((job.id, key))
@@ -87,10 +92,101 @@ def request(job, vid: str, src: str, page: int, print_mm: tuple, op: bool, proof
                 _views.pop((jid, k2), None)
                 shutil.rmtree(os.path.join(job.dir, "view_" + k2), ignore_errors=True)
         total = 1 + (pl["levels"][0]["rows"] if pl["levels"] else 0) + max(0, len(pl["levels"]) - 1)
-        e = _views[(job.id, key)] = {"state": "queued", "done": 0, "total": total, "tok": uuid.uuid4().hex,
-                                     "seen": time.time()}
-    threading.Thread(target=_worker, args=(job, key, src, page, pl, out, op, proof, e["tok"]), daemon=True).start()
+        e = _views[(job.id, key)] = {"state": "queued", "done": 0, "total": 1 if lazy else total,
+                                     "tok": uuid.uuid4().hex, "seen": time.time()}
+        e.update(pl=pl, out=out, src=src, page=page, op=op, proof=proof)
+        if lazy:
+            e["lazy"] = True
+    target = _lazy_worker if lazy else _worker
+    threading.Thread(target=target, args=(job, key, src, page, pl, out, op, proof, e["tok"]), daemon=True).start()
     return _public(key, pl, e)
+
+
+def _lazy_worker(job, key, src, page, pl, out, op, proof, tok):
+    """Widok na żądanie: podgląd całości MuPDF-em (bez kolejki Ghostscripta). Gdy MuPDF nie daje rady —
+    zwykła piramida Ghostscripta pod tym samym kluczem."""
+    e = _views.get((job.id, key))
+    if not e or e.get("tok") != tok:
+        return
+    e["state"] = "run"
+    try:
+        r = render.build_lazy(src, page, pl, out)
+    except Exception as ex:
+        r = None
+        _log(job, key, ex)
+    with _lock:
+        e = _views.get((job.id, key))
+        if not e or e.get("tok") != tok:
+            return
+        if r:
+            e.update(state="done", done=1, cur=r[0], cpage=r[1])
+            return
+        e.update(lazy=False, state="queued", total=1 + (pl["levels"][0]["rows"] if pl["levels"] else 0)
+                 + max(0, len(pl["levels"]) - 1))
+    _worker(job, key, src, page, pl, out, op, proof, tok)
+
+
+_regions: dict = {}               # zadanie -> ostatnio zamówiony wycinek (starsze nieaktualne — widok się przesunął)
+_region_busy: set = set()
+
+
+def region(job, key: str, lvl: int, box: tuple) -> bool:
+    """Przeglądarka przybliżyła widok, którego piramida (Ghostscript) jeszcze się liczy: najpierw widoczny
+    kawałek (render.gs_block), obok piramidy. Jeden wycinek naraz na zadanie; liczy się ostatnie zamówienie."""
+    with _lock:
+        e = _views.get((job.id, key))
+        if not e or e.get("lazy") or e.get("state") == "done" or "pl" not in e or not e["pl"]["levels"] \
+                or render.is_raster(e["src"]):
+            return False
+        _regions[job.id] = (key, lvl, box, dict(e))
+        if job.id in _region_busy:
+            return True
+        _region_busy.add(job.id)
+    threading.Thread(target=_region_worker, args=(job,), daemon=True).start()
+    return True
+
+
+def _region_worker(job) -> None:
+    while True:
+        with _lock:
+            want = _regions.pop(job.id, None)
+            if want is None:
+                _region_busy.discard(job.id)
+                return
+        key, lvl, box, e = want
+        try:
+            t0 = time.time()
+            n = render.gs_block(e["src"], e["page"], e["pl"], lvl, box, e["op"], e["proof"], e["out"])
+            print(f"[adChecker] wycinek podglądu: {n} kafli (poziom {lvl}) w {time.time() - t0:.1f} s")
+        except Exception as ex:
+            _log(job, key + " (wycinek)", ex)
+
+
+def tile(job, key: str, name: str) -> str | None:
+    """Ścieżka kafelka: gotowy z dysku albo — w widoku na żądanie — policzony teraz (MuPDF)."""
+    out = os.path.join(job.dir, "view_" + key)
+    p = os.path.join(out, name)
+    if os.path.exists(p):
+        return p
+    # widok na żądanie dopiero startuje (podgląd całości MuPDF-em, ułamek sekundy) — chwilę czekamy,
+    # zamiast odsyłać „jeszcze nie ma” (przeglądarka ponawia dopiero po 1,5 s)
+    for _ in range(100):
+        with _lock:
+            e = _views.get((job.id, key))
+            if not e or not e.get("lazy") or e.get("state") not in ("queued", "run"):
+                break
+        time.sleep(0.05)
+    with _lock:
+        e = _views.get((job.id, key))
+        e = dict(e) if e and e.get("lazy") and e.get("state") == "done" else None
+    m = re.fullmatch(r"L(\d+)_(\d+)_(\d+)\.jpg", name)
+    if not e or not m:
+        return None
+    try:
+        return render.lazy_tile(e["cur"], e["cpage"], e["pl"], int(m[1]), int(m[2]), int(m[3]), out, e["cur"])
+    except Exception as ex:
+        _log(job, key, ex)
+        return None
 
 
 def _worker(job, key, src, page, pl, out, op, proof, tok):
@@ -121,6 +217,12 @@ def _worker(job, key, src, page, pl, out, op, proof, tok):
             if band is not None:
                 e["done"] = max(e["done"], 1 + band)
 
+    # Przybliżenie poza „Jakością” zamawia piramidę i zaraz potem widoczny wycinek (region) — wycinek ma
+    # pierwszeństwo: piramida rusza, gdy go nie ma (na 2 rdzeniach oba naraz liczyły się 3× dłużej).
+    time.sleep(2.0)
+    t0 = time.time()
+    while job.id in _region_busy and time.time() - t0 < 120 and not stop():
+        time.sleep(0.2)
     with _gs_lock:
         if not stop():
             set_(state="run")
@@ -168,6 +270,7 @@ def drop(job, vids: set | None = None) -> None:
             _plans.pop(pk, None)
     if not os.path.isdir(job.dir):
         return
+    render.forget_docs(job.dir)                   # kafelki na żądanie trzymają pliki otwarte
     for f in os.listdir(job.dir):
         if f.startswith("view_") and (vids is None or f[5:].split("_p")[0] in vids):
             shutil.rmtree(os.path.join(job.dir, f), ignore_errors=True)

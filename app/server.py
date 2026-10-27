@@ -724,6 +724,31 @@ def api_step_undo(jid, name):
 # ----------------------------------------------------------------------------
 # podgląd w pełnej jakości (piramida)
 # ----------------------------------------------------------------------------
+# Miękkie maski (maska luminancji z gradientem, obraz z maską) MuPDF liczy inaczej niż Ghostscript
+# i Acrobat — na adWall 400 dorysowywał ukośne „kliny” na pasach kurtyny (doc 20, Tomasz 27.10).
+MUPDF_TILES_NO = ("maska", "obraz z maską")
+
+
+def mupdf_tiles_ok(job, v, page: int, op: bool, proof: bool) -> bool:
+    """Czy kafelki tej strony może rysować MuPDF (na żądanie, setne części sekundy) zamiast piramidy
+    Ghostscripta — tylko tam, gdzie wynik jest taki sam (doc 20): treść CMYK / szarość / spot,
+    bez miękkich masek, bez symulacji overprintu; na ekranie bez przezroczystości mieszanej w RGB."""
+    if op or job.info.get("kind") == "raster":
+        return False
+    try:
+        a = job.analysis_of(v, page)
+    except Exception:
+        return False
+    if not a or a.get("error") or a.get("partial"):
+        return False
+    fam = (a.get("color") or {}).get("families") or {}
+    if any("RGB" in f or f in ("Lab", "Unknown", "Indexed") for f in fam):
+        return False
+    if any(k.startswith(MUPDF_TILES_NO) for k in (a.get("transparency") or {})):
+        return False
+    return proof or not (a.get("blend_space_missing") or a.get("group_rgb"))
+
+
 @app.route("/api/jobs/<jid>/view", methods=["GET", "POST"])
 def api_view(jid):
     """GET = stan, POST = policz (jeśli trzeba). `w_mm`/`h_mm` = wymiar NA WYDRUKU —
@@ -736,12 +761,33 @@ def api_view(jid):
     # NaN / nieskończoność / ≤ 0 — 400 (przegląd 09.10, B22); 1e9 mm podgląd i tak przycina (MAX_MPX)
     mm = (pos_float(request.args.get("w_mm"), "szerokość"), pos_float(request.args.get("h_mm"), "wysokość"))
     op, pr = request.args.get("op") == "1", request.args.get("pr") == "1"
+    # „Krzywe” nie zmieniają wyglądu (podgląd i tak rysuje tekst z krzywych — render.text_as_curves):
+    # widok poprzedniej wersji, bez liczenia od nowa (doc 20, krok 3)
+    while v.step == "outline":
+        i = job.versions.index(v)
+        if i == 0:
+            break
+        v = job.versions[i - 1]
+    full = request.args.get("full", "1") == "1"
     try:
+        lazy = full and mupdf_tiles_ok(job, v, page, op, pr)
         # wielostronicowy obraz: podgląd wybranej strony, nie zawsze pierwszej (A8)
         return jsonify(views.request(job, v.id, job.page_path(v, page), page, mm, op, pr, request.method == "POST",
-                                     full=request.args.get("full", "1") == "1"))
+                                     full=full, lazy=lazy))
     except Exception as e:
         return jsonify({"state": "err", "err": f"{type(e).__name__}: {e}"})
+
+
+@app.post("/api/jobs/<jid>/view/<key>/region")
+def api_view_region(jid, key):
+    """Widoczny kawałek przybliżenia, zanim policzy się cała piramida (doc 20): poziom i prostokąt kafli."""
+    job = job_or_404(jid)
+    b = body_dict()
+    try:
+        lvl = int(b.get("lvl")); box = tuple(int(b[k]) for k in ("x0", "y0", "x1", "y1"))
+    except (TypeError, ValueError, KeyError):
+        return err("Zły wycinek.")
+    return jsonify({"ok": views.region(job, key, lvl, box)})
 
 
 @app.post("/api/jobs/<jid>/view/<key>/cancel")
@@ -757,8 +803,8 @@ def api_tile(jid, key, name):
     job = job_or_404(jid)
     if not re.fullmatch(r"[A-Za-z0-9_]+", key) or not re.fullmatch(r"(ov|ov_q|L\d+_\d+_\d+)\.jpg", name):
         return err("Zły adres kafelka.")
-    p = os.path.join(job.dir, "view_" + key, name)
-    if not os.path.exists(p):
+    p = views.tile(job, key, name)               # widok na żądanie: kafel liczony teraz (MuPDF)
+    if not p:
         return err("Jeszcze nie policzony.", 404)
     return send_file(p, mimetype="image/jpeg", max_age=86400)
 

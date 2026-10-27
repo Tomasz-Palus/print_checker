@@ -1353,3 +1353,6 @@ Numery jak w `18_przeglad_kodu.md`.
   20 MB zdjęć z maskami): zanim Ghostscript odda pierwszy wiersz, wczytuje cały projekt — przy takim
   wydruku (ok. 200 Mpx, z nadpróbkowaniem 4× tyle) to minuty. Wtedy pasek pulsuje, a opis liczy czas
   („Ghostscript czyta projekt… 1:25 — przy dużym projekcie to może potrwać kilka minut”).
+- Przybliżanie podglądu we wszystkich rozdziałach (Tomasz 27.10) — opis i pomiary w
+  `20_przyblizanie_kafelki.md` (kafle MuPDF na żądanie dla stron bez miękkich masek, wycinek Ghostscripta
+  przy przybliżeniu dla pozostałych).
