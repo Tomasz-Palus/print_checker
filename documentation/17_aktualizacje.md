@@ -1342,3 +1342,10 @@ Numery jak w `18_przeglad_kodu.md`.
 - „Obraz nie ma zapisanego DPI”, choć Windows we „Właściwościach” pokazuje 96 dpi: w JFIF pliku
   jednostka gęstości = 0 (same proporcje pikseli, bez DPI), a 96 dpi to wartość zastępcza Windowsa.
   Program działa dobrze — dopisana o tym uwaga w rozdziale „Wymiar wydruku”.
+- Ramki w kolorach wytycznych, które nie pasują do szablonu produktu („do obejrzenia”), można teraz
+  usunąć (Tomasz 27.10, Skolae na adWall Vario Prosta Light 300 — cyjanowa ramka przy krawędzi
+  i czerwona wcięta). Przycisk „Usuń te ramki” obok „Zostaw jak jest”: `step_frames` z `foreign: true`
+  wycina dokładnie ramki policzone jako obce (`frames.find` → `foreign_targets`, kształty w kolorach
+  wytycznych przy krawędzi strony), napisy i reszta projektu zostają. Tylko gdy szablonu produktu
+  w pliku nie znaleziono; suwak przed/po i „Cofnij” jak przy szablonie. Sprawdzone: obie ramki
+  usunięte, tło i element projektu nietknięte; bez kliknięcia — jak dawniej.

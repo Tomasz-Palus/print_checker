@@ -49,10 +49,18 @@ def step_frames(src, dst, p, job) -> dict:
     page = int(p.get("page", 0))
     mm = job.original.pages_mm[page]
     r = frames.find(src, page, tuple(mm), p.get("gl_pdf"), p.get("gl_page"))
+    els = lambda n: f"{n} {'element' if n == 1 else 'elementy' if 1 < n % 10 < 5 and not 11 < n % 100 < 15 else 'elementów'}"
+    if not r["found"] and p.get("foreign"):
+        # ramki w kolorach wytycznych, które nie pasują do szablonu tego produktu (inna wersja szablonu,
+        # inny produkt) — usuwane tylko na wyraźne kliknięcie; suwak przed/po i „Cofnij” jak zwykle
+        if not r["foreign_targets"]:
+            raise ValueError("W pliku nie ma ramek w kolorach wytycznych — nie ma czego usuwać.")
+        n = frames.remove(src, dst, page, r["foreign_targets"])
+        return {"text": f"usunięte ramki w kolorach wytycznych, niepasujące do szablonu produktu ({els(n)})"}
     if not r["found"]:
         raise ValueError("W pliku nie ma szablonu z wytycznych — nie ma czego usuwać.")
     n = frames.remove(src, dst, page, r["found"])
-    return {"text": f"usunięty szablon z wytycznych ({n} {'element' if n == 1 else 'elementy' if n < 5 else 'elementów'})"}
+    return {"text": f"usunięty szablon z wytycznych ({els(n)})"}
 
 
 # ----------------------------------------------------------------------------

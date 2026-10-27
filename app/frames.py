@@ -364,7 +364,9 @@ def find(path: str, page_index: int, page_mm: tuple, gl_pdf: str | None, gl_page
     """Czy w pliku został szablon z wytycznych. Zwraca:
         found   — obiekty do usunięcia (gdy szablon pasuje),
         match   — opis dopasowania,
-        foreign — liczba ramek w kolorach wytycznych, które NIE układają się w ten szablon."""
+        foreign — liczba ramek w kolorach wytycznych, które NIE układają się w ten szablon,
+        foreign_targets — te ramki (do usunięcia na życzenie — Tomasz 27.10: inna wersja szablonu,
+                  inny produkt; dokładnie te kształty, napisy zostają)."""
     mine, mine_txt = shapes(path, page_index, page_mm)
     tpl, tpl_txt = [], []
     if gl_pdf and gl_page is not None and os.path.exists(gl_pdf):
@@ -385,7 +387,7 @@ def find(path: str, page_index: int, page_mm: tuple, gl_pdf: str | None, gl_page
     foreign = [z for z in mine if color_class(z) is not None and _edge_frame(z, *page_mm)
                and ((tuple(z["owner"]) if z.get("owner") else None, z["index"]) not in ids)]
     m.pop("targets", None)
-    return {"found": found, "match": m, "foreign": len(foreign)}
+    return {"found": found, "match": m, "foreign": len(foreign), "foreign_targets": foreign}
 
 
 def remove(src: str, dst: str, page_index: int, targets: list) -> int:

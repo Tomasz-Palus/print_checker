@@ -507,6 +507,7 @@ def api_step(jid):
         params["gl_pdf"] = gl_pdf(params.get("gl", ""))
         glp = params.get("glpage")
         params["gl_page"] = int(glp) if isinstance(glp, int) and glp >= 0 else None
+        params["foreign"] = params.get("foreign") is True
     try:
         job.apply(name, params)
     except ValueError as e:
