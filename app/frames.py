@@ -19,7 +19,11 @@ import pikepdf
 MM = 25.4 / 72.0
 
 # Kolory, którymi Adsystem rysuje wytyczne (100 % cyanu oraz 0/94,7/91,2/0), na ekranie:
-TEMPLATE_COLORS = [(0.0, 1.0, 1.0), (1.0, 0.05, 0.09)]
+# Od 27.10 (Tomasz: „adChecker nie usuwa zielonych linii z szablonu”, adTent EXPRESS) także zieleń
+# C65 M0 Y100 K0 i żółć obszaru technologicznego C9,5 M0 Y95 K0 (adTent Air Premium). Szablon i tak
+# musi się zgadzać CAŁY (kształt i położenie wszystkich linii) — zielony czy żółty element projektu,
+# który nie leży dokładnie na linii szablonu, zostaje.
+TEMPLATE_COLORS = [(0.0, 1.0, 1.0), (1.0, 0.05, 0.09), (0.35, 1.0, 0.0), (0.905, 1.0, 0.049)]
 COLOR_TOL = 0.10          # różnica składowej RGB (0–1), żeby uznać kolor za ten sam
 MATCH_TOL = 0.006         # odchyłka krawędzi: 0,6 % większego boku szablonu (12 mm na 2 m)
 MATCH_MIN = 0.6           # jaka część szablonu (ważona obwodem linii) musi się znaleźć w pliku
@@ -245,7 +249,7 @@ def _same_color(a, b) -> bool:
 
 
 def color_class(z: dict):
-    """Który kolor wytycznych (0 = cyjan, 1 = czerwień) — albo None."""
+    """Który kolor wytycznych (0 = cyjan, 1 = czerwień, 2 = zieleń, 3 = żółć) — albo None."""
     for i, c in enumerate(TEMPLATE_COLORS):
         if _same_color(z.get("stroke"), c) or _same_color(z.get("fill"), c):
             return i

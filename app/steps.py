@@ -1143,7 +1143,9 @@ def step_outline(src, dst, p, job) -> dict:
 # ----------------------------------------------------------------------------
 # spłaszczenie
 # ----------------------------------------------------------------------------
-FLATTEN_MAX_MPX = 400      # sufit; adWall Vario Prosta 600 w 1:10 przy 120 ppi to 319 Mpx (8 s)
+# Bez sufitu megapikseli (Tomasz 27.10: „musi być zawsze minimum 120 ppi”). Wcześniej 400 Mpx:
+# 5×5 m wychodziło 100 ppi, baner 20 m — 114 ppi. Render i zapis idą pasami, a obraz trafia do PDF-a
+# prosto z pliku (_flate_page_pdf) — pamięć nie rośnie z wielkością strony.
 # Zapis spłaszczenia BEZSTRATNY (Tomasz 29.09): ZIP (Flate) z predyktorem PNG „Sub” — piksel w piksel
 # to, co wyrenderował Ghostscript. Wcześniej JPEG q90: na ostrej krawędzi (biały napis na granacie)
 # kwadraciki 8×8 i wcięcia, w pasie ±4 px wokół krawędzi do 19/255 (1815, CAD/CAM). JPEG 100 też
@@ -1168,18 +1170,15 @@ def flatten_plan(w_pt: float, h_pt: float, k: float) -> dict:
     k = max(0.01, float(k))
     ppi = flatten_ppi_for(max(w_pt, h_pt) * MM * k)
     dpi = ppi * k
-    mpx = (w_pt / 72 * dpi) * (h_pt / 72 * dpi) / 1e6
-    cut = mpx > FLATTEN_MAX_MPX
-    if cut:
-        dpi *= (FLATTEN_MAX_MPX / mpx) ** 0.5
-    return {"ppi": round(dpi / k), "want_ppi": ppi, "dpi": dpi, "cut": cut,
+    return {"ppi": round(dpi / k), "want_ppi": ppi, "dpi": dpi, "cut": False,
             "px": [round(w_pt / 72 * dpi), round(h_pt / 72 * dpi)]}
 
 
 FLATTEN_SS = 2              # nadpróbkowanie spłaszczenia (zawsze; jak podgląd)
 # Gdy wygładzanie Ghostscripta jest wyłączone (overprint na dużej stronie — błąd gs, gs.aa_args),
 # 2× daje tylko 4 próbki na piksel: krawędzie wychodzą „szarpane” (Tomasz 29.09). Wtedy 4× = 16
-# próbek, tyle co AlphaBits=4 — o ile render się mieści w FLATTEN_SS_MAX_MPX (dalej 3×).
+# próbek, tyle co AlphaBits=4 — o ile render się mieści w FLATTEN_SS_MAX_MPX (dalej 3×, a dla bardzo
+# dużych stron 2× — czas renderu rośnie z kwadratem nadpróbkowania).
 FLATTEN_SS_NOAA = 4
 FLATTEN_SS_MAX_MPX = 4000
 FLATTEN_TIMEOUT_BASE = 600          # s — limit czasu spłaszczenia = podstawa + s na Mpx renderu
@@ -1245,6 +1244,43 @@ def _flatten_supersampled(base: list, dpi: float, ss: int, src: str, out_path: s
         raise ValueError(f"Ghostscript nie dał rady spłaszczyć strony. Komunikat: {e}") from e
 
 
+def _flate_page_pdf(zpath: str, out: str, px: tuple, w_pt: float, h_pt: float, icc: bytes) -> None:
+    """Jednostronicowy PDF z obrazem CMYK (Flate + predyktor PNG, profil ICC) — dane obrazu kopiowane
+    z pliku kawałkami, więc obraz dowolnej wielkości nie trafia do pamięci w całości."""
+    import shutil
+    n = os.path.getsize(zpath)
+    content = f"q {w_pt:.3f} 0 0 {h_pt:.3f} 0 0 cm /Im0 Do Q".encode()
+    objs_head = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {w_pt:.4f} {h_pt:.4f}] "
+        f"/Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>".encode(),
+    ]
+    offs = []
+    with open(out, "wb") as f:
+        f.write(b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n")
+        for i, body in enumerate(objs_head, 1):
+            offs.append(f.tell())
+            f.write(f"{i} 0 obj\n".encode() + body + b"\nendobj\n")
+        offs.append(f.tell())
+        f.write(f"4 0 obj\n<< /Length {len(content)} >>\nstream\n".encode() + content + b"\nendstream\nendobj\n")
+        offs.append(f.tell())
+        f.write((f"5 0 obj\n<< /Type /XObject /Subtype /Image /Width {px[0]} /Height {px[1]} /BitsPerComponent 8 "
+                 f"/ColorSpace [/ICCBased 6 0 R] /Filter /FlateDecode "
+                 f"/DecodeParms << /Predictor 15 /Colors 4 /BitsPerComponent 8 /Columns {px[0]} >> "
+                 f"/Length {n} >>\nstream\n").encode())
+        with open(zpath, "rb") as z:
+            shutil.copyfileobj(z, f, 16 * 1024 * 1024)
+        f.write(b"\nendstream\nendobj\n")
+        offs.append(f.tell())
+        f.write(f"6 0 obj\n<< /N 4 /Length {len(icc)} >>\nstream\n".encode() + icc + b"\nendstream\nendobj\n")
+        x = f.tell()
+        f.write(f"xref\n0 {len(offs) + 1}\n0000000000 65535 f \n".encode())
+        for o in offs:
+            f.write(f"{o:010d} 00000 n \n".encode())
+        f.write(f"trailer\n<< /Size {len(offs) + 1} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n".encode())
+
+
 def step_flatten(src, dst, p, job) -> dict:
     """Cała strona zamieniona na JEDEN obraz CMYK — „spłaszczenie" jak w Photoshopie.
 
@@ -1297,7 +1333,7 @@ def step_flatten(src, dst, p, job) -> dict:
     aa = gs.aa_args(op, plan["px"][0] * ss, plan["px"][1] * ss, 4)
     if not aa:                                   # bez wygładzania gs — więcej próbek na piksel
         mpx = plan["px"][0] * plan["px"][1] / 1e6
-        ss = FLATTEN_SS_NOAA if mpx * FLATTEN_SS_NOAA ** 2 <= FLATTEN_SS_MAX_MPX else 3
+        ss = next((s_ for s_ in (FLATTEN_SS_NOAA, 3) if mpx * s_ ** 2 <= FLATTEN_SS_MAX_MPX), FLATTEN_SS)
         aa = gs.aa_args(op, plan["px"][0] * ss, plan["px"][1] * ss, 4)
     base = ["-dSAFER", "--permit-file-read=" + icc, *gs.font_path_args(),
             "-sOutputICCProfile=" + icc, "-sDefaultCMYKProfile=" + icc, "-dUseCropBox",
@@ -1315,32 +1351,19 @@ def step_flatten(src, dst, p, job) -> dict:
             raise ValueError("Ghostscript nie dał rady spłaszczyć strony. Komunikat: " + err)
         subs = gs.substituted(log, finfo.get("niewidoczne", []))
         warn = _subst_report(src, page, subs)       # jak przy krzywych: ostrzeżenie zamiast odmowy
-        with open(zpath, "rb") as fh:
-            raw = fh.read()
         px = (pw_, ph_)
-        with pikepdf.open(src) as pdf:
-            ic = pdf.make_stream(data)
-            ic["/N"] = 4
-            img = pikepdf.Stream(pdf, b"")
-            # bezstratnie: dane już skompresowane (Flate + predyktor PNG) — wstawiamy bez przeliczania
-            img.write(raw, filter=pikepdf.Name("/FlateDecode"),
-                      decode_parms=pikepdf.Dictionary(Predictor=15, Colors=4, BitsPerComponent=8, Columns=px[0]))
-            img["/Type"], img["/Subtype"] = pikepdf.Name("/XObject"), pikepdf.Name("/Image")
-            img["/Width"], img["/Height"], img["/BitsPerComponent"] = px[0], px[1], 8
-            img["/ColorSpace"] = pikepdf.Array([pikepdf.Name("/ICCBased"), pdf.make_indirect(ic)])
-            new = pikepdf.Dictionary(
-                Type=pikepdf.Name("/Page"), MediaBox=[0, 0, w_pt, h_pt],
-                Resources=pikepdf.Dictionary(XObject=pikepdf.Dictionary(Im0=img)),
-                Contents=pdf.make_stream(f"q {w_pt:.3f} 0 0 {h_pt:.3f} 0 0 cm /Im0 Do Q".encode()))
-            pdf.pages[page] = pikepdf.Page(pdf.make_indirect(new))
+        # obraz NIE jest wczytywany do pamięci: osobny jednostronicowy PDF pisany strumieniem z pliku,
+        # a qpdf kopiuje dane obcej strony dopiero przy zapisie (Tomasz 27.10 — bez sufitu Mpx)
+        ppath = dst + ".img.pdf"
+        _flate_page_pdf(zpath, ppath, px, w_pt, h_pt, data)
+        with pikepdf.open(src) as pdf, pikepdf.open(ppath) as one:
+            pdf.pages[page] = one.pages[0]
             pdf.save(dst)
     finally:
         _rm(zpath)
+        _rm(dst + ".img.pdf")
     text = (f"strona spłaszczona do jednego obrazu CMYK {px[0]} × {px[1]} px "
             f"({plan['ppi']} ppi na wydruku), profil {name}")
-    if plan["cut"]:
-        text += (f" — strona jest tak duża, że zamiast {plan['want_ppi']} ppi wyszło {plan['ppi']} ppi "
-                 f"(sufit {FLATTEN_MAX_MPX} megapikseli)")
     if warn:
         text += ("; UWAGA: " + ", ".join(w["name"] for w in warn[:4])
                  + " nie było w pliku ani nigdzie indziej — te litery mają kształt kroju zastępczego")

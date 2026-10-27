@@ -291,8 +291,7 @@ export function flattenPlan() {
   let dpi = ppi * k;
   const px = (mm) => mm / 25.4 * dpi;
   const mpx = px(p.w) * px(p.h) / 1e6;
-  const cut = mpx > 400;
-  if (cut) dpi *= Math.sqrt(400 / mpx);
+  const cut = false;           // bez sufitu megapikseli — zawsze 120 ppi (Tomasz 27.10)
   return { ppi: Math.round(dpi / k), want: ppi, cut, px: [Math.round(p.w / 25.4 * dpi), Math.round(p.h / 25.4 * dpi)] };
 }
 

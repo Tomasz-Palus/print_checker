@@ -1279,3 +1279,18 @@ Numery jak w `18_przeglad_kodu.md`.
   `Job.page_path`, `Job.analysis_of`, `guidelines.PARSER_VERSION` = 6 (wytyczne przeliczą się same).
 - Pułapka na przyszłość: MuPDF podaje wymiar strony obrazu przeliczony z DPI (przy DPI ≥ 72); testy
   rastrów zawsze w 100, 150 i 300 dpi oraz TIFF bez rozdzielczości.
+
+## 0.6.8 — spłaszczenie zawsze 120 ppi, bez sufitu megapikseli (Tomasz 27.10)
+
+- Tomasz: „musi być zawsze minimum 120 ppi”. Usunięty sufit 400 Mpx (`FLATTEN_MAX_MPX`) — wcześniej
+  5×5 m wychodziło 100 ppi, baner 20 m 114 ppi (`steps.flatten_plan`, `state.js flattenPlan`).
+- Żeby pamięć nie rosła z wielkością strony: render i kompresja już szły pasami, a teraz także
+  wstawienie obrazu do PDF-a — `steps._flate_page_pdf` pisze jednostronicowy PDF strumieniem z pliku,
+  a qpdf kopiuje dane strony dopiero przy zapisie (wcześniej cały skompresowany obraz był w pamięci,
+  przy dużych zdjęciach kilka GB).
+- Bez wygładzania Ghostscripta (overprint na dużej stronie) nadpróbkowanie 4× → 3× → 2×, zależnie od
+  wielkości renderu (`FLATTEN_SS_MAX_MPX`).
+- Sprawdzone: strona 5000×5000 mm → 23622 × 23622 px = 120 ppi, 114 s na 2 rdzeniach, szczytowo ok.
+  300 MB RAM (gs + Python); mała strona — wynik bajt w bajt jak przed zmianą (różnica renderu 0).
+- „Multiply” bez zadeklarowanej przestrzeni mieszania (Ghostscript jaśniej niż Acrobat/MuPDF) —
+  na razie bez zmian, decyzja odłożona (Tomasz 27.10).
