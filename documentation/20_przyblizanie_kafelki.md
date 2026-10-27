@@ -64,3 +64,17 @@ Po „Zamień na CMYK” (wymagane do druku) praktycznie każda strona trafia do
 `py narzedzia\porownaj_silniki.py "…\przykladowe projekty"` — czy reguła trzyma się na prawdziwych
 projektach (duże zdjęcia, maski, pliki z Illustratora/Corela) i ile trwa kafel Ghostscripta na ciężkich
 plikach (Ghostscript czyta przy każdym kafelku całą stronę).
+
+### Wynik na prawdziwych projektach Tomasza (27.10, 3 pliki)
+
+| plik | co ma | wynik |
+|---|---|---|
+| Volvo adTent (wektor, sam DeviceCMYK) | linie szablonu, tekst | kolory identyczne; różnice tylko na krawędziach cienkich linii (wygładzanie) — p99 ~10 to włosowe linie, wizualnie to samo |
+| Skolae adWall 300 | gradienty (`sh`), maski miękkie, Multiply | ukośny pas tła minimalnie inny (p99 4–10) |
+| konferencja adWall 400 (21 MB zdjęć CMYK z SMask) | maski miękkie z gradientem, Multiply, krycie | **różny kształt**: MuPDF rysuje ostre ukośne „kliny” na pionowych pasach kurtyny, Ghostscript pasy z lekkim skosem, Poppler (trzeci silnik, do porównania) prawie gładko |
+
+- Czas kafla na adWall 400: Ghostscript 7–17 s, MuPDF 1,7–4 s (skrypt otwiera plik od nowa przy każdym kaflu).
+- **Wniosek:** reguła z korpusu testowego nie wystarcza. Maski miękkie (gradientowe maski luminancji) każdy
+  silnik liczy inaczej — MuPDF dla stron z maskami odpada. Który wynik jest prawdziwy (Acrobat / RIP
+  drukarni), musi sprawdzić Tomasz w Acrobacie: ma to znaczenie także dla druku, bo spłaszczenie liczy
+  Ghostscript.
