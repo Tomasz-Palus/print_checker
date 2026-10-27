@@ -1356,3 +1356,18 @@ Numery jak w `18_przeglad_kodu.md`.
 - Przybliżanie podglądu we wszystkich rozdziałach (Tomasz 27.10) — opis i pomiary w
   `20_przyblizanie_kafelki.md` (kafle MuPDF na żądanie dla stron bez miękkich masek, wycinek Ghostscripta
   przy przybliżeniu dla pozostałych).
+
+## 0.6.11 — obraz bez DPI liczony jako 120 ppi; przesuwany panel lupek (Tomasz 27.10)
+
+- Tomasz (adWall L 200, JPG bez DPI): „skoro mamy wybrany produkt, to powinien działać podgląd szablonu —
+  skoro nie możemy określić wymiaru wydruku, niech liczy jako 120 ppi, bo tyle potrzebujemy do druku”.
+  - `render.inspect`: obraz bez zapisanego DPI dostaje wymiar z umownych 120 ppi (`ASSUMED_PPI`, znacznik
+    `dpi_assumed` w stronie). Działa podgląd szablonu, porównanie z wytycznymi i „Dopasuj wymiar”
+    (`steps._raster_resize` przyjmuje te same 120 ppi; wynik ma zapisane DPI).
+  - Wymiar wydruku: dopisek „bez DPI, przyjęte 120 ppi” i wyjaśnienie o 96 dpi Windowsa.
+  - Sprawdzone: JPG 3000 × 3000 px bez DPI → 635 × 635 mm; dopasowanie do 1995 × 2000 mm → 9425 × 9449 px,
+    120 dpi zapisane w pliku.
+  - Ograniczenie: przy produkcie w skali 1:10 umowne 120 ppi dotyczy wymiaru pliku (obrazy w 1:10 to rzadkość).
+- Panel lupek nad podglądem da się przesuwać (Tomasz: „to menu dajmy floating, żeby dało się je przesuwać”):
+  uchwyt ⋮⋮ albo puste miejsce panelu; położenie zapamiętane w przeglądarce (ułamek podglądu), nie wychodzi
+  poza podgląd; dwuklik w uchwyt — z powrotem na środek.

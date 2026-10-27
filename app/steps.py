@@ -368,10 +368,9 @@ def _raster_resize(src: str, dst: str, p: dict) -> dict:
     im.seek(0)
     info = dict(im.info)
     import pdfutil
-    d0 = pdfutil.raster_dpi(im)
-    if not d0:
-        raise ValueError("Obraz nie ma zapisanej rozdzielczości (DPI), więc nie wiadomo, ile ma milimetrów — "
-                         "ustaw ją w programie graficznym.")
+    import render
+    # bez zapisanego DPI — umowne 120 ppi, jak przy wgraniu (render.inspect, Tomasz 27.10); wynik dostaje DPI
+    d0 = pdfutil.raster_dpi(im) or (render.ASSUMED_PPI, render.ASSUMED_PPI)
     d0 = (float(d0[0]), float(d0[1]))
     jpg = os.path.splitext(src)[1].lower() in (".jpg", ".jpeg")
     im = _gray8(im)

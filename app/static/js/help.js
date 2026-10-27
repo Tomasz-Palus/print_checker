@@ -57,7 +57,7 @@ export const HELP = {
     <b>Obraz (JPG, PNG, TIFF)</b> dopasowuje się tak samo i zostaje obrazem. Przy 100 % piksele się nie
     zmieniają — obraz jest tylko przycinany albo dostawiany. Przy innej wielkości zmienia się rozdzielczość
     (DPI), a piksele są przeliczane tylko minimalnie. JPG zapisuje się na nowo w jakości 95, reszta jako
-    TIFF bez strat. Obraz bez zapisanego DPI nie ma wymiaru w mm — tego program nie dopasuje.`,
+    TIFF bez strat. Obraz bez zapisanego DPI program liczy jako 120 ppi (tyle potrzeba do druku).`,
   print: `Od tego rozdziału <b>podgląd pokazuje wydruk</b>, nie ekran: kolory tak, jak przeliczy je
     drukarnia (profilem zapisanym w pliku, np. ISO Coated v2, a gdy plik go nie ma — Coated FOGRA39;
     intencja relatywna kolorymetryczna), i overprint, tak jak zrobi to maszyna. Zdjęcie, które już

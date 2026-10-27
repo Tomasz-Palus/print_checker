@@ -288,8 +288,14 @@ def inspect(path: str, original_name: str) -> dict:
                 wpx, hpx, dpi = frames[i] if i < len(frames) else (int(round(r.width)), int(round(r.height)), None)
                 p["width_px"], p["height_px"] = wpx, hpx
                 p["dpi"] = [round(dpi[0], 1), round(dpi[1], 1)] if dpi else None
-                p["width_mm"] = round(wpx / dpi[0] * 25.4, 2) if dpi else None
-                p["height_mm"] = round(hpx / dpi[1] * 25.4, 2) if dpi else None
+                # Bez zapisanego DPI wymiar w mm był nieznany: ani podglądu szablonu, ani porównania z wytycznymi,
+                # ani „Dopasuj wymiar” (Tomasz 27.10: „niech liczy jako 120 ppi, bo tyle potrzebujemy do druku”).
+                # Umowne 120 ppi; plik dostaje prawdziwe DPI przy dopasowaniu albo przy pobraniu.
+                if not dpi:
+                    p["dpi_assumed"] = ASSUMED_PPI
+                d = dpi or (ASSUMED_PPI, ASSUMED_PPI)
+                p["width_mm"] = round(wpx / d[0] * 25.4, 2)
+                p["height_mm"] = round(hpx / d[1] * 25.4, 2)
             pages.append(p)
         return {"name": original_name, "kind": "raster" if raster else "pdf",
                 "size_bytes": os.path.getsize(path), "page_count": len(pages), "pages": pages}
@@ -300,6 +306,7 @@ def inspect(path: str, original_name: str) -> dict:
 # ----------------------------------------------------------------------------
 # miniatury i wycinki (MuPDF; Ghostscript, gdy MuPDF odmawia)
 # ----------------------------------------------------------------------------
+ASSUMED_PPI = 120                    # obraz bez zapisanego DPI — tyle, ile potrzeba do druku (Tomasz 27.10)
 MUPDF_IMAGE_LIMIT = 400_000_000      # MuPDF odmawia obrazów > ~0,5 Gpx („Overly large image")
 # PyMuPDF nie jest bezpieczny wątkowo, a ostrzeżenia MuPDF (mupdf_warnings) są globalne — ocena
 # jakości w tle i trasy serwera wołały go naraz (przegląd 09.10, B24). Każde użycie MuPDF z wątku
