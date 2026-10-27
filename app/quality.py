@@ -35,6 +35,7 @@ def request(job, page: int, k: float, block: int, print_mm: tuple | None) -> dic
     v = version_for(job)
     kind = "raster" if job.info.get("kind") == "raster" else "pdf"
     images = page_mm = None
+    partial = {"partial": False, "partial_reason": ""}
     if kind == "pdf":
         cache = job.analysis.setdefault(v.id, {})
         if page not in cache:
@@ -42,8 +43,11 @@ def request(job, page: int, k: float, block: int, print_mm: tuple | None) -> dic
             job.images.setdefault(v.id, {})[page] = res.pop("_images", None)
             cache[page] = res
         a = cache[page]
+        partial = {"partial": bool(a.get("partial")), "partial_reason": a.get("partial_reason") or ""}
         if not (a.get("resolution") or {}).get("has_images"):
-            return {"status": "done", "version": v.id, "verdict": "vector", "areas": [], "groups": []}
+            # analiza niepełna: „sam wektor” byłby zgadywaniem — „partial” (przegląd 09.10, B13)
+            return {"status": "done", "version": v.id, "verdict": "partial" if partial["partial"] else "vector",
+                    "areas": [], "groups": [], "few": 0, "look": 0, "jpeg": 0, **partial}
         images = job.images.get(v.id, {}).get(page)
         sizes = a.get("resolution", {}).get("page_sizes_mm") or []
         page_mm = tuple(sizes[page]) if page < len(sizes) else None
@@ -55,6 +59,10 @@ def request(job, page: int, k: float, block: int, print_mm: tuple | None) -> dic
            "error": st.get("error")}
     if st["status"] == "done" and st.get("result"):
         out.update(verdict_of(st["result"], kind, print_mm))
+        if kind == "pdf" and partial["partial"]:
+            out.update(partial)
+            if out.get("verdict") == "ok":       # nie wszystko przejrzane — nie mówimy „w porządku”
+                out["verdict"] = "partial"
     return out
 
 

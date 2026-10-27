@@ -16,6 +16,7 @@ import json
 import os
 import threading
 import time
+import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import guidelines
@@ -65,11 +66,17 @@ def load() -> dict:
 
 def _save() -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
-    tmp = INDEX_PATH + ".tmp"
+    # własny plik tymczasowy i podmiana pod blokadą — wspólny „.tmp” przy dwóch zapisach naraz
+    # mógł podmienić plik w trakcie pisania (przegląd 09.10, B21)
+    tmp = f"{INDEX_PATH}.{uuid.uuid4().hex[:8]}.tmp"
     with _lock:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(_index, f, ensure_ascii=False)
-    os.replace(tmp, INDEX_PATH)
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(_index, f, ensure_ascii=False)
+            os.replace(tmp, INDEX_PATH)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
 
 
 def entry_from_guidelines(data: dict) -> dict:
@@ -116,8 +123,13 @@ def _fetch_one(p: dict) -> tuple[str, dict]:
 def _worker(retry_failed: bool) -> None:
     """Pobiera wytyczne brakujących produktów RÓWNOLEGLE (WORKERS wątków) — pobieranie
     to głównie czekanie na sieć, więc 8 wątków daje ~6–8× krótszy czas niż po kolei."""
-    idx = load()
-    plist = products.get_products()
+    try:
+        idx = load()
+        plist = products.get_products()
+    except Exception as e:                    # „running” jest już ustawione — trzeba je zdjąć
+        with _lock:
+            _status.update({"running": False, "finished": time.time(), "last_error": f"{type(e).__name__}: {e}"})
+        return
     todo = [p for p in plist if p["hash"] not in idx or (retry_failed and not idx[p["hash"]].get("ok"))]
     with _lock:
         _status.update({"running": True, "done": 0, "total": len(todo), "errors": 0, "last_error": None,
@@ -176,9 +188,14 @@ def _worker(retry_failed: bool) -> None:
 def start_build(retry_failed: bool = False) -> dict:
     global _stop
     with _lock:
-        if _status["running"]:
-            return status()
-    _stop = False
+        busy = _status["running"]
+        if not busy:
+            # „running” ustawiane od razu, pod blokadą — dawniej robił to dopiero wątek i dwa
+            # równoczesne „buduj” uruchamiały dwie budowy (przegląd 09.10, B21)
+            _status["running"] = True
+            _stop = False
+    if busy:
+        return status()
     threading.Thread(target=_worker, args=(retry_failed,), daemon=True).start()
     time.sleep(0.05)
     return status()

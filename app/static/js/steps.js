@@ -18,12 +18,25 @@ const same = (jid) => S.job?.job_id === jid;
 
 export async function applyStep(name, params) {
   if (!S.job || S.busy) return;
-  const jid = S.job.job_id;
+  const jid = S.job.job_id, ep = S.fmtEpoch;
   S.busy = `Pracuję: ${STEP_NAME[name]}…`; delete S.stepErr[name];
   changed();
   try {
     const job = await post(`/api/jobs/${jid}/steps`, { name, params: { page: S.page, ...params } });
     if (!same(jid)) return;
+    // W międzyczasie zmienił się format (strona / produkt / rola / obrót — „epoka” S.fmtEpoch): poprawka
+    // zrobiona pod stary format nie może domknąć rozdziałów nowego — zdejmujemy ją na serwerze
+    // (przegląd 09.10, A9). Zwykle niemożliwe — te przyciski są nieaktywne przy S.busy.
+    if (S.fmtEpoch !== ep) {
+      try {
+        const back = await api(`/api/jobs/${jid}/steps/${name}`, { method: "DELETE" });
+        if (same(jid)) S.job = back;
+      } catch (e) {
+        if (same(jid)) { S.job = job; S.stepErr[name] = `Nie udało się cofnąć nieaktualnej poprawki: ${e.message}`; }
+      }
+      if (same(jid)) { S.busy = null; changed(); }
+      return;
+    }
     S.job = job;
     S.cmp = null; S.sim = null;
     S.pin = STEP_CH[name];            // rozdział z nową poprawką zostaje rozwinięty (main.render)
@@ -55,7 +68,12 @@ export async function undoStep(name) {
       S.job = job;
     } catch (e) {
       if (!same(jid)) return false;
-      S.stepErr[name] = e.message;
+      // błąd cofnięcia widać (dawniej forgetFrom kasował go od razu), decyzje zostają — plik się
+      // nie zmienił (przegląd 09.10, A9/C)
+      S.stepErr[name] = `Nie udało się cofnąć: ${e.message}`;
+      S.busy = null;
+      changed();
+      return false;
     }
   }
   forgetFrom(name);
@@ -79,11 +97,17 @@ export async function resetSteps(title, why = "były robione pod obecny format")
       const job = await api(`/api/jobs/${jid}/steps/${vs[1].step}`, { method: "DELETE" });
       if (!same(jid)) return false;
       S.job = job;
-    } catch (_) {
+    } catch (e) {
       if (!same(jid)) return false;
+      // nieudane cofnięcie NIE może przepuścić zmiany formatu — poprawki pod stary format domykały
+      // rozdziały nowego (przegląd 09.10, A9; dawniej catch(_){} i dalej)
+      S.busy = null; changed();
+      await ask("Nie udało się cofnąć poprawek", `${esc(e.message)}<br>Nic nie zostało zmienione — spróbuj jeszcze raz.`, "OK", "Zamknij");
+      return false;
     }
     S.busy = null;
   }
+  S.fmtEpoch = (S.fmtEpoch || 0) + 1;              // nowy format — poprawki w drodze są nieaktualne
   forgetFrom(STEP_ORDER[0]);
   S.fscan = { key: "", data: null, err: "" };
   changed();

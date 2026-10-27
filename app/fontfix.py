@@ -90,6 +90,10 @@ def text_usage(path: str, page: int | None = None) -> dict:
                     walk(x, x.get("/Resources") or resources, depth + 1, seen | {x.objgen})
             except Exception:
                 continue
+        # wzory i glify Type3 z zasobów tej treści też rysują tekst (przegląd 09.10, B11)
+        for st, res in _sub_streams(resources):
+            if st.objgen not in seen:
+                walk(st, res, depth + 1, seen | {st.objgen})
 
     with pikepdf.open(path) as pdf:
         for i, pg in enumerate(pdf.pages):
@@ -100,6 +104,76 @@ def text_usage(path: str, page: int | None = None) -> dict:
 
 def _base(fd) -> str:
     return str(fd.get("/BaseFont", "?")).lstrip("/")
+
+
+def _sub_streams(resources):
+    """Treści, które rysują się „z zasobów”, a nie przez `Do`: wzory kafelkowe (tiling) i glify fontów
+    Type3. Zwraca [(strumień, jego zasoby)]. Wcześniej font użyty tylko w nich był niewidoczny dla
+    rozdziału Fonty (przegląd 09.10, B11)."""
+    out = []
+    if resources is None:
+        return out
+    try:
+        pats = resources.get("/Pattern")
+        for k in (list(pats.keys()) if pats is not None else []):
+            pt = pats[k]
+            if isinstance(pt, pikepdf.Stream) and int(pt.get("/PatternType", 0)) == 1:
+                out.append((pt, pt.get("/Resources") or resources))
+    except Exception:
+        pass
+    try:
+        fonts = resources.get("/Font")
+        for k in (list(fonts.keys()) if fonts is not None else []):
+            f = fonts[k]
+            if str(f.get("/Subtype", "")) == "/Type3" and f.get("/CharProcs") is not None:
+                fres = f.get("/Resources") or resources
+                for g in list(f.CharProcs.keys()):
+                    out.append((f.CharProcs[g], fres))
+    except Exception:
+        pass
+    return out
+
+
+def _font_dicts(pdf, page: int | None):
+    """Słowniki fontów osiągalne z zasobów stron (wszystkich albo jednej): strona, formy, wzory, glify
+    Type3 — także fonty zapisane BEZPOŚREDNIO w zasobach (bez własnego numeru obiektu), których
+    przejście po `pdf.objects` nie widziało (przegląd 09.10, B11)."""
+    found, seen_res = {}, set()
+
+    def res(r, depth):
+        if r is None or depth > 12:
+            return
+        rk = tuple(r.objgen)
+        if rk != (0, 0):                    # bezpośrednie zasoby nie mają numeru — tych nie skracamy
+            if rk in seen_res:
+                return
+            seen_res.add(rk)
+        try:
+            fonts = r.get("/Font")
+            for k in (list(fonts.keys()) if fonts is not None else []):
+                f = fonts[k]
+                key = tuple(f.objgen) if tuple(f.objgen) != (0, 0) else bytes(f.unparse())
+                if key not in found:
+                    found[key] = f
+                    if str(f.get("/Subtype", "")) == "/Type3":
+                        res(f.get("/Resources"), depth + 1)
+        except Exception:
+            pass
+        for kind in ("/XObject", "/Pattern"):
+            try:
+                d = r.get(kind)
+                for k in (list(d.keys()) if d is not None else []):
+                    x = d[k]
+                    if kind == "/XObject" and str(x.get("/Subtype", "")) != "/Form":
+                        continue
+                    res(x.get("/Resources"), depth + 1)
+            except Exception:
+                continue
+
+    for i, pg in enumerate(pdf.pages):
+        if page is None or i == page:
+            res(pg.obj.get("/Resources"), 0)
+    return list(found.values())
 
 
 # --------------------------------------------------------------------------------------
@@ -366,6 +440,9 @@ def _used_codes(pdf, target_objgens: set) -> dict:
                         walk(x, x.get("/Resources") or resources, depth + 1, seen | {x.objgen})
             except Exception:
                 continue
+        for st, res in _sub_streams(resources):          # wzory i glify Type3 (przegląd 09.10, B11)
+            if st.objgen not in seen:
+                walk(st, res, depth + 1, seen | {st.objgen})
 
     for pg in pdf.pages:
         walk(pg, pg.obj.get("/Resources"), 0, frozenset())
@@ -379,8 +456,10 @@ def missing(path: str, page: int | None = None) -> list[dict]:
     usage = text_usage(path, page)
     wynik: dict = {}
     with pikepdf.open(path) as pdf:
-        for obj in pdf.objects:
-            if not isinstance(obj, pikepdf.Dictionary) or obj.get("/Type") != "/Font":
+        # fonty z ZASOBÓW stron (także we wzorach, w glifach Type3, zapisane bezpośrednio), nie tylko
+        # obiekty z numerem (przegląd 09.10, B11)
+        for obj in _font_dicts(pdf, page):
+            if not isinstance(obj, pikepdf.Dictionary) or "/Subtype" not in obj:
                 continue
             st = str(obj.get("/Subtype", ""))
             if st in ("/Type3", "/CIDFontType0", "/CIDFontType2"):
@@ -399,7 +478,8 @@ def missing(path: str, page: int | None = None) -> list[dict]:
             if page is not None and name not in usage:
                 continue                                   # na tej stronie nieużywany
             e = wynik.setdefault(name, {"name": name, "objgens": [], "widoczny": False})
-            e["objgens"].append(list(obj.objgen))
+            if tuple(obj.objgen) != (0, 0):          # bezpośredni słownik — zgłaszamy, ale osadzić się nie da
+                e["objgens"].append(list(obj.objgen))
             u = usage.get(name) or {}
             e["widoczny"] = e["widoczny"] or bool(u.get("widoczne")) or not u
     return list(wynik.values())
@@ -420,6 +500,9 @@ def embed(src: str, dst: str, fetcher=fetch, page: int | None = None) -> dict:
         for e in lista:
             if not e["widoczny"]:
                 niewidoczne.append(e["name"])
+                continue
+            if not e["objgens"]:
+                brak.append((e["name"], "font zapisany bezpośrednio w zasobach — nie da się go osadzić"))
                 continue
             fonts = [pdf.get_object(*g) for g in e["objgens"]]
             f0 = fonts[0]

@@ -77,6 +77,7 @@ class Layer {
     // przerwany / nieznany / chwilowy błąd — zamawiamy jeszcze raz (do 30 razy)
     if (["stale", "idle", "err"].includes(r.state)) {
       if (++this.tries <= 30) this.timer = setTimeout(() => this.poll(true), Math.min(4000, 400 * this.tries));
+      else { this.state = "failed"; wait(); }      // koniec prób — komunikat z „Spróbuj jeszcze raz” (przegląd 09.10, C)
       return;
     }
     if (r.state !== "done") this.timer = setTimeout(() => this.poll(false), 600);
@@ -397,7 +398,9 @@ function drawDecor(z, px, py) {
   fr.hidden = !scene.frameLabel;
   dim.hidden = !scene.dimOutside;
   for (const el of [fr, dim]) box(el, px(0), py(0), scene.frame.w * z, scene.frame.h * z);
-  if (!fr.hidden) fr.innerHTML = `<span>${scene.frameLabel}</span>`;
+  // etykiety zawsze przez textContent — nazwa fontu z pliku klienta wykonywała się jako HTML
+  // (przegląd 09.10, A3)
+  if (!fr.hidden) label(fr, scene.frameLabel);
   // litery krojem zastępczym (brak fontu) — ramki z nazwą fontu (Tomasz 29.09)
   const mk = decor("fmarks"), marks = scene.marks || [];
   mk.hidden = !marks.length;
@@ -410,7 +413,7 @@ function drawDecor(z, px, py) {
       const pad = 3;
       box(d, px(m.r.x) - pad, py(m.r.y) - pad, m.r.w * z + 2 * pad, m.r.h * z + 2 * pad);
       d.classList.toggle("red", m.tone === "red");
-      if (d.dataset.l !== m.label) { d.innerHTML = `<span>⚠ ${m.label}</span>`; d.dataset.l = m.label; }
+      if (d.dataset.l !== m.label) { label(d, `⚠ ${m.label}`); d.dataset.l = m.label; }
     });
   }
   // podświetlony obszar
@@ -420,8 +423,14 @@ function drawDecor(z, px, py) {
     const r = hilite.r;
     box(hl, px(Math.max(0, r.x)) - 4, py(Math.max(0, r.y)) - 4,
         (Math.min(scene.frame.w, r.x + r.w) - Math.max(0, r.x)) * z + 8, (Math.min(scene.frame.h, r.y + r.h) - Math.max(0, r.y)) * z + 8);
-    hl.innerHTML = hilite.label ? `<span>${hilite.label}</span>` : "";
+    if (hilite.label) label(hl, hilite.label); else hl.replaceChildren();
   }
+}
+// <span>tekst</span> jako jedyne dziecko elementu — bez innerHTML
+function label(el, txt) {
+  const s = document.createElement("span");
+  s.textContent = txt;
+  el.replaceChildren(s);
 }
 
 // ------------------------------------------------------------------ nawigator
@@ -504,9 +513,16 @@ let busyTxt = null;
 export function setBusy(t) { if (t !== busyTxt) { busyTxt = t; wait(); } }
 function wait() {
   const any = !!scene && [...live.values()].some((l) => l.ov.src);
+  const failed = !busyTxt && !!scene && !any && [...live.values()].some((l) => l.state === "failed");
   $("vWait").hidden = !busyTxt && (!scene || any);
-  $("vWait").querySelector(".t").textContent = busyTxt || "wczytuję podgląd…";
+  $("vWait").classList.toggle("fail", failed);
+  $("vRetry").hidden = !failed;
+  $("vWait").querySelector(".t").textContent = busyTxt || (failed ? "Nie udało się wczytać podglądu." : "wczytuję podgląd…");
 }
+$("vRetry").addEventListener("click", () => {
+  for (const l of live.values()) if (l.state === "failed") { l.tries = 0; l.state = "wait"; l.poll(true); }
+  wait();
+});
 
 // ------------------------------------------------------------------ mysz i lupki
 // Lupki jak w Photoshopie: przycisk WYBIERA narzędzie; potem kliknięcie w podgląd powiększa

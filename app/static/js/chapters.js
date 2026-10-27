@@ -30,6 +30,14 @@ $("frDo").onclick = () => {
 };
 $("frUndo").onclick = () => undoStep("frames");
 $("frSkip").onclick = () => { if (S.job) { S.settle.frames = "skip"; changed(); } };
+// błąd szukania szablonu: „Sprawdź jeszcze raz” albo świadome „Pomiń sprawdzanie” (przegląd 09.10, A2)
+$("frChk").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-chk]");
+  if (!b || !S.job || S.busy) return;
+  if (b.dataset.chk === "retry") S.fscan = { key: "", data: null, err: "" };   // renderFrames szuka od nowa
+  else S.settle.frames = "unchecked";
+  changed();
+});
 
 export function renderFrames() {
   const el = $("ch-frames");
@@ -42,8 +50,12 @@ export function renderFrames() {
     st = "done"; sum = "usunięty";
     say = `<span class="say ok">Szablon usunięty z projektu.</span> <span class="now-only">Suwakiem niżej porównasz przed i po.</span>`;
   } else if (S.fscan.err) {
-    st = "done"; sum = "nie udało się sprawdzić";
-    say = `<span class="say warn">Nie udało się przeszukać pliku.</span>`; note = esc(S.fscan.err);
+    const sk = S.settle.frames === "unchecked";
+    st = sk ? "done" : "todo"; sum = sk ? "niesprawdzony" : "";
+    say = sk ? `<span class="say warn">Szablonu nie sprawdzono</span> — obejrzyj podgląd, czy nie ma w nim ramek z wytycznych.`
+      : `<span class="say warn">Nie udało się przeszukać pliku.</span> Sprawdź jeszcze raz albo pomiń sprawdzanie — `
+        + `wtedy obejrzyj podgląd sam.`;
+    note = esc(S.fscan.err);
   } else if (!d) {
     say = `<span class="spin"></span>Porównuję plik z szablonem z wytycznych…`;
   } else if (d.found && d.hidden) {
@@ -83,7 +95,10 @@ export function renderFrames() {
     else if (d.pixels) b = `<span class="warn">Linie szablonu są wtopione w obraz</span> — nie do usunięcia.`;
     else if (d.foreign) b = `Ramki w kolorach wytycznych — nie pasują do szablonu tego produktu.`;
   }
+  if (!on && S.fscan.err && !S.settle.frames) b = `<span class="warn">Nie udało się sprawdzić szablonu</span>.`;
   brief("frBrief", b);
+  $("frChk").hidden = on || !S.fscan.err || !!S.settle.frames;
+  $("frChk").querySelectorAll("button").forEach((x) => { x.disabled = !!S.busy; });
   $("frSay").innerHTML = say;
   $("frNote").innerHTML = note; $("frNote").hidden = !note;
   stepControls("fr", "frames", { canDo: !!d?.found, skip, doLabel: hidden ? "Usuń mimo to" : "Usuń szablon" });

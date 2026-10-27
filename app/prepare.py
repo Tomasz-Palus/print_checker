@@ -200,8 +200,9 @@ def _bake_annots(pdf, page, L: _Layers | None, stats: dict):
         except Exception:
             stats["annots_off"].append("adnotacja")
     if cmds:
-        page.contents_add(pdf.make_stream(b"q\n"), prepend=True)
-        page.contents_add(pdf.make_stream(("\nQ\n" + "\n".join(cmds) + "\n").encode()), prepend=False)
+        import pdfutil
+        pdfutil.wrap_page(pdf, page, b"")       # stan po treści wraca do początkowego, nawet przy złym q/Q
+        page.contents_add(pdf.make_stream(("\n" + "\n".join(cmds) + "\n").encode()), prepend=False)
     # linki zostają (nic nie rysują), reszta znika — okienka komentarzy (/Popup) razem z nimi
     o.Annots = pikepdf.Array([a for a in annots if str(a.get("/Subtype", "")) == "/Link"])
     if not len(o.Annots):
@@ -278,8 +279,8 @@ def with_user_unit(pdf, page, u: int) -> None:
     """Treść i pola strony zmniejszone u razy + /UserUnit u: wydruk wychodzi tej samej wielkości."""
     k = 1.0 / u
     o = page.obj
-    page.contents_add(pdf.make_stream(f"q {k:.8f} 0 0 {k:.8f} 0 0 cm\n".encode()), prepend=True)
-    page.contents_add(pdf.make_stream(b"\nQ\n"), prepend=False)
+    import pdfutil
+    pdfutil.wrap_page(pdf, page, f"{k:.8f} 0 0 {k:.8f} 0 0 cm".encode())   # nadmiarowe Q (przegląd 09.10, C)
     for key in ("/MediaBox", "/CropBox", "/TrimBox", "/BleedBox", "/ArtBox"):
         b = o.get(key)
         if b is not None:

@@ -24,6 +24,7 @@ import os
 import threading
 import time
 import urllib.request
+import uuid
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, urlparse
 
@@ -121,19 +122,32 @@ def _fetch_remote(timeout: float = 15.0) -> list[dict]:
 
 
 def _load_json(path: str) -> dict | None:
+    """Plik listy produktów albo None. Zła struktura (lista, `products: null`, wpisy bez nazwy
+    czy hasha) = jakby pliku nie było — dawniej /api/products kończyło się 500 (przegląd 09.10, C)."""
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            d = json.load(f)
     except (OSError, ValueError):
         return None
+    if not isinstance(d, dict) or not isinstance(d.get("products"), list):
+        return None
+    d["products"] = [p for p in d["products"] if isinstance(p, dict) and isinstance(p.get("name"), str)
+                     and isinstance(p.get("hash"), str) and p["hash"]]
+    if not isinstance(d.get("fetched_ts", 0), (int, float)):
+        d["fetched_ts"] = 0
+    return d if d["products"] else None
 
 
 def _save_cache(products: list[dict]) -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
-    tmp = CACHE_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump({"fetched_ts": time.time(), "products": products}, f, ensure_ascii=False)
-    os.replace(tmp, CACHE_PATH)
+    tmp = f"{CACHE_PATH}.{uuid.uuid4().hex[:8]}.tmp"     # własny plik tymczasowy (przegląd 09.10, B21)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"fetched_ts": time.time(), "products": products}, f, ensure_ascii=False)
+        os.replace(tmp, CACHE_PATH)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
 def _set(products, source, fetched_ts=None, error=None):

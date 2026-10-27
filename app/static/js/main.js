@@ -103,7 +103,10 @@ let anSeq = 0, anBusy = null;
 // Fakty zawsze o ostatniej wersji i o wybranej stronie (do druku idzie jedna strona).
 async function loadAnalysis() {
   const v = head(), key = factsKey();
-  if (!v || anBusy === key || S.analysisFor === key) return;
+  // po błędzie — tylko na żądanie („Sprawdź jeszcze raz” w rozdziale, S.anRetry; przegląd 09.10, A2)
+  const retry = S.anRetry && S.analysisFor === key && !!S.analysis?.error;
+  if (!v || anBusy === key || (S.analysisFor === key && !retry)) return;
+  S.anRetry = false;
   const seq = ++anSeq;
   anBusy = key;
   try {
@@ -113,6 +116,7 @@ async function loadAnalysis() {
   } catch (e) {
     if (seq !== anSeq || factsKey() !== key) { if (anBusy === key) anBusy = null; return; }
     S.analysis = { error: e.message }; S.analysisFor = key;
+    delete S.factsCache[key];
   }
   anBusy = null;
   changed();
@@ -474,7 +478,8 @@ async function checkVersion() {
   try { upd = await api("/api/version"); } catch (_) { return; }
   $("ver").textContent = "v" + upd.version;
   const a = $("upd");
-  a.hidden = !upd.update;
+  // odrzucone wydanie (zły podpis / suma / wersja) — bez linku i przycisku (przegląd 09.10, B23)
+  a.hidden = !upd.update || upd.status === "rejected" || upd.status === "installing";
   a.classList.toggle("wait", upd.status === "downloading");
   if (upd.update) {
     a.href = upd.update_url || "#";
@@ -486,6 +491,7 @@ async function checkVersion() {
   setTimeout(checkVersion, upd.status === "downloading" ? 3000 : 10 * 60 * 1000);
 }
 $("upd").addEventListener("click", async (e) => {
+  if (upd?.status === "rejected") { e.preventDefault(); return; }
   if (!upd?.self_update || upd.status === "error") return;     // zwykły link do wydania
   e.preventDefault();
   if (upd.status !== "ready") return;

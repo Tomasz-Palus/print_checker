@@ -28,14 +28,18 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 import urllib.request
+import uuid
 
 import pymupdf
 
+import pdfutil
+
 from products import requirements_url
 
-PARSER_VERSION = 5          # 5: safe_mm — obszar bezpieczny (czerwona ramka)
+PARSER_VERSION = 6          # 5: safe_mm — obszar bezpieczny (czerwona ramka); 6: wymiar z „[mm]”, bez napisów < 10 % strony
 import paths
 from version import UA
 
@@ -69,12 +73,51 @@ def download_pdf(hash_: str, timeout: float = 30.0) -> bytes:
     return data
 
 
+def _tmp_for(path: str) -> str:
+    """Własny plik tymczasowy każdego zapisu — wspólny „.tmp” przy dwóch pobraniach naraz dawał
+    502 albo podmieniał plik w trakcie zapisu (przegląd 09.10, B21)."""
+    root, ext = os.path.splitext(path)
+    return f"{root}.{uuid.uuid4().hex[:8]}.part{ext}"         # rozszerzenie zostaje (MuPDF)
+
+
 def _write_atomic(path: str, data: bytes) -> None:
     os.makedirs(DATA_DIR, exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "wb") as f:
-        f.write(data)
-    os.replace(tmp, path)
+    tmp = _tmp_for(path)
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+_locks: dict = {}
+_locks_lock = threading.Lock()
+
+
+def _hash_lock(hash_: str) -> threading.Lock:
+    """Jedno pobieranie/parsowanie danego produktu naraz (strona produktu + indeks w tle)."""
+    with _locks_lock:
+        return _locks.setdefault(hash_, threading.Lock())
+
+
+def _store_parsed(hash_: str, data: bytes) -> dict:
+    """Parsuje pobrany PDF z PLIKU TYMCZASOWEGO; kopia w cache jest podmieniana dopiero, gdy
+    parsowanie się udało. Dawniej zapis szedł pierwszy: obcięte pobranie → 502, a dobra kopia
+    była już nadpisana i bez sieci szablon przestawał być znajdowany (przegląd 09.10, A10)."""
+    path = pdf_path_for(hash_)
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = _tmp_for(path)
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+        parsed = parse_pdf(tmp)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    return parsed
 
 
 def fetch_pdf(hash_: str, force: bool = False, timeout: float = 30.0) -> str:
@@ -82,7 +125,10 @@ def fetch_pdf(hash_: str, force: bool = False, timeout: float = 30.0) -> str:
     path = pdf_path_for(hash_)
     if os.path.exists(path) and not force and os.path.getsize(path) > 1000:
         return path
-    _write_atomic(path, download_pdf(hash_, timeout=timeout))
+    with _hash_lock(hash_):
+        if os.path.exists(path) and not force and os.path.getsize(path) > 1000:
+            return path
+        _store_parsed(hash_, download_pdf(hash_, timeout=timeout))
     return path
 
 
@@ -278,11 +324,20 @@ def parse_template_page(page, index: int) -> dict:
     for ln in lines:
         ln["text"] = " ".join(ln["text"].split())
     role, dims, product_name = None, None, None
+    # wymiar szablonu: zapis z „[mm]” ma pierwszeństwo, a napis dużo mniejszy od strony (< 10 %
+    # boku, np. „keder 9x3mm” w nazwie produktu) to nie wymiar szablonu. Dawniej wygrywał pierwszy
+    # napis „AxB mm” od góry (przegląd 09.10, C). „0 x 0” = wytyczne-zaślepka (niżej).
+    pw_mm, ph_mm = page.rect.width * MM_PER_PT, page.rect.height * MM_PER_PT
+    cands = []
     for ln in lines:
-        m = _DIM_RE.search(ln["text"])
-        if m and dims is None:
-            dims = (float(m.group(1).replace(",", ".")), float(m.group(2).replace(",", ".")))
-            continue
+        for m in _DIM_RE.finditer(ln["text"]):
+            w, h = float(m.group(1).replace(",", ".")), float(m.group(2).replace(",", "."))
+            if not (w <= 0 and h <= 0) and not (
+                    (w >= 0.1 * pw_mm and h >= 0.1 * ph_mm) or (w >= 0.1 * ph_mm and h >= 0.1 * pw_mm)):
+                continue
+            cands.append((0 if "[" in m.group(0) else 1, len(cands), (w, h)))
+    if cands:
+        dims = min(cands)[2]
     text_lines = [ln for ln in lines if not _DIM_RE.search(ln["text"])]
     if text_lines:
         role_ln = max(text_lines, key=lambda ln: (ln["bold"], ln["size"]))
@@ -323,6 +378,7 @@ def parse_template_page(page, index: int) -> dict:
     }
 
 
+@pdfutil.mupdf_locked
 def parse_pdf(path: str) -> dict:
     doc = pymupdf.open(path)
     try:
@@ -358,9 +414,8 @@ def _load_cached_json(hash_: str) -> dict | None:
 
 
 def _save_json(hash_: str, data: dict) -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(json_path_for(hash_), "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False)
+    """Atomowo (własny plik tymczasowy) — przerwany zapis nie zostawia uciętego JSON-a (A10)."""
+    _write_atomic(json_path_for(hash_), json.dumps(data, ensure_ascii=False).encode("utf-8"))
 
 
 def get_guidelines(hash_: str, force: bool = False) -> dict:
@@ -370,10 +425,18 @@ def get_guidelines(hash_: str, force: bool = False) -> dict:
         data = _load_cached_json(hash_)
         if data:
             return data
-    pdf = fetch_pdf(hash_, force=force)
-    data = parse_pdf(pdf)
-    data.update({"hash": hash_, "source": "remote", "fetched_at": time.time()})
-    _save_json(hash_, data)
+    with _hash_lock(hash_):
+        if not force:
+            data = _load_cached_json(hash_)
+            if data:
+                return data
+        path = pdf_path_for(hash_)
+        if not force and os.path.exists(path) and os.path.getsize(path) > 1000:
+            data = parse_pdf(path)
+        else:
+            data = _store_parsed(hash_, download_pdf(hash_))
+        data.update({"hash": hash_, "source": "remote", "fetched_at": time.time()})
+        _save_json(hash_, data)
     return data
 
 
@@ -386,11 +449,12 @@ def get_guidelines_fresh(hash_: str, timeout: float = 20.0) -> dict:
     try:
         fresh = download_pdf(hash_, timeout=timeout)
     except Exception as e:
-        cached = _load_cached_json(hash_)
-        if not cached and os.path.exists(path) and os.path.getsize(path) > 1000:
-            cached = parse_pdf(path)          # jest PDF w cache, ale bez JSON-u (np. stara wersja parsera)
-            cached.update({"hash": hash_, "fetched_at": os.path.getmtime(path)})
-            _save_json(hash_, cached)
+        with _hash_lock(hash_):
+            cached = _load_cached_json(hash_)
+            if not cached and os.path.exists(path) and os.path.getsize(path) > 1000:
+                cached = parse_pdf(path)          # jest PDF w cache, ale bez JSON-u (np. stara wersja parsera)
+                cached.update({"hash": hash_, "fetched_at": os.path.getmtime(path)})
+                _save_json(hash_, cached)
         if cached:
             cached = dict(cached)
             cached["stale"] = True
@@ -398,6 +462,11 @@ def get_guidelines_fresh(hash_: str, timeout: float = 20.0) -> dict:
             cached["source"] = "cache"
             return cached
         raise
+    with _hash_lock(hash_):
+        return _fresh_store(hash_, path, fresh)
+
+
+def _fresh_store(hash_: str, path: str, fresh: bytes) -> dict:
     same = False
     if os.path.exists(path):
         try:
@@ -412,8 +481,7 @@ def get_guidelines_fresh(hash_: str, timeout: float = 20.0) -> dict:
             cached.update({"source": "remote", "stale": False, "fetched_at": time.time(), "unchanged": True})
             _save_json(hash_, cached)
             return cached
-    _write_atomic(path, fresh)
-    data = parse_pdf(path)
+    data = _store_parsed(hash_, fresh)       # parsowanie przed podmianą kopii (A10)
     data.update({"hash": hash_, "source": "remote", "stale": False, "fetched_at": time.time(), "unchanged": False})
     _save_json(hash_, data)
     return data

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import math
 import os
+import re
+import subprocess
 
 import pikepdf
 from decimal import Decimal
@@ -19,6 +21,7 @@ import pymupdf
 
 import frames
 import gs
+import pdfutil
 
 MM = 25.4 / 72.0
 ORDER = ["frames", "trim", "resize", "cmyk", "black", "overprint", "outline", "flatten"]
@@ -32,7 +35,9 @@ def run(name: str, src: str, dst: str, params: dict, job) -> dict:
 
 
 def _fmt(v: float) -> str:
-    return f"{v:.1f}".rstrip("0").rstrip(".").replace(".", ",")
+    # −0,0x z zaokrągleń (np. przycięcie w jednej osi) dawało „1330,8 × -0 mm” (przegląd 09.10, C)
+    s = f"{v:.1f}".rstrip("0").rstrip(".").replace(".", ",")
+    return "0" if s in ("-0", "") else s
 
 
 # ----------------------------------------------------------------------------
@@ -221,21 +226,37 @@ def _mirror(path_in, dst, page_index, left, top, pw, ph, tw, th, ov) -> int:
     return len(ops)
 
 
-def _keep_doc_level(src: str, dst: str) -> None:
+def _keep_doc_level(src: str, dst: str, page: int | None = None) -> None:
     """Nowy dokument z MuPDF-a nie ma tego, co było na poziomie DOKUMENTU: profilu wyjściowego
     (OutputIntent) — potem „profil z pliku” i spłaszczenie po cichu brały FOGRA39 (przegląd kodu
-    27.09, A13). Przenosimy go ze źródła."""
+    27.09, A13). Przenosimy go ze źródła.
+
+    Ani grupy przezroczystości strony (/Group, przestrzeń mieszania): bez niej RIP i Ghostscript
+    mieszały przezroczystość w CMYK zamiast w przestrzeni pliku — na strony.pdf render CMYK zmieniał
+    się na 83 % pikseli (przegląd 09.10, A5). Grupa idzie na nową stronę i na formę z projektem."""
     with pikepdf.open(src) as s_pdf:
         oi = s_pdf.Root.get("/OutputIntents")
-        if oi is None:
+        grp = s_pdf.pages[page].obj.get("/Group") if page is not None and page < len(s_pdf.pages) else None
+        if oi is None and grp is None:
             return
         with pikepdf.open(dst, allow_overwriting_input=True) as d_pdf:
-            # copy_foreign przyjmuje tylko obiekt pośredni — tablica /OutputIntents bywa bezpośrednia
-            # (plik 1878: „copy_foreign called with direct object handle”, Tomasz 28.09)
-            d_pdf.Root.OutputIntents = d_pdf.copy_foreign(oi if oi.is_indirect else s_pdf.make_indirect(oi))
+            if oi is not None:
+                # copy_foreign przyjmuje tylko obiekt pośredni — tablica /OutputIntents bywa bezpośrednia
+                # (plik 1878: „copy_foreign called with direct object handle”, Tomasz 28.09)
+                d_pdf.Root.OutputIntents = d_pdf.copy_foreign(oi if oi.is_indirect else s_pdf.make_indirect(oi))
+            if grp is not None:
+                g = d_pdf.copy_foreign(grp if grp.is_indirect else s_pdf.make_indirect(grp))
+                po = d_pdf.pages[page].obj
+                po["/Group"] = g
+                xo = (po.get("/Resources") or {}).get("/XObject")
+                for k in (list(xo.keys()) if xo is not None else []):
+                    x = xo[k]
+                    if str(x.get("/Subtype", "")) == "/Form" and "/Group" not in x:
+                        x["/Group"] = g
             d_pdf.save(dst)
 
 
+@pdfutil.mupdf_locked
 def step_resize(src, dst, p, job) -> dict:
     """Nowa strona w formacie z wytycznych; projekt wstawiony jako obiekt formy (wektor zostaje
     wektorem, nic nie jest rasteryzowane), w skali i położeniu z suwaków. Margines można
@@ -267,8 +288,11 @@ def step_resize(src, dst, p, job) -> dict:
                 continue
             pg = out.new_page(width=tw, height=th)
             # najpierw projekt, POTEM tło — pasy wchodzą pod krawędź projektu z wierzchu
+            # keep_proportion=False: wycinek bez skrajnych pikseli ma minimalnie inne proporcje niż
+            # projekt — wpasowany z zachowaniem proporcji zostawiał w drugiej osi biały pas ~0,5 mm,
+            # a przy krawędzi bez marginesu nic go nie przykrywało (przegląd 09.10, B17)
             pg.show_pdf_page(pymupdf.Rect(left, top, left + pw, top + ph), srcd, page,
-                             clip=src_rect if crop else None)
+                             clip=src_rect if crop else None, keep_proportion=False)
             if fill and mode == "stretch":
                 filled = _fill_edges(pg, srcd[page], src_rect, left, top, pw, ph, tw, th, k)
         out.save(tmp, garbage=3, deflate=True)
@@ -283,7 +307,7 @@ def step_resize(src, dst, p, job) -> dict:
             os.replace(tmp, dst)
     finally:
         _rm(tmp)
-    _keep_doc_level(src, dst)
+    _keep_doc_level(src, dst, page)
     (cx, gx), (cy, gy) = _span(left, pw, tw), _span(top, ph, th)
     gap, cut = [gx * MM, gy * MM], [cx * MM, cy * MM]
     parts = [f"wymiar {_fmt(sr.width * MM)} × {_fmt(sr.height * MM)} → {_fmt(tw * MM)} × {_fmt(th * MM)} mm, "
@@ -301,6 +325,25 @@ def step_resize(src, dst, p, job) -> dict:
 RASTER_MAX_PX = 1_500_000_000     # sufit na obraz po dopasowaniu (pikseli)
 
 
+def _gray8(im):
+    """Szarość 16/32-bitowa (PNG/TIFF „I;16”, „I”, „F”) → 8 bit („L”). Pillow przy convert("RGB")
+    OBCINA wartości do 255 — cały obraz robił się biały (przegląd 09.10, B16)."""
+    if im.mode not in ("I;16", "I;16B", "I;16L", "I;16N", "I", "F"):
+        return im
+    import numpy as np
+    from PIL import Image
+    a = np.asarray(im)
+    if im.mode == "F":
+        a = a.astype(np.float64) * (255.0 if float(a.max(initial=0)) <= 1.0 else 1.0)
+    else:
+        a = a.astype(np.int64)
+        if im.mode.startswith("I;16") or int(a.max(initial=0)) > 255:
+            a = a >> 8                      # 16 bit (Pillow czyta 16-bitowe PNG także jako „I”)
+    out = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), "L")
+    out.info = dict(im.info)
+    return out
+
+
 def _raster_resize(src: str, dst: str, p: dict) -> dict:
     """Dopasowanie wymiaru OBRAZU (JPG, PNG, TIFF…) — obraz zostaje obrazem (Tomasz 29.09: „chcę
     dopasowanie wymiaru do wszystkich formatów”). Te same suwaki co przy PDF-ie: wielkość,
@@ -316,12 +359,14 @@ def _raster_resize(src: str, dst: str, p: dict) -> dict:
     im = Image.open(src)
     im.seek(0)
     info = dict(im.info)
-    d0 = info.get("dpi")
-    if not d0 or not d0[0] or not d0[1]:
+    import pdfutil
+    d0 = pdfutil.raster_dpi(im)
+    if not d0:
         raise ValueError("Obraz nie ma zapisanej rozdzielczości (DPI), więc nie wiadomo, ile ma milimetrów — "
                          "ustaw ją w programie graficznym.")
     d0 = (float(d0[0]), float(d0[1]))
     jpg = os.path.splitext(src)[1].lower() in (".jpg", ".jpeg")
+    im = _gray8(im)
     if im.mode not in ("L", "RGB", "RGBA", "CMYK"):
         im = im.convert("RGBA" if ("A" in im.mode or "transparency" in info) else "RGB")
     if jpg and im.mode == "RGBA":
@@ -394,6 +439,9 @@ def _raster_resize(src: str, dst: str, p: dict) -> dict:
 # ----------------------------------------------------------------------------
 # wspólne dla poprawek przez Ghostscripta
 # ----------------------------------------------------------------------------
+_ICC_ERR = re.compile(r"icc|profile|invalidfileaccess|initial device", re.I)
+
+
 def _gs_page(src: str, dst: str, page: int, args: list, what: str, timeout: int = 1800, pre: list | None = None):
     """Ghostscript (pdfwrite) przepisuje TYLKO wybraną stronę; wynik wklejamy w kopię pliku
     na jej miejsce. Pozostałe strony i wszystko na poziomie dokumentu (profil kolorystyczny,
@@ -406,13 +454,18 @@ def _gs_page(src: str, dst: str, page: int, args: list, what: str, timeout: int 
         r = gs.run(args + [f"-sPageList={page + 1}", "-o", gs.arg_path(out), *(pre or []), gs.arg_path(src)], timeout)
         if r.returncode != 0 or not os.path.exists(out):
             # druga próba bez -dSAFER: pliki, które czyta, to nasze kopie profili — bywa,
-            # że tylko tak Ghostscript je otwiera (Windows)
-            if "-dSAFER" in args:
+            # że tylko tak Ghostscript je otwiera (Windows). TYLKO przy błędzie odczytu profilu —
+            # plik klienta z innym błędem nie idzie drugi raz bez zabezpieczeń (przegląd 09.10, C)
+            if "-dSAFER" in args and _ICC_ERR.search(gs.log_of(r, 4000)):
                 r = gs.run([a for a in args if a != "-dSAFER"]
                            + [f"-sPageList={page + 1}", "-o", gs.arg_path(out), *(pre or []), gs.arg_path(src)], timeout)
             if r.returncode != 0 or not os.path.exists(out):
                 raise ValueError(f"Ghostscript nie dał rady ({what}). Komunikat: {gs.log_of(r)}")
         return r, out
+    except subprocess.TimeoutExpired:
+        _rm(out)
+        raise ValueError(f"Ghostscript liczył dłużej niż {max(1, round(timeout / 60))} min ({what}) — przerwane. "
+                         "Plik jest bardzo złożony albo uszkodzony.")
     except Exception:
         _rm(out)
         raise
@@ -453,17 +506,26 @@ def _page_facts(job, src: str, page: int) -> dict:
 PROFILE_KEEP, PROFILE_NONE, PROFILE_FOGRA = "keep", "none", "fogra39"
 
 
-def file_icc(src: str) -> tuple[bytes | None, str]:
+def file_icc(src: str, intent_only: bool = False) -> tuple[bytes | None, str]:
     """Profil CMYK zapisany W PLIKU: najpierw deklaracja (OutputIntent), potem pierwszy
     osadzony profil CMYK. Do wyboru „zostaw profil z pliku": plik bywa przygotowany pod
     konkretną maszynę (u nas najczęściej ISO Coated v2) — przestawianie go na inny profil
-    tej samej normy to zmiana bez powodu (prośba Tomasza)."""
+    tej samej normy to zmiana bez powodu (prośba Tomasza).
+
+    `intent_only=True` — TYLKO deklaracja (OutputIntent) z profilem drukarki (spłaszczenie, „zostaw
+    profil z pliku”). Profil pierwszego lepszego obrazu CMYK (np. SWOP) to profil tego obrazu, a nie
+    maszyny — cała strona szła przez niego zamiast FOGRA39 (przegląd 09.10, B15)."""
     try:
         with pikepdf.open(src) as pdf:
             for oi in pdf.Root.get("/OutputIntents") or []:
                 p = oi.get("/DestOutputProfile")
                 if p is not None and int(p.get("/N", 4)) == 4:
-                    return bytes(p.read_bytes()), str(oi.get("/OutputConditionIdentifier") or oi.get("/Info") or "")
+                    data = bytes(p.read_bytes())
+                    if intent_only and not _is_printer_profile(data):
+                        continue
+                    return data, str(oi.get("/OutputConditionIdentifier") or oi.get("/Info") or "")
+            if intent_only:
+                return None, ""
             for obj in pdf.objects:
                 try:
                     if (isinstance(obj, pikepdf.Array) and len(obj) > 1 and str(obj[0]) == "/ICCBased"
@@ -474,6 +536,18 @@ def file_icc(src: str) -> tuple[bytes | None, str]:
     except Exception:
         pass
     return None, ""
+
+
+def _is_printer_profile(data: bytes) -> bool:
+    """Profil CMYK klasy „drukarka” (prtr). Nieczytelny — przyjmujemy (nie odrzucamy deklaracji
+    tylko dlatego, że Pillow go nie zna)."""
+    try:
+        import io
+        from PIL import ImageCms
+        prof = ImageCms.ImageCmsProfile(io.BytesIO(data)).profile
+        return prof.xcolor_space.strip() == "CMYK" and prof.device_class.strip() == "prtr"
+    except Exception:
+        return True
 
 
 def icc_name(data: bytes, fallback: str = "") -> str:
@@ -542,6 +616,73 @@ def _rename_registration(src: str, dst: str) -> int:
     return n
 
 
+def _is_rgb_cs(cs) -> bool:
+    try:
+        if isinstance(cs, pikepdf.Name):
+            return str(cs) in ("/DeviceRGB", "/RGB", "/CalRGB")
+        if isinstance(cs, pikepdf.Array) and len(cs):
+            fam = str(cs[0])
+            if fam == "/CalRGB":
+                return True
+            if fam == "/ICCBased":
+                return int(cs[1].get("/N", 0)) == 3
+    except Exception:
+        pass
+    return False
+
+
+def _rgb_groups(page_obj, fix: bool = False) -> int:
+    """Grupy przezroczystości w RGB na stronie: grupa strony i grupy form (także we wzorach),
+    BEZ grup masek (/SMask /G — tam RGB tylko liczy maskę). `fix=True` ustawia im /CS DeviceCMYK.
+
+    Przegląd 09.10, A4: pdfwrite przelicza kolory na CMYK, ale grupy zostawia w RGB — w druku
+    (RIP, spłaszczenie) treść strony miesza się wtedy w RGB: czerń K100 wychodziła czterokolorowa,
+    cyjan 100 % brudny. Plik CMYK z dokumentu RGB (Illustrator) ma to samo."""
+    n, seen = 0, set()
+
+    def group(o):
+        nonlocal n
+        g = o.get("/Group")
+        if g is not None and str(g.get("/S", "")) == "/Transparency" and _is_rgb_cs(g.get("/CS")):
+            n += 1
+            if fix:
+                g["/CS"] = pikepdf.Name("/DeviceCMYK")
+
+    def res(r, depth):
+        if r is None or depth > 12:
+            return
+        for kind in ("/XObject", "/Pattern"):
+            d = r.get(kind)
+            for k in (list(d.keys()) if d is not None else []):
+                try:
+                    x = d[k]
+                    key = tuple(x.objgen)
+                    if key != (0, 0):              # bezpośrednie (bez numeru) nie mają stałej tożsamości
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                    if kind == "/XObject" and str(x.get("/Subtype", "")) != "/Form":
+                        continue
+                    if kind == "/XObject":
+                        group(x)
+                    res(x.get("/Resources"), depth + 1)
+                except Exception:
+                    continue
+        # maski (ExtGState /SMask /G) celowo pomijamy
+        fonts = r.get("/Font")
+        for k in (list(fonts.keys()) if fonts is not None else []):
+            try:
+                f = fonts[k]
+                if str(f.get("/Subtype", "")) == "/Type3":
+                    res(f.get("/Resources"), depth + 1)
+            except Exception:
+                continue
+
+    group(page_obj)
+    res(page_obj.get("/Resources"), 0)
+    return n
+
+
 def color_need(facts: dict) -> dict:
     """Co w kolorach strony trzeba przeliczyć: {rgb, lab, spots:[nazwy], other}. Gray obok
     CMYK nie jest problemem (drukuje się czarną farbą)."""
@@ -565,7 +706,7 @@ def step_cmyk(src, dst, p, job) -> dict:
     profile = p.get("profile") or PROFILE_FOGRA
     if __import__("render").is_raster(src):
         return _raster_cmyk(src, dst, profile)
-    data, name = (file_icc(src) if profile == PROFILE_KEEP else (None, ""))
+    data, name = (file_icc(src, intent_only=True) if profile == PROFILE_KEEP else (None, ""))
     if profile == PROFILE_KEEP and not data:
         profile = PROFILE_FOGRA                     # plik nie ma profilu — bierzemy nasz
     if data is None:
@@ -586,8 +727,23 @@ def step_cmyk(src, dst, p, job) -> dict:
     # separacje) i trwa 40 s zamiast 3 s. Spoty liczy przez alternatywę (tint 1,0 dla
     # 0,15/0,35/0,85/0,05 daje 0,149/0,349/0,847/0,047 — jak Photoshop).
     fast = not need["rgb"] and not need["lab"] and not need["other"] and need["spot_alt_ok"]
+    with pikepdf.open(src) as _pdf:
+        groups = _rgb_groups(_pdf.pages[page].obj)
     if fast and not need["spots"]:
-        raise ValueError("Kolory na tej stronie są już w CMYK-u — nie ma czego zamieniać.")
+        if not groups:
+            raise ValueError("Kolory na tej stronie są już w CMYK-u — nie ma czego zamieniać.")
+        # Kolory już CMYK, tylko przezroczystość miesza się w RGB (przegląd 09.10, A4): bez Ghostscripta,
+        # wartości kolorów zostają nietknięte — zmieniamy tylko przestrzeń mieszania.
+        with pikepdf.open(src) as pdf:
+            _rgb_groups(pdf.pages[page].obj, fix=True)
+            if profile == PROFILE_NONE:
+                set_intent(pdf, None)
+            elif profile != PROFILE_KEEP:
+                set_intent(pdf, data, name)
+            pdf.save(dst)
+        return {"text": "kolory były już w CMYK-u (wartości nietknięte); przezroczystość mieszała się w RGB — "
+                        "przestawiona na CMYK" + {PROFILE_KEEP: "; profil kolorystyczny z pliku zostaje",
+                                                  PROFILE_NONE: "; plik bez deklaracji profilu"}.get(profile, f"; profil pliku: {name}")}
     common = ["-dSAFER", "-sDEVICE=pdfwrite", "-dPreserveSeparation=false", "-dPreserveDeviceN=false",
               "-dProcessColorModel=/DeviceCMYK"]
     if fast:
@@ -618,7 +774,8 @@ def step_cmyk(src, dst, p, job) -> dict:
         # informacja. Zamieniamy kolory jeszcze raz, ale te fonty zostają NIEOSADZONE (jak były) —
         # drukarnia podstawi swój krój, a program dalej o tym wie i ostrzega.
         _rm(out)
-        ne = "[" + " ".join("/" + n.split("+")[-1] for n in subs) + "]"
+        # nazwy jako ciągi `(…) cvn` — spacja albo nawias w nazwie psuły PostScript (przegląd 09.10, A6)
+        ne = gs.ps_names([n.split("+")[-1] for n in subs] + list(subs))
         fsrc2, _ = _prepare_fonts(src, dst, page)
         gs_src = reg if _rename_registration(fsrc2, reg) else fsrc2
         try:
@@ -628,12 +785,13 @@ def step_cmyk(src, dst, p, job) -> dict:
             _rm(reg if gs_src != fsrc2 else None)
             _rm(fsrc2 if fsrc2 != src else None)
     try:
-        if profile == PROFILE_KEEP:
-            doc_fn = None                              # deklaracja z pliku zostaje, jaka była
-        elif profile == PROFILE_NONE:
-            doc_fn = lambda pdf: set_intent(pdf, None)
-        else:
-            doc_fn = lambda pdf: set_intent(pdf, data, name)
+        def doc_fn(pdf):
+            # grupy przezroczystości strony i form → CMYK (pdfwrite zostawia RGB; przegląd 09.10, A4)
+            _rgb_groups(pdf.pages[page].obj, fix=True)
+            if profile == PROFILE_NONE:
+                set_intent(pdf, None)
+            elif profile != PROFILE_KEEP:                # KEEP: deklaracja z pliku zostaje, jaka była
+                set_intent(pdf, data, name)
         _splice(src, page, out, dst, doc_fn)
     finally:
         _rm(out)
@@ -659,8 +817,11 @@ def _raster_cmyk(src: str, dst: str, profile: str) -> dict:
     im = Image.open(src)
     im.seek(0)
     info = dict(im.info)
+    import pdfutil
+    info["_nodpi"] = pdfutil.raster_dpi(im) is None     # TIFF bez DPI: nie wpisywać umownego 1 dpi
     if im.mode == "CMYK":
         raise ValueError("Obraz jest już w CMYK-u.")
+    im = _gray8(im)
     if im.mode in ("RGBA", "LA", "PA") or "transparency" in info:
         rgba = im.convert("RGBA")
         bg = Image.new("RGB", im.size, (255, 255, 255))
@@ -682,7 +843,7 @@ def _raster_cmyk(src: str, dst: str, profile: str) -> dict:
                                      renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC,
                                      flags=ImageCms.Flags.BLACKPOINTCOMPENSATION)
     kw = {"icc_profile": fog} if profile != PROFILE_NONE else {}
-    if info.get("dpi"):
+    if info.get("dpi") and not info.get("_nodpi"):
         kw["dpi"] = info["dpi"]
     ext = os.path.splitext(src)[1].lower()
     if ext in (".jpg", ".jpeg"):
@@ -747,6 +908,7 @@ def _fix_black(pdf, container, resources, st: dict, done: set, depth=0) -> int:
     except Exception:
         return 0
     n, out, stack, changed = 0, [], [], False
+    pending = {"f": False, "s": False}    # Registration zamieniona bez `scn` — liczymy przy rysowaniu
     st = dict(st)
     xobj = resources.get("/XObject") if resources is not None else None
     def num(xs):
@@ -786,10 +948,23 @@ def _fix_black(pdf, container, resources, st: dict, done: set, depth=0) -> int:
             side = "f" if o == "cs" else "s"
             kind = _cs_kind(operands[0], resources) if operands else ""
             st[side] = kind
+            pending[side] = False
             if kind == "reg":
-                operands, changed = [pikepdf.Name("/DeviceCMYK")], True
+                # `cs` ustawia kolor POCZĄTKOWY: dla Registration odcień 1 (400 %), dla DeviceCMYK —
+                # sama czerń K100. Bez `scn` po zamianie wychodziło K100 zamiast zalecanej czerni
+                # (przegląd 09.10, C) — dopisujemy jawnie zalecaną czerń.
+                changed = True
+                out.append(pikepdf.ContentStreamInstruction([pikepdf.Name("/DeviceCMYK")], op))
+                out.append(pikepdf.ContentStreamInstruction(rb(), pikepdf.Operator("sc" if side == "f" else "SC")))
+                pending[side] = True
+                continue
+        elif (o in PAINT_FILL or o in PAINT_STROKE) and any(pending.values()):
+            for side, ops_ in (("f", PAINT_FILL), ("s", PAINT_STROKE)):
+                if pending[side] and o in ops_:
+                    n, pending[side] = n + 1, False
         elif o in ("sc", "scn", "SC", "SCN"):
             side = "f" if o in ("sc", "scn") else "s"
+            pending[side] = False
             v = num(operands)
             if st.get(side) == "reg" and len(v) == 1:
                 t = v[0]
@@ -809,7 +984,30 @@ def _fix_black(pdf, container, resources, st: dict, done: set, depth=0) -> int:
             container.obj.Contents = pdf.make_stream(data)
         else:
             container.write(data)
+    # wzory kafelkowe (PaintType 1 — kolory w treści wzoru) i glify fontów Type3 z zasobów tej treści:
+    # tam czerń 4 × 100 % zostawała, a ostrzeżenie o farbie po „Popraw czerń” nie znikało (przegląd 09.10, C).
+    # Rysują się we własnym stanie kolorów (początkowy = czerń), więc zaczynamy od czystego.
+    if resources is not None:
+        try:
+            pats = resources.get("/Pattern")
+            for k in (list(pats.keys()) if pats is not None else []):
+                pt = pats[k]
+                if isinstance(pt, pikepdf.Stream) and int(pt.get("/PatternType", 0)) == 1 and int(pt.get("/PaintType", 1)) == 1:
+                    n += _fix_black(pdf, pt, pt.get("/Resources") or resources, {"f": "", "s": ""}, done, depth + 1)
+            fonts = resources.get("/Font")
+            for k in (list(fonts.keys()) if fonts is not None else []):
+                f = fonts[k]
+                if str(f.get("/Subtype", "")) == "/Type3" and f.get("/CharProcs") is not None:
+                    fres = f.get("/Resources") or resources
+                    for g in list(f.CharProcs.keys()):
+                        n += _fix_black(pdf, f.CharProcs[g], fres, {"f": "", "s": ""}, done, depth + 1)
+        except Exception:
+            pass
     return n
+
+
+PAINT_FILL = {"f", "F", "f*", "B", "B*", "b", "b*", "Tj", "TJ", "'", '"'}
+PAINT_STROKE = {"S", "s", "B", "B*", "b", "b*"}
 
 
 def step_black(src, dst, p, job) -> dict:
@@ -888,6 +1086,7 @@ def _subst_report(src: str, page: int, subs: list) -> list:
     return [{"name": n, "boxes": boxes.get(analyze._fkey(n), [])} for n in names]
 
 
+@pdfutil.mupdf_locked
 def _page_fonts(path: str, page: int) -> list[str]:
     d = pymupdf.open(path)
     try:
@@ -983,9 +1182,12 @@ FLATTEN_SS = 2              # nadpróbkowanie spłaszczenia (zawsze; jak podglą
 # próbek, tyle co AlphaBits=4 — o ile render się mieści w FLATTEN_SS_MAX_MPX (dalej 3×).
 FLATTEN_SS_NOAA = 4
 FLATTEN_SS_MAX_MPX = 4000
+FLATTEN_TIMEOUT_BASE = 600          # s — limit czasu spłaszczenia = podstawa + s na Mpx renderu
+FLATTEN_TIMEOUT_PER_MPX = 1.5
 
 
-def _flatten_supersampled(base: list, dpi: float, ss: int, src: str, out_path: str) -> tuple[str, int, int]:
+def _flatten_supersampled(base: list, dpi: float, ss: int, src: str, out_path: str,
+                          timeout: float | None = None) -> tuple[str, int, int]:
     """Spłaszczenie z nadpróbkowaniem: render ss× gęściej, uśrednienie bloków ss×ss (Pillow reduce),
     zapis BEZSTRATNY: strumień Flate (zlib) wierszy CMYK z predyktorem PNG „Sub” (filtr 1),
     gotowy do wstawienia do PDF-a jako /FlateDecode z /DecodeParms Predictor 15.
@@ -998,7 +1200,8 @@ def _flatten_supersampled(base: list, dpi: float, ss: int, src: str, out_path: s
     from PIL import Image
     import render
     p = gs.stream([*base, "-sDEVICE=pamcmyk32", f"-r{dpi * ss:.4f}", "-sOutputFile=-",
-                   *gs.PREVIEW_PRE, gs.arg_path(src)], quiet=False)   # pełny dziennik: zamienione fonty
+                   *gs.PREVIEW_PRE, gs.arg_path(src)], quiet=False,   # pełny dziennik: zamienione fonty
+                  timeout=timeout)
     comp = zlib.compressobj(FLATTEN_ZLIB_LEVEL)
     fh = open(out_path, "wb")
     try:
@@ -1036,6 +1239,9 @@ def _flatten_supersampled(base: list, dpi: float, ss: int, src: str, out_path: s
     except Exception as e:
         fh.close()
         _rm(out_path)
+        if getattr(p, "timed_out", False):
+            raise ValueError(f"Spłaszczanie trwało dłużej niż {max(1, round(timeout / 60))} min — przerwane. Plik jest "
+                             "bardzo złożony albo uszkodzony; spróbuj „Zostaw jak jest”.") from e
         raise ValueError(f"Ghostscript nie dał rady spłaszczyć strony. Komunikat: {e}") from e
 
 
@@ -1056,14 +1262,15 @@ def step_flatten(src, dst, p, job) -> dict:
     if fi:
         raise ValueError(f"Strona już jest jednym obrazem ({fi['w']} × {fi['h']} px) — spłaszczanie niczego nie "
                          "poprawi, tylko przeliczyłoby piksele od nowa. Wybierz „Zostaw jak jest”.")
-    d = pymupdf.open(src)
-    try:
-        rect = d[page].rect
-    finally:
-        d.close()
+    with pdfutil.MUPDF_LOCK:
+        d = pymupdf.open(src)
+        try:
+            rect = d[page].rect
+        finally:
+            d.close()
     w_pt, h_pt = float(rect.width), float(rect.height)
     plan = flatten_plan(w_pt, h_pt, float(p.get("k", 1.0)))
-    data, name = file_icc(src)
+    data, name = file_icc(src, intent_only=True)     # tylko deklaracja, inaczej FOGRA39 (przegląd 09.10, B15)
     work = os.path.dirname(os.path.abspath(dst))
     if data:
         icc_path = os.path.join(work, "icc_splaszcz.icc")
@@ -1097,7 +1304,10 @@ def step_flatten(src, dst, p, job) -> dict:
             f"-dFirstPage={page + 1}", f"-dLastPage={page + 1}", *gs.SPEED[:1], *aa,
             "-dOverprint=/simulate"]                 # na urządzeniu CMYK to nie symulacja, tylko druk
     try:
-        (log, pw_, ph_), err = _flatten_supersampled(base, plan["dpi"], ss, gs_src, zpath), None
+        # limit czasu skalowany do renderu: ok. 20× czasu zmierzonego (0,075 s na Mpx renderu na 2 rdzeniach)
+        # + 10 min zapasu (przegląd 09.10, C — zawieszony gs trzymał blokadę zadania)
+        limit = FLATTEN_TIMEOUT_BASE + FLATTEN_TIMEOUT_PER_MPX * plan["px"][0] * plan["px"][1] * ss * ss / 1e6
+        (log, pw_, ph_), err = _flatten_supersampled(base, plan["dpi"], ss, gs_src, zpath, limit), None
     finally:
         _rm(gs_src if gs_src != src else None)
     try:

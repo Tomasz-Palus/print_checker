@@ -1,5 +1,5 @@
 // Ustawienia: kalibracja monitora (dla „100 %") i indeks wymiarów.
-import { $, api } from "./util.js";
+import { $, api, esc } from "./util.js";
 import { S, changed } from "./state.js";
 
 const BAR_PX = 400;           // pasek wzorcowy ma stałą długość w px CSS
@@ -60,7 +60,7 @@ async function pollIdx(start, retry) {
   const total = st.total_products || 0, pct = total ? Math.round(st.indexed / total * 100) : 0;
   $("idxSt").innerHTML = `Znane wymiary: <b>${st.indexed}</b> z ${total} produktów (${pct} %)`
     + (st.failed ? `, nieudanych ${st.failed}` : "") + (st.running ? ` — <b>pobieram</b> ${st.done}/${st.total}…` : "")
-    + (st.last_error ? `<br>Ostatni błąd: ${st.last_error}` : "");
+    + (st.last_error ? `<br>Ostatni błąd: ${esc(st.last_error)}` : "");   // nazwa produktu ze strony — esc (przegląd 09.10, A3)
   $("idxBar").style.width = pct + "%";
   $("idxBuild").hidden = !!st.running; $("idxRetry").hidden = !!st.running || !st.failed; $("idxStop").hidden = !st.running;
   clearTimeout(idxTimer);

@@ -39,6 +39,9 @@ def main() -> None:
         sys.exit(1)
     seed = os.urandom(32)
     pub = ed25519.public_key(seed).hex()
+    # klucz małego rzędu przyjąłby podrobiony podpis (z losowego seeda praktycznie niemożliwy,
+    # ale sprawdzamy — przegląd 09.10, B23)
+    assert not ed25519.small_order(ed25519._decompress(bytes.fromhex(pub)))
     msg = b"test"
     assert ed25519.verify(bytes.fromhex(pub), msg, ed25519.sign(seed, msg))
     src = re.sub(r'PUBLIC_KEY\s*=\s*"[0-9a-fA-F]*"', f'PUBLIC_KEY = "{pub}"', src)

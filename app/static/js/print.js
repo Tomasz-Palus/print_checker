@@ -35,6 +35,37 @@ async function setAct(name, act) {
   changed();
   if (act === "fix") await applyStep(name, name === "flatten" ? { k: scaleK() } : {});
 }
+// Błąd analizy albo analiza niepełna (przegląd 09.10, A2): rozdział NIE przechodzi sam. Rząd `.achk`:
+// „Sprawdź jeszcze raz” (main.loadAnalysis pyta serwer od nowa) i „Pomiń sprawdzanie” (settle =
+// "unchecked" — Akceptacja i Pobierz wypisują ostrzeżenie); przy analizie niepełnej, gdy plik nie
+// wymaga innej decyzji — „Rozumiem, idę dalej” (settle = "partial").
+function checkRow(pre, name, a, clean) {
+  const row = $(pre + "Chk");
+  const open = !S.settle[name] && !hasStep(name) && !S.choice[name]?.act;
+  const err = open && !!a?.error, part = open && !!a && !a.error && !!a.partial && clean;
+  row.hidden = !(err || part);
+  row.dataset.mode = err ? "unchecked" : "partial";
+  const [retry, skip] = row.querySelectorAll("button");
+  retry.hidden = !err; retry.disabled = !!a?.retrying || !!S.busy;
+  skip.textContent = err ? "Pomiń sprawdzanie" : "Rozumiem, idę dalej";
+  skip.disabled = !!S.busy || !!a?.retrying;
+}
+document.querySelectorAll(".achk").forEach((row) => row.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-chk]");
+  if (!b || !S.job || S.busy) return;
+  if (b.dataset.chk === "retry") {
+    if (S.analysis?.error) { S.analysis.retrying = true; S.anRetry = true; }
+  } else S.settle[row.dataset.name] = row.dataset.mode;
+  changed();
+}));
+// opis błędu / niepełnej analizy: krótko w rozdziale, szczegóły pod „?”
+const errSay = (what, a) => a.retrying ? loading(what)
+  : `<span class="say warn">Nie udało się sprawdzić: ${what}.</span> Sprawdź jeszcze raz albo pomiń sprawdzanie — `
+    + `wtedy sprawdź to w pliku sam.`;
+const partialNote = (a) => `<span class="say warn">Analiza pliku jest niepełna</span> — część treści nie została `
+  + `sprawdzona${a.partial_reason ? ` (${esc(a.partial_reason)})` : ""}. Obejrzyj podgląd uważnie.`;
+const partialBrief = `<span class="warn">Analiza niepełna</span> — część pliku nie została sprawdzona.`;
+
 // „Cofnij" w starszym rozdziale (klasa `past`, main.render): cofa do tego rozdziału — razem
 // z krokami zrobionymi później (undoStep pyta, gdy jakieś są).
 document.querySelectorAll(".ch-back button").forEach((b) => b.addEventListener("click", () => {
@@ -79,7 +110,8 @@ export function renderPrint() {
 // ------------------------------------------------------------------ kolory
 document.querySelectorAll("#coAct button").forEach((b) => b.addEventListener("click", () => setAct("cmyk", b.dataset.v)));
 document.querySelectorAll("#coProf button").forEach((b) => b.addEventListener("click", async () => {
-  const c = choice("cmyk"), p = b.dataset.v;
+  if (!S.job) return;
+  const c = choice("cmyk"), p = b.dataset.v, jid = S.job.job_id;
   if (S.busy || (c.profile === p && hasStep("cmyk"))) return;
   if (hasStep("cmyk")) {                        // inny profil = zamiana od nowa
     if (!(await undoStep("cmyk"))) return;
@@ -88,7 +120,9 @@ document.querySelectorAll("#coProf button").forEach((b) => b.addEventListener("c
   S.choice.cmyk.profile = p; S.cmykProfile = p;
   changed();
   await applyStep("cmyk", { profile: p });
-  if (!hasStep("cmyk")) { S.choice.cmyk.profile = null; changed(); }   // błąd — wybór wraca
+  // błąd — wybór wraca. W międzyczasie mógł przyjść inny plik (S.choice wyczyszczone → dawniej
+  // TypeError, przegląd 09.10, C)
+  if (S.job?.job_id === jid && !hasStep("cmyk") && S.choice.cmyk) { S.choice.cmyk.profile = null; changed(); }
 }));
 
 $("bkDo").addEventListener("click", () => applyStep("black", {}));
@@ -105,10 +139,12 @@ export function renderColor() {
   if (!on && !c.act && !a) {
     st = "open"; say = loading("kolory");
   } else if (!on && !c.act && a.error) {
-    st = "done"; sum = "nie udało się sprawdzić";
-    say = `<span class="say warn">Nie udało się sprawdzić kolorów.</span>`; note = esc(a.error);
+    const sk = S.settle.cmyk === "unchecked";
+    st = sk ? "done" : "todo"; sum = sk ? "niesprawdzone" : "";
+    say = sk ? `<span class="say warn">Kolorów nie sprawdzono</span> — sprawdź je w pliku sam.` : errSay("kolory", a);
+    note = esc(a.error);
   } else if (!on && !c.act && !need.any) {
-    st = "done"; sum = "CMYK";
+    st = !a.partial || S.settle.cmyk ? "done" : "todo"; sum = st === "done" ? "CMYK" : "";
     say = `<span class="say ok">Kolory są w CMYK — w porządku.</span>`;
   } else {
     if (S.settle.cmyk) st = "done";
@@ -127,10 +163,17 @@ export function renderColor() {
       const what = [n.rgb && "<b>RGB</b>", n.lab && "<b>Lab</b>",
         n.spots.length && `<b>dodatkowe</b> (spot: ${esc(n.spots.slice(0, 3).join(", "))}${n.spots.length > 3 ? "…" : ""})`,
         n.other && "<b>inne</b>"].filter(Boolean);
-      say = `W projekcie są kolory ${what.join(" i ")}. Drukujemy w CMYK — lepiej przeliczyć je tutaj `
-        + `i zobaczyć wynik, niż zdać się na drukarnię. Podgląd pokazuje teraz, jak przeliczy je drukarnia.`;
+      say = what.length
+        ? `W projekcie są kolory ${what.join(" i ")}. Drukujemy w CMYK — lepiej przeliczyć je tutaj `
+          + `i zobaczyć wynik, niż zdać się na drukarnię. Podgląd pokazuje teraz, jak przeliczy je drukarnia.`
+        : `Kolory są w CMYK, ale <b>przezroczystość miesza się w RGB</b> — trzeba zamienić na CMYK.`;
+      // grupa przezroczystości w RGB (kontrakt `group_rgb`, przegląd 09.10) — wyjaśnienie pod „?”
+      if (n.group) note = `Strona (albo jej fragment) ma ustawione mieszanie przezroczystości w RGB. Cienie, `
+        + `półprzezroczystość i tryby mieszania wyjdą wtedy w druku inaczej niż na podglądzie. Zamiana na CMYK `
+        + `ustawia mieszanie w CMYK.`;
     }
   }
+  if (a && !a.error && a.partial) note = partialNote(a) + (note ? "<br>" + note : "");
   chapter("ch-color", st, sum);
   // Za dużo farby (ink.py). Jednolitą czerń (pola, napisy, linie w CMYK albo „Registration”) da się
   // poprawić przyciskiem — na zalecaną czerń Adsystem C78 M85 Y90 K100 (Tomasz 29.09); obrazów
@@ -164,8 +207,10 @@ export function renderColor() {
     else if (!on && a && !a.error && need.any) {
       const n = colorNeed(a);
       const sp = n.spots.length ? `spot (${esc(n.spots.slice(0, 3).join(", "))}${n.spots.length > 3 ? "…" : ""})` : "";
-      b = `Kolory: <b>${[n.rgb && "RGB", n.lab && "Lab", sp, n.other && "inne"].filter(Boolean).join(", ")}</b> — do druku potrzebny CMYK.`;
+      b = `Kolory: <b>${[n.rgb && "RGB", n.lab && "Lab", sp, n.other && "inne", n.group && "przezroczystość w RGB"].filter(Boolean).join(", ")}</b> — do druku potrzebny CMYK.`;
     }
+    if (!on && a?.error && !S.settle.cmyk) b = `<span class="warn">Nie udało się sprawdzić kolorów</span>.`;
+    if (!on && a && !a.error && a.partial) b += `${b ? "<br>" : ""}${partialBrief}`;
     if (ib.length && !fixed) b += `${b ? "<br>" : ""}<span class="warn">Za dużo farby</span>: do ${ink.max} % (limit ${ink.limit} %).`;
     brief("coBrief", b);
   }
@@ -181,6 +226,7 @@ export function renderColor() {
   const rows = need.any || !!c.act;
   $("coAct").hidden = !rows;
   pick("coAct", on ? "convert" : c.act);
+  checkRow("co", "cmyk", a, !need.any);
   // rząd 2 przy zamianie: profil („z pliku" — tylko gdy plik jakiś ma)
   const fp = isPdf() ? fileProfile(a) : "";
   $("coProf").hidden = !(rows && c.act === "convert");
@@ -216,10 +262,12 @@ export function renderOverprint() {
   if (!on && !c.act && !a) {
     st = "open"; say = loading("overprint");
   } else if (!on && !c.act && a.error) {
-    st = "done"; sum = "nie udało się sprawdzić";
-    say = `<span class="say warn">Nie udało się sprawdzić overprintu.</span>`;
+    const sk = S.settle.overprint === "unchecked";
+    st = sk ? "done" : "todo"; sum = sk ? "niesprawdzony" : "";
+    say = sk ? `<span class="say warn">Overprintu nie sprawdzono</span> — sprawdź go w pliku sam.` : errSay("overprint", a);
+    note = esc(a.error);
   } else if (!on && !c.act && !uses) {
-    st = "done"; sum = "brak";
+    st = !a.partial || S.settle.overprint ? "done" : "todo"; sum = st === "done" ? "brak" : "";
     say = `<span class="say ok">Projekt nie używa overprintu.</span>`;
   } else {
     if (S.settle.overprint || on) st = "done";
@@ -243,10 +291,13 @@ export function renderOverprint() {
         + `z overprintem zostaje tło. <b>Wyłącz overprint</b>, żeby na pewno się wydrukował.`;
     }
   }
+  if (!on && a && !a.error && a.partial) note = partialNote(a) + (note ? "<br>" + note : "");
   chapter("ch-op", st, sum);
-  brief("opBrief", on ? "" : !a ? loading("overprint") : a.error || !uses ? ""
-    : `Overprint: <b>${uses} ${plural(uses, "miejsce", "miejsca", "miejsc")}</b>`
-      + (white ? ` · <span class="warn">biel z overprintem: ${white}</span>` : "") + ".");
+  brief("opBrief", on ? "" : !a ? loading("overprint")
+    : a.error ? (S.settle.overprint ? "" : `<span class="warn">Nie udało się sprawdzić overprintu</span>.`)
+    : (uses ? `Overprint: <b>${uses} ${plural(uses, "miejsce", "miejsca", "miejsc")}</b>`
+      + (white ? ` · <span class="warn">biel z overprintem: ${white}</span>` : "") + "." : "")
+      + (a.partial ? `${uses ? "<br>" : ""}${partialBrief}` : ""));
   $("opSay").innerHTML = say;
   $("opNote").innerHTML = note; $("opNote").hidden = !note;
   $("opErr").hidden = !S.stepErr.overprint; $("opErr").textContent = S.stepErr.overprint || "";
@@ -254,6 +305,7 @@ export function renderOverprint() {
   $("opAct").hidden = !rows;
   pick("opAct", on ? "fix" : c.act);
   lockRows(["opAct"]);
+  checkRow("op", "overprint", a, !uses);
   $("opMini").hidden = !on;
   if (S.cmp?.step !== "overprint") $("opMini").querySelector("input").value = 100;
 }
@@ -274,10 +326,12 @@ export function renderFonts() {
   if (!on && !c.act && !a) {
     st = "open"; say = loading("fonty");
   } else if (!on && !c.act && a.error) {
-    st = "done"; sum = "nie udało się sprawdzić";
-    say = `<span class="say warn">Nie udało się sprawdzić fontów.</span>`;
+    const sk = S.settle.outline === "unchecked";
+    st = sk ? "done" : "todo"; sum = sk ? "niesprawdzone" : "";
+    say = sk ? `<span class="say warn">Fontów nie sprawdzono</span> — sprawdź je w pliku sam.` : errSay("fonty", a);
+    note = esc(a.error);
   } else if (!on && !c.act && !any) {
-    st = "done"; sum = "brak tekstu";
+    st = !a.partial || S.settle.outline ? "done" : "todo"; sum = st === "done" ? "brak tekstu" : "";
     say = `<span class="say ok">W projekcie nie ma tekstu w fontach</span> — nie ma czego zamieniać.`;
   } else {
     if (S.settle.outline || on) st = "done";
@@ -308,17 +362,21 @@ export function renderFonts() {
         + `plikach (tekst z Worda, Canvy) nawet krzaczki. Najpewniej: poproś klienta o PDF z osadzonymi fontami.`;
     }
   }
+  if (!on && a && !a.error && a.partial) note = partialNote(a) + (note ? "<br>" + note : "");
   chapter("ch-fonts", st, sum);
   {
     const baked = on ? bakedFonts("outline") : [];
     brief("foBrief", on ? (baked.length ? `<span class="warn">Krój zastępczy</span>: ${esc(baked.join(", "))}.` : "")
-      : !a ? loading("fonty") : a.error || !fonts.length ? ""
-      : `Tekst w fontach (${fonts.length}) — nie zamieniony na krzywe`
-        + (miss.length ? ` · <span class="warn">nieosadzone: ${esc(miss.join(", "))}</span>` : "") + ".");
+      : !a ? loading("fonty")
+      : a.error ? (S.settle.outline ? "" : `<span class="warn">Nie udało się sprawdzić fontów</span>.`)
+      : (fonts.length ? `Tekst w fontach (${fonts.length}) — nie zamieniony na krzywe`
+        + (miss.length ? ` · <span class="warn">nieosadzone: ${esc(miss.join(", "))}</span>` : "") + "." : "")
+        + (a.partial ? `${fonts.length ? "<br>" : ""}${partialBrief}` : ""));
   }
   $("foSay").innerHTML = say;
   $("foNote").innerHTML = note; $("foNote").hidden = !note;
   rowsFor("fo", "outline", any || !!c.act, on);
+  checkRow("fo", "outline", a, !any);
   // nieosadzony, WIDOCZNY font: można zostawić (Tomasz 29.09: „da się przejść dalej i wydrukować,
   // po prostu info”) — ostrzeżenie zostaje przy decyzji, nad podglądem i przy pobieraniu
   if (!on && miss.length && c.act === "keep") {
@@ -362,11 +420,14 @@ export function renderFlatten() {
   if (!on && !c.act && !a) {
     st = "open"; say = loading("przezroczystość");
   } else if (!on && !c.act && a.error) {
-    st = "done"; sum = "nie udało się sprawdzić";
-    say = `<span class="say warn">Nie udało się sprawdzić przezroczystości.</span>`;
+    const sk = S.settle.flatten === "unchecked";
+    st = sk ? "done" : "todo"; sum = sk ? "niesprawdzone" : "";
+    say = sk ? `<span class="say warn">Przezroczystości nie sprawdzono</span> — projekt zostaje warstwowy.`
+      : errSay("przezroczystość", a);
+    note = esc(a.error);
   } else if (!on && a.flat_image) {
     // strona już jest jednym obrazem — spłaszczenie tylko przeliczyłoby piksele (Tomasz 29.09: ząbki)
-    st = "done"; sum = "już jeden obraz";
+    st = !a.partial || S.settle.flatten ? "done" : "todo"; sum = st === "done" ? "już jeden obraz" : "";
     say = `<span class="say ok">Projekt jest już jednym obrazem</span> (${nf(a.flat_image.w)} × ${nf(a.flat_image.h)} px) — `
       + `nie ma czego spłaszczać. Program zostawia go bez zmian.`;
   } else {
@@ -409,11 +470,14 @@ export function renderFlatten() {
     + `— program poszuka ${live.length === 1 ? "go" : "ich"} w Google Fonts i w systemie, a czego nie znajdzie, `
     + `to po spłaszczeniu zostanie na stałe krojem zastępczym (pomarańczowe ramki na podglądzie). `
     + (note || "");
+  if (!on && a && !a.error && a.partial) note = partialNote(a) + (note ? "<br>" + note : "");
   chapter("ch-flat", st, sum);
   const adv = on ? null : flattenAdvice(a, kinds, live);
   brief("flBrief", on ? (fb.length ? `<span class="warn">Krój zastępczy</span>: ${esc(fb.join(", "))}.` : "")
-    : !a ? loading("przezroczystość") : !adv ? ""
-    : `<b>Zalecane: ${adv.rec === "fix" ? "Spłaszcz projekt" : "Zostaw jak jest"}.</b> ${adv.why[0].toUpperCase() + adv.why.slice(1)}.`);
+    : !a ? loading("przezroczystość")
+    : a.error ? (S.settle.flatten ? "" : `<span class="warn">Nie udało się sprawdzić przezroczystości</span>.`)
+    : (adv ? `<b>Zalecane: ${adv.rec === "fix" ? "Spłaszcz projekt" : "Zostaw jak jest"}.</b> ${adv.why[0].toUpperCase() + adv.why.slice(1)}.` : "")
+      + (a.partial ? `${adv ? "<br>" : ""}${partialBrief}` : ""));
   // zalecany przycisk z dopiskiem, jak „FOGRA39 (zalecany)” w Kolorach
   $("flAct").querySelectorAll("button").forEach((btn) => {
     const base = btn.dataset.v === "fix" ? "Spłaszcz projekt" : "Zostaw jak jest";
@@ -423,6 +487,7 @@ export function renderFlatten() {
   $("flSay").innerHTML = say;
   $("flNote").innerHTML = note; $("flNote").hidden = !note;
   rowsFor("fl", "flatten", (!!a && !a.error && !a.flat_image) || on || !!c.act, on);
+  checkRow("fl", "flatten", a, !!a?.flat_image);
 }
 
 // Fonty utrwalone krojem zastępczym przez dany krok (serwer: `fonts_subst`).

@@ -102,12 +102,19 @@ def sign(seed: bytes, msg: bytes) -> bytes:
     return R + int.to_bytes(s, 32, "little")
 
 
+def small_order(P) -> bool:
+    """Punkt rzędu ≤ 8 (8·P = punkt neutralny). Taki klucz publiczny przyjąłby podpis
+    podrobiony bez klucza prywatnego (przegląd 09.10, B23) — nie wolno go używać."""
+    Q = _mul(8, P)
+    return Q[0] % _p == 0 and (Q[1] - Q[2]) % _p == 0
+
+
 def verify(public: bytes, msg: bytes, signature: bytes) -> bool:
     if len(public) != 32 or len(signature) != 64:
         return False
     A = _decompress(public)
     R = _decompress(signature[:32])
-    if A is None or R is None:
+    if A is None or R is None or small_order(A):
         return False
     s = int.from_bytes(signature[32:], "little")
     if s >= _L:

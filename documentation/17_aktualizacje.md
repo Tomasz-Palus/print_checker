@@ -1257,3 +1257,25 @@ Numery jak w `18_przeglad_kodu.md`.
   - po CMYK i wyłączonym overprincie → Spłaszcz (tryby mieszania);
   - `Test_edge_1strona` → Zostaw (brak przezroczystości);
   - cały samouczek przechodzi.
+
+## 0.6.8 — naprawy z przeglądu kodu 09.10 (doc 19)
+
+- Tomasz: „napraw wszystkie punkty” z przeglądu i testów 0.6.7. Szczegóły, dowody i ograniczenia:
+  `19_przeglad_kodu_0.6.7.md`, sekcja „Stan naprawy — wersja 0.6.8”.
+- **Najważniejsze:**
+  - wymiar JPG/PNG/TIFF z DPI > 72 liczony z pikseli Pillow (wcześniej np. 300 dpi → ¼ wymiaru);
+  - błąd sprawdzania nie domyka rozdziałów — „Sprawdź jeszcze raz” / „Pomiń sprawdzanie”;
+  - XSS przez nazwę fontu z pliku (podgląd) i w Ustawieniach;
+  - CMYK i „Dopasuj wymiar”: grupa przezroczystości strony w CMYK / zachowana;
+  - podmiana fontu z nazwą ze spacją wykrywana;
+  - jakość: filtr widoczności w mm, wzory, maski, Type3, obrazy nieczytelne, próg powiększenia;
+  - TIFF wielostronicowy, wyścigi w interfejsie, 409 przy pobraniu innej wersji, atomowe zapisy
+    wytycznych/indeksu/listy produktów, walidacja parametrów API;
+  - aktualizacje: wersja związana z podpisem, status „odrzucona”, ponowna suma przed instalacją,
+    sprzątanie procesów przed instalacją, macOS 14 + certifi; CI: sumy Ghostscripta i Inno Setup,
+    akcje przypięte do commitów, `--require-hashes`, wydanie tylko z `main`.
+- Nowe w kodzie: `pdfutil.MUPDF_LOCK` / `mupdf_locked` (PyMuPDF z wielu wątków), `pdfutil.raster_dpi`
+  (TIFF bez znacznika rozdzielczości = brak DPI, nie 1 dpi), `pdfutil.wrap_page`, `instance.shutdown`,
+  `Job.page_path`, `Job.analysis_of`, `guidelines.PARSER_VERSION` = 6 (wytyczne przeliczą się same).
+- Pułapka na przyszłość: MuPDF podaje wymiar strony obrazu przeliczony z DPI (przy DPI ≥ 72); testy
+  rastrów zawsze w 100, 150 i 300 dpi oraz TIFF bez rozdzielczości.

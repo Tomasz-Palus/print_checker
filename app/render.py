@@ -24,6 +24,7 @@ import pymupdf
 from PIL import Image
 
 import gs
+import pdfutil as _pdfutil
 
 Image.MAX_IMAGE_PIXELS = None
 MM = 25.4 / 72.0
@@ -79,11 +80,12 @@ def canonicalize(path: str) -> tuple[str, str | None]:
     ext = os.path.splitext(path)[1].lower()
     out = os.path.join(os.path.dirname(path), "canon.pdf")
     if ext == ".svg":
-        doc = pymupdf.open(path)
-        try:
-            data = doc.convert_to_pdf()
-        finally:
-            doc.close()
+        with MUPDF_LOCK:
+            doc = pymupdf.open(path)
+            try:
+                data = doc.convert_to_pdf()
+            finally:
+                doc.close()
         with open(out, "wb") as f:
             f.write(data)
         return out, "SVG → PDF"
@@ -178,9 +180,9 @@ def normalize_geometry(path: str) -> tuple[str, list]:
                 m, W, H = [1, 0, 0, 1, -x0, -y0], w, h
             if uu != 1.0:
                 m, W, H = _mat_mul(m, [uu, 0, 0, uu, 0, 0]), W * uu, H * uu
-            cmd = ("q " + " ".join(f"{x:.6f}".rstrip("0").rstrip(".") or "0" for x in m) + " cm\n").encode()
-            page.contents_add(pdf.make_stream(cmd), prepend=True)
-            page.contents_add(pdf.make_stream(b"\nQ\n"), prepend=False)
+            cmd = (" ".join(f"{x:.6f}".rstrip("0").rstrip(".") or "0" for x in m) + " cm").encode()
+            import pdfutil
+            pdfutil.wrap_page(pdf, page, cmd)      # odporne na nadmiarowe Q w treści (przegląd 09.10, C)
             # wzory z zasobów STRONY — kopia z macierzą przeliczoną o nasz obrót/przesunięcie
             res = o.get("/Resources")
             pats = res.get("/Pattern") if res is not None else None
@@ -241,15 +243,25 @@ def normalize_geometry(path: str) -> tuple[str, list]:
     return out, notes
 
 
+@_pdfutil.mupdf_locked
 def inspect(path: str, original_name: str) -> dict:
     """Metadane pliku: strony, wymiary, spady (TrimBox/ArtBox), dla rastra — piksele i DPI."""
     raster = is_raster(original_name)
-    dpi = None
+    # raster: piksele i DPI z Pillow, osobno dla każdej strony (TIFF). Wymiar strony z MuPDF się
+    # nie nadaje — przy DPI ≥ 72 MuPDF podaje go już w punktach (px × 72 / DPI), a kod brał go za
+    # piksele: JPG 150 dpi wychodził o połowę za mały (przegląd 09.10, A1)
+    frames = []
     if raster:
         try:
             with Image.open(path) as im:
-                d = im.info.get("dpi")
-                dpi = (float(d[0]), float(d[1])) if d and d[0] and d[1] else None
+                for i in range(getattr(im, "n_frames", 1)):
+                    im.seek(i)
+                    d = im.info.get("dpi")
+                    # TIFF bez znacznika XResolution: Pillow podaje umowne (1, 1) — to brak DPI
+                    if im.format == "TIFF" and 282 not in getattr(im, "tag_v2", {}):
+                        d = None
+                    dpi = (float(d[0]), float(d[1])) if d and d[0] and d[1] else None
+                    frames.append((im.width, im.height, dpi))
         except Exception:
             pass
     doc = open_doc(path)
@@ -273,10 +285,11 @@ def inspect(path: str, original_name: str) -> dict:
             except Exception:
                 pass
             if raster:
-                p["width_px"], p["height_px"] = int(round(r.width)), int(round(r.height))
+                wpx, hpx, dpi = frames[i] if i < len(frames) else (int(round(r.width)), int(round(r.height)), None)
+                p["width_px"], p["height_px"] = wpx, hpx
                 p["dpi"] = [round(dpi[0], 1), round(dpi[1], 1)] if dpi else None
-                p["width_mm"] = round(r.width / dpi[0] * 25.4, 2) if dpi else None
-                p["height_mm"] = round(r.height / dpi[1] * 25.4, 2) if dpi else None
+                p["width_mm"] = round(wpx / dpi[0] * 25.4, 2) if dpi else None
+                p["height_mm"] = round(hpx / dpi[1] * 25.4, 2) if dpi else None
             pages.append(p)
         return {"name": original_name, "kind": "raster" if raster else "pdf",
                 "size_bytes": os.path.getsize(path), "page_count": len(pages), "pages": pages}
@@ -288,6 +301,10 @@ def inspect(path: str, original_name: str) -> dict:
 # miniatury i wycinki (MuPDF; Ghostscript, gdy MuPDF odmawia)
 # ----------------------------------------------------------------------------
 MUPDF_IMAGE_LIMIT = 400_000_000      # MuPDF odmawia obrazów > ~0,5 Gpx („Overly large image")
+# PyMuPDF nie jest bezpieczny wątkowo, a ostrzeżenia MuPDF (mupdf_warnings) są globalne — ocena
+# jakości w tle i trasy serwera wołały go naraz (przegląd 09.10, B24). Każde użycie MuPDF z wątku
+# bierze tę blokadę (RLock: region_png → open_doc w tym samym wątku).
+MUPDF_LOCK = _pdfutil.MUPDF_LOCK
 
 
 def _mupdf_can(page) -> bool:
@@ -344,23 +361,36 @@ def fix_edges(data: bytes, gray: bool = False) -> bytes:
 
 def page_png(path: str, page_index: int, max_px: int) -> bytes:
     """Cała strona jako PNG (miniatura, skan ramek w pikselach)."""
-    doc = open_doc(path)
-    try:
-        page = doc[page_index]
-        zoom = max_px / (max(page.rect.width, page.rect.height) or 1)
-        if not is_raster(path) and not _mupdf_can(page):
-            return region_png(path, page_index, tuple(page.rect), zoom, max_px=max_px)
-        _interpolate(doc)
-        pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False, colorspace=pymupdf.csRGB)
-        return pix.tobytes("png")
-    finally:
-        doc.close()
+    with MUPDF_LOCK:
+        doc = open_doc(path)
+        try:
+            page = doc[page_index]
+            zoom = max_px / (max(page.rect.width, page.rect.height) or 1)
+            big = not is_raster(path) and not _mupdf_can(page)
+            if not big:
+                _interpolate(doc)
+                pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False, colorspace=pymupdf.csRGB)
+                return pix.tobytes("png")
+            rect = tuple(page.rect)
+        finally:
+            doc.close()
+    return region_png(path, page_index, rect, zoom, max_px=max_px)
 
 
 def region_png(path: str, page_index: int, clip_pt: tuple, px_per_pt: float, smooth: bool = True,
                max_px: int = 3200, gray: bool = False) -> bytes:
     """Wycinek strony (x0,y0,x1,y1 w pt, początek w lewym górnym rogu) — narzędzie pomiarowe
     analizy i mapy detalu. `gray` = skala szarości (mniej pamięci)."""
+    with MUPDF_LOCK:                 # Ghostscript (_gs_region) już poza blokadą
+        r = _region_mupdf(path, page_index, clip_pt, px_per_pt, smooth, max_px, gray)
+    if isinstance(r, bytes):
+        return r
+    pr, clip, px_per_pt = r
+    return _gs_region(path, page_index, pr, clip, px_per_pt, smooth, gray)
+
+
+def _region_mupdf(path, page_index, clip_pt, px_per_pt, smooth, max_px, gray):
+    """Wycinek MuPDF-em (pod MUPDF_LOCK) — PNG albo (strona, wycinek, skala) dla Ghostscripta."""
     doc = open_doc(path)
     try:
         page = doc[page_index]
@@ -381,7 +411,7 @@ def region_png(path: str, page_index: int, clip_pt: tuple, px_per_pt: float, smo
                 return pix.tobytes("png")
     finally:
         doc.close()
-    return _gs_region(path, page_index, pr, clip, px_per_pt, smooth, gray)
+    return pr, clip, px_per_pt
 
 
 def _gs_region(path, page_index, page_rect, clip, px_per_pt, smooth, gray) -> bytes:
@@ -672,11 +702,12 @@ def text_as_curves(src: str, page: int) -> tuple[str, int]:
     if os.path.exists(out):
         return out, 0
     try:
-        doc = pymupdf.open(src)
-        try:
-            has = bool(doc[page].get_fonts())
-        finally:
-            doc.close()
+        with MUPDF_LOCK:
+            doc = pymupdf.open(src)
+            try:
+                has = bool(doc[page].get_fonts())
+            finally:
+                doc.close()
     except Exception:
         return src, page
     if not has:

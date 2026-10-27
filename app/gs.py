@@ -260,11 +260,13 @@ def substituted(log: str, ignore=()) -> list[str]:
     out = []
     # font CID (np. japoński, chiński, czasem polski z Worda): Ghostscript mówi wprost „substitute”
     # i bierze krój z CIDFSubst (review 27.09, A14)
-    for m in re.finditer(r"Loading CIDFont (\S+) substitute from", log):
+    for m in re.finditer(r"Loading CIDFont (.+?) substitute from", log):
         name = m.group(1)
         if name.split("+")[-1] not in skip and name not in out:
             out.append(name)
-    for m in re.finditer(r"Loading font (\S+) \(or substitute\) from (.+)", log):
+    # nazwa może mieć spacje („Foo Bar Sans” — eksporty z LibreOffice/Corela); `\S+` jej nie łapał
+    # i zamiennik przechodził bez ostrzeżenia (przegląd 09.10, A6)
+    for m in re.finditer(r"Loading font (.+?) \(or substitute\) from (.+)", log):
         name, path = m.group(1), m.group(2).strip().lower().replace("\\", "/")
         if is_base14(name) or name.split("+")[-1] in skip:
             continue
@@ -375,7 +377,21 @@ def log_of(r: subprocess.CompletedProcess, n: int = 400) -> str:
     return ((r.stderr or "") + " " + (r.stdout or "")).strip()[-n:] or "brak komunikatu"
 
 
-def stream(args: list, quiet: bool = True) -> subprocess.Popen:
+def ps_names(names) -> str:
+    """Tablica nazw PostScriptu z dowolnych nazw fontów: `[(Foo Bar) cvn …]`. Zapis `/Foo Bar`
+    rozpadał się na dwie nazwy, a nawias w nazwie psuł składnię (przegląd 09.10, A6). Znaki spoza
+    ASCII — ósemkowo, bajty UTF-8."""
+    out = []
+    for n in names:
+        s = ""
+        for b in str(n).encode("utf-8", "replace"):
+            ch = chr(b)
+            s += ("\\" + ch) if ch in "()\\" else ch if 32 <= b < 127 else f"\\{b:03o}"
+        out.append(f"({s}) cvn")
+    return "[" + " ".join(out) + "]"
+
+
+def stream(args: list, quiet: bool = True, timeout: float | None = None) -> subprocess.Popen:
     """Ghostscript z obrazem na stdout (piramida podglądu).
 
     Komunikaty (stderr) czytamy NA BIEŻĄCO w osobnym wątku: na Windowsie bufor potoku ma
@@ -389,6 +405,21 @@ def stream(args: list, quiet: bool = True) -> subprocess.Popen:
     _track(p)
     p.err_tail = b""
     p.err_all = bytearray()          # cały dziennik (do 2 MB) — np. zamienione fonty przy spłaszczaniu
+    p.timed_out = False
+    # limit czasu (przegląd 09.10, C): zawieszony Ghostscript trzymał blokadę zadania bez końca.
+    # Po czasie proces jest zabijany — czytający dostaje koniec strumienia, a `timed_out` mówi dlaczego.
+    timer = None
+    if timeout:
+        def _kill():
+            if p.poll() is None:
+                p.timed_out = True
+                try:
+                    p.kill()
+                except Exception:
+                    pass
+        timer = threading.Timer(timeout, _kill)
+        timer.daemon = True
+        timer.start()
 
     def drain():
         try:
@@ -402,6 +433,8 @@ def stream(args: list, quiet: bool = True) -> subprocess.Popen:
             p.wait()
         except Exception:
             pass
+        if timer is not None:
+            timer.cancel()
         _untrack(p)                  # koniec procesu (stderr zamknięty) — zdejmujemy z rejestru
     threading.Thread(target=drain, daemon=True).start()
     return p

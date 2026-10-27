@@ -53,7 +53,7 @@ export function resetJobState() {
   Object.assign(S, {
     settle: {}, choice: {}, stepErr: {}, busy: null,
     fscan: { key: "", data: null, err: "" }, qual: { key: "", data: null, err: "" },
-    accShown: null, pin: null, factsCache: {}, rotErr: "", sz: null, sizeEdit: false, cmp: null, sim: null, simMix: 100, cmykProfile: "fogra39",
+    accShown: null, pin: null, factsCache: {}, rotErr: "", anRetry: false, fmtEpoch: (S.fmtEpoch || 0) + 1, sz: null, sizeEdit: false, cmp: null, sim: null, simMix: 100, cmykProfile: "fogra39",
   });
 }
 
@@ -70,7 +70,9 @@ export function changed() {
 export const head = () => S.job ? S.job.versions[S.job.versions.length - 1] : null;
 export const original = () => S.job ? S.job.versions[0] : null;
 export const template = () => S.guidelines?.templates?.[S.tplIndex] || null;
-export const scaleK = () => (S.guidelines?.scale === "1:10" ? 10 : 1);   // wydruk / plik
+// skala tylko z wytycznych POTWIERDZONEGO produktu — spóźnione wytyczne poprzedniego produktu
+// dawały wymiarowi spoza listy skalę 1:10 (przegląd 09.10, B19)
+export const scaleK = () => (S.product && S.guidelines?.scale === "1:10" ? 10 : 1);   // wydruk / plik
 export const productOk = () => !!S.product || !!S.custom;
 export const isPdf = () => !!S.job && S.job.file.kind !== "raster";
 export const hasStep = (name) => !!S.job && S.job.versions.some((v) => v.step === name);
@@ -151,7 +153,9 @@ export function framesSettled() {
   if (!roleSettled()) return false;
   if (hasStep("frames") || S.settle.frames) return true;
   const d = S.fscan.data;
-  if (S.fscan.err) return true;                    // szukanie padło — nie blokujemy reszty
+  // szukanie padło — rozdział czeka: „Sprawdź jeszcze raz” albo świadome „Pomiń sprawdzanie”
+  // (settle.frames = "unchecked", wyżej). Dawniej przechodził sam (przegląd 09.10, A2)
+  if (S.fscan.err) return false;
   return !!d && (!d.found || d.hidden) && !d.pixels && !d.foreign;
 }
 export function trimSettled() {
@@ -196,7 +200,10 @@ export function colorNeed(a = facts()) {
   const spots = (c.spots || []).map((s) => (s.name === "All" ? "Registration" : s.name));
   const rgb = fam.some((f) => f.startsWith("RGB")), lab = fam.includes("Lab");
   const other = fam.includes("Unknown") || fam.includes("Indexed");
-  return { rgb, lab, spots, other, any: rgb || lab || other || spots.length > 0 };
+  // grupa przezroczystości strony / formy w RGB: przezroczystość miesza się w RGB, choć wszystkie
+  // kolory są CMYK — też trzeba zamienić (kontrakt analizy `group_rgb`, przegląd 09.10)
+  const group = !!a.group_rgb;
+  return { rgb, lab, spots, other, group, any: rgb || lab || other || group || spots.length > 0 };
 }
 // Profil CMYK zapisany w pliku (deklaracja albo osadzony) — do wyboru „zostaw profil z pliku".
 export function fileProfile(a = facts()) {
@@ -244,18 +251,37 @@ export const printSettled = () => sizeSettled() && !!S.settle.print;
 // Kolory, overprint, fonty, spłaszczenie: domknięte, gdy wybrano — poprawka nałożona (`hasStep`)
 // albo „Zostaw jak jest” (`settle` = "skip"). Bez problemu w pliku — od razu. Od 0.5.4 bez
 // „Pokaż, jak wydrukuje”: podgląd już jest wydrukiem (rozdział Symulacja wydruku).
-function settledByChoice(name, prev, clean) {
+// Błąd analizy albo analiza NIEPEŁNA (`partial`) nie domyka rozdziału — decyduje człowiek:
+// „Sprawdź jeszcze raz”, „Pomiń sprawdzanie” (settle = "unchecked") albo przy niepełnej „Rozumiem,
+// idę dalej” (settle = "partial"). Dawniej błąd domykał Kolory…Spłaszczenie i plik szedł do
+// pobrania jako „gotowy do druku” (przegląd 09.10, A2).
+function settledByChoice(name, prev, clean, pdfOnly = false) {
   if (!prev) return false;
+  if (pdfOnly && !isPdf()) return true;            // rozdział tylko dla PDF-a (obraz go nie ma)
   const a = facts(name);
-  if (S.settle[name] || hasStep(name) || a?.error) return true;
-  return !S.choice[name]?.act && !!a && clean(a);
+  if (S.settle[name] || hasStep(name)) return true;
+  if (!a || a.error || a.partial) return false;
+  return !S.choice[name]?.act && clean(a);
 }
 export const colorSettled = () => settledByChoice("cmyk", printSettled(), (a) => !colorNeed(a).any);
-export const overprintSettled = () => settledByChoice("overprint", colorSettled(), (a) => !isPdf() || !(a.overprint_uses > 0));
-export const fontsSettled = () => settledByChoice("outline", overprintSettled(), (a) => !isPdf() || !(a.fonts || []).length);
+export const overprintSettled = () => settledByChoice("overprint", colorSettled(), (a) => !(a.overprint_uses > 0), true);
+export const fontsSettled = () => settledByChoice("outline", overprintSettled(), (a) => !(a.fonts || []).length, true);
 // Spłaszczenie: ZAWSZE czeka na wybór, także bez przezroczystości (Tomasz 25.09: „kolejny rozdział
 // nie powinien się pojawić, dopóki nie wybiorę")
-export const flattenSettled = () => settledByChoice("flatten", fontsSettled(), (a) => !isPdf() || !!a.flat_image);
+export const flattenSettled = () => settledByChoice("flatten", fontsSettled(), (a) => !!a.flat_image, true);
+
+// Sprawdzenia pominięte świadomie (błąd) albo niepełne — Akceptacja i Pobierz wypisują ostrzeżenie.
+const CHECK_NAME = { frames: "szablon", cmyk: "kolory", overprint: "overprint", outline: "fonty",
+  flatten: "przezroczystość", quality: "jakość obrazów" };
+export function skippedChecks() {
+  const out = { unchecked: [], partial: [] };
+  for (const [n, t] of Object.entries(CHECK_NAME)) {
+    if (S.settle[n] === "unchecked") out.unchecked.push(t);
+    else if (S.settle[n] === "partial" || (n !== "frames" && n !== "quality" && facts(n)?.partial)
+             || (n === "quality" && S.qual?.data?.status === "done" && S.qual.data.partial)) out.partial.push(t);
+  }
+  return out;
+}
 
 // Ile pikseli wyjdzie po spłaszczeniu (to samo liczy serwer: steps.flatten_plan).
 export function flattenPlan() {

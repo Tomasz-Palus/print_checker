@@ -19,8 +19,16 @@ concurrency:
   group: instalatory-${{ github.ref }}
   cancel-in-progress: false
 
+# Wszystko, co pobieramy, ma przypiętą wersję i sumę SHA-256 (przegląd 09.10, B17). Nowa wersja
+# Ghostscripta / Inno Setup = nowe sumy (sha256sum pobranego pliku; Ghostscript — zgodność
+# z SHA512SUMS w wydaniu Artifexu). Akcje GitHuba przypięte do commitów (w komentarzu wersja).
 env:
   GS_VERSION: "10.07.1"
+  GS_WIN_SHA256: "3a4c28d0aac47aa7cccd35a5932c55110376e9dbd966898dde388b7faba444a4"   # gs10071w64.exe
+  GS_MAC_SHA256: "1cdb766de8db8f1e589c817f09c5855ea5f65dfc8540e465a69ac14c18416025"   # ghostscript-10.07.1.tar.xz
+  INNO_VERSION: "6.7.3"
+  INNO_SHA256: "9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732"     # innosetup-6.7.3.exe
+  PIP_VERSION: "26.2.1"
   PYTHON_VERSION: "3.12"
 
 jobs:
@@ -28,10 +36,10 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Wersja
@@ -48,6 +56,8 @@ jobs:
           $url = "https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/$tag/${tag}w64.exe"
           curl.exe -sSL -o gs_setup.exe $url
           if ($LASTEXITCODE -ne 0) { throw "Nie pobrałem Ghostscripta" }
+          $sum = (Get-FileHash gs_setup.exe -Algorithm SHA256).Hash.ToLower()
+          if ($sum -ne $env:GS_WIN_SHA256) { throw "Suma Ghostscripta się nie zgadza: $sum" }
           7z x gs_setup.exe -oC:\gsinst -y | Out-Null
           New-Item -ItemType Directory -Force build\gs\bin | Out-Null
           Copy-Item C:\gsinst\bin\gswin64c.exe, C:\gsinst\bin\gsdll64.dll build\gs\bin\
@@ -60,8 +70,8 @@ jobs:
           & build\gs\bin\gswin64c.exe --version
       - name: Python
         run: |
-          python -m pip install --upgrade pip
-          pip install -r packaging/requirements-build.txt
+          python -m pip install "pip==${{ env.PIP_VERSION }}"
+          pip install --require-hashes -r packaging/requirements-build.lock
       - name: PyInstaller
         run: pyinstaller --noconfirm --distpath dist --workpath build/pyi packaging/adchecker.spec
       - name: Test uruchomienia
@@ -75,15 +85,19 @@ jobs:
       - name: Instalator (Inno Setup)
         shell: pwsh
         run: |
-          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
-            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-            if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
-          }
-          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
-          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          # przypięta wersja z wydania na GitHubie autora (jrsoftware/issrc) i suma SHA-256 — nie
+          # „co akurat jest na maszynie” ani Chocolatey bez wersji (przegląd 09.10, B17)
+          $tag = "is-" + ($env:INNO_VERSION -replace '\.', '_')
+          curl.exe -sSL -o is_setup.exe "https://github.com/jrsoftware/issrc/releases/download/$tag/innosetup-$env:INNO_VERSION.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Nie pobrałem Inno Setup" }
+          $sum = (Get-FileHash is_setup.exe -Algorithm SHA256).Hash.ToLower()
+          if ($sum -ne $env:INNO_SHA256) { throw "Suma Inno Setup się nie zgadza: $sum" }
+          $p = Start-Process -PassThru -Wait -FilePath .\is_setup.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/CURRENTUSER", "/DIR=C:\innosetup"
+          if ($p.ExitCode -ne 0) { throw "Instalacja Inno Setup: kod $($p.ExitCode)" }
+          $iscc = "C:\innosetup\ISCC.exe"
           & $iscc "/DAppVersion=${{ steps.ver.outputs.v }}" packaging\windows\adchecker.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup: błąd" }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: windows
           path: dist/adChecker-*-Windows-instalator.exe
@@ -92,21 +106,21 @@ jobs:
     runs-on: macos-14
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Wersja
         id: ver
         run: echo "v=$(python3 -c "import re;print(re.search(r'VERSION\s*=\s*\"([^\"]+)\"',open('app/version.py',encoding='utf-8').read()).group(1))")" >> "$GITHUB_OUTPUT"
       - name: Ghostscript (ze źródeł)
-        run: bash packaging/build_gs_mac.sh "$GS_VERSION"
+        run: bash packaging/build_gs_mac.sh "$GS_VERSION"     # sprawdza GS_MAC_SHA256
       - name: Python
         run: |
-          python -m pip install --upgrade pip
-          pip install -r packaging/requirements-build.txt
+          python -m pip install "pip==${{ env.PIP_VERSION }}"
+          pip install --require-hashes -r packaging/requirements-build.lock
       - name: PyInstaller
         run: pyinstaller --noconfirm --distpath dist --workpath build/pyi packaging/adchecker.spec
       - name: Podpis (ad-hoc) i test uruchomienia
@@ -123,21 +137,27 @@ jobs:
           ln -s /Applications build/dmg/Applications
           hdiutil create -volname "adChecker" -srcfolder build/dmg -ov -format UDZO \
             "dist/adChecker-${{ steps.ver.outputs.v }}-macOS.dmg"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
           name: macos
           path: dist/adChecker-*-macOS.dmg
 
   wydanie:
     needs: [windows, macos]
+    # wydanie (i klucz podpisu) tylko z gałęzi main — ręczne uruchomienie z innej gałęzi buduje
+    # instalatory do Artifacts, ale niczego nie podpisuje ani nie wydaje (przegląd 09.10, B17).
+    # Środowisko „release”: sekret ADCHECKER_SIGN_KEY trzymać w nim (Settings → Environments →
+    # release → Deployment branches: tylko main), a nie w sekretach całego repozytorium.
+    if: github.ref == 'refs/heads/main'
+    environment: release
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
         with:
           path: out
       # Wydanie powstaje TYLKO przy nowym numerze wersji (app/version.py). Zwykła zmiana to test:

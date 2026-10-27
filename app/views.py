@@ -21,6 +21,7 @@ _gs_lock = threading.Lock()       # jeden przebieg naraz — dwa zajechałyby ko
 FORGOTTEN_S = 120.0               # tyle bez pytania o stan = widok porzucony (zamknięta karta);
                                   # zwykłe porzucenie przeglądarka zgłasza sama (cancel)
 _plans: dict = {}                 # (zadanie, wersja, strona, mm) -> plan — bez otwierania pliku co 0,6 s
+MAX_PLANS = 200                   # najstarsze wypadają (słownik trzyma kolejność dodania)
 
 
 def key_of(vid: str, page: int, op: bool, proof: bool, W: int) -> str:
@@ -42,13 +43,28 @@ def request(job, vid: str, src: str, page: int, print_mm: tuple, op: bool, proof
     pk = (job.id, vid, page, round(print_mm[0], 2), round(print_mm[1], 2))
     pl = _plans.get(pk)
     if pl is None:
-        doc = render.open_doc(src)
-        try:
-            r = doc[page].rect
-            native = (r.width, r.height) if render.is_raster(src) else None
-            pl = _plans[pk] = render.plan(r.width, r.height, print_mm[0], print_mm[1], native)
-        finally:
-            doc.close()
+        if render.is_raster(src):
+            # raster: prawdziwe piksele z Pillow — wymiar strony z MuPDF przy DPI ≥ 72 jest już
+            # w punktach i podgląd liczył się w za małej rozdzielczości (przegląd 09.10, A1).
+            # `src` to plik JEDNEJ strony (Job.page_path), więc klatka 0.
+            from PIL import Image
+            with Image.open(src) as im:
+                native = (im.width, im.height)
+            pl = render.plan(native[0], native[1], print_mm[0], print_mm[1], native)
+        else:
+            with render.MUPDF_LOCK:          # przegląd 09.10, B24
+                doc = render.open_doc(src)
+                try:
+                    r = doc[page].rect
+                finally:
+                    doc.close()
+            pl = render.plan(r.width, r.height, print_mm[0], print_mm[1], None)
+        with _lock:
+            # górna granica: każdy inny wymiar wydruku to nowy wpis (przegląd 09.10, C)
+            if len(_plans) >= MAX_PLANS:
+                for old in list(_plans)[:len(_plans) - MAX_PLANS + 1]:
+                    _plans.pop(old, None)
+            _plans[pk] = pl
     if not full:
         pl = {**pl, "levels": []}                 # render.build: bez poziomów = sam podgląd całości
     key = key_of(vid, page, op, proof, pl["w"]) + ("" if full else "_ov")

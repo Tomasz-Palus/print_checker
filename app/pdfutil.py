@@ -98,6 +98,30 @@ def _extgstates(res, depth):
         pass
 
 
+def wrap_page(pdf, page, prefix: bytes) -> None:
+    """Treść strony w `q <prefix> … Q` — odporne na NIEZRÓWNOWAŻONE q/Q w treści.
+
+    Nadmiarowe `Q` (pliki sklejane, stemplowane) zdejmowało nasze `q … cm` i dalsza treść rysowała
+    się bez obrotu / skali (przegląd 09.10, C — normalize_geometry). Dlatego po naszym `q` idzie tyle
+    zapasowych `q`, ile treść ma nadmiarowych `Q`, a na końcu tyle `Q`, ile trzeba, żeby wrócić do
+    stanu początkowego (także gdy treść zostawia niezamknięte `q`)."""
+    depth, low = 0, 0
+    try:
+        for ins in pikepdf.parse_content_stream(page):
+            o = str(ins.operator)
+            if o == "q":
+                depth += 1
+            elif o == "Q":
+                depth -= 1
+                low = min(low, depth)
+    except Exception:
+        depth, low = 0, 0
+    extra = -low
+    page.contents_add(pdf.make_stream(b"q " + prefix + b"\n" + b"q\n" * extra), prepend=True)
+    close = 1 + extra + depth
+    page.contents_add(pdf.make_stream(b"\n" + b"Q\n" * max(1, close)), prepend=False)
+
+
 def uses_overprint(path: str) -> bool:
     """Czy plik włącza overprint (/OP albo /op = true w jakimkolwiek stanie graficznym)."""
     if not is_pdf(path):
@@ -157,3 +181,34 @@ def page_sizes_mm(path: str) -> list[list[float]]:
         return [[round(p.rect.width * MM, 2), round(p.rect.height * MM, 2)] for p in d]
     finally:
         d.close()
+
+
+def raster_dpi(im):
+    """DPI obrazu z Pillow albo None. TIFF bez znacznika XResolution: Pillow podaje umowne (1, 1) —
+    to brak DPI, nie 1 dpi (przegląd 09.10, A1/B18)."""
+    d = im.info.get("dpi")
+    if (im.format or "") == "TIFF" and 282 not in getattr(im, "tag_v2", {}):
+        return None
+    try:
+        return (float(d[0]), float(d[1])) if d and d[0] and d[1] else None
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+# PyMuPDF nie jest bezpieczny dla wielu wątków naraz (ocena jakości w tle + trasy serwera) —
+# jedna blokada na cały program (przegląd 09.10, B24). RLock: funkcje pod blokadą mogą wołać inne.
+import functools as _ft
+import threading as _th
+MUPDF_LOCK = _th.RLock()
+
+
+def mupdf_locked(fn):
+    @_ft.wraps(fn)
+    def run(*a, **kw):
+        with MUPDF_LOCK:
+            return fn(*a, **kw)
+    return run
+
+
+fonts_in = mupdf_locked(fonts_in)
+page_sizes_mm = mupdf_locked(page_sizes_mm)

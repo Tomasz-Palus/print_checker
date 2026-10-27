@@ -2,7 +2,7 @@
 // Jakość liczy serwer (quality.py → detailmap.py) i oddaje gotowy werdykt; tu tylko pokazanie
 // go po ludzku i nawigacja po słabych miejscach na podglądzie (w rzeczywistej wielkości wydruku).
 import { $, esc, fmtMm, api, chapter, plural, brief } from "./util.js";
-import { S, changed, head, scaleK, printMm, isPdf, flattenSettled, roleSettled, template, STEP_NAME, ROT_TXT, fontWarnings, inkNow, factsKey } from "./state.js";
+import { S, changed, head, scaleK, printMm, isPdf, flattenSettled, roleSettled, template, STEP_NAME, ROT_TXT, fontWarnings, inkNow, factsKey, skippedChecks } from "./state.js";
 import { detailBlock } from "./settings.js";
 import * as viewer from "./viewer.js";
 
@@ -37,18 +37,22 @@ async function poll(key) {
 
 export function qualitySettled() {
   if (!flattenSettled()) return false;
-  if (S.qual.err) return true;
+  // błąd oceny nie domyka rozdziału — „Sprawdź jeszcze raz” albo świadome „Pomiń sprawdzanie”
+  // (przegląd 09.10, A2; dawniej przechodził sam, a Pobierz pisał „Plik gotowy do druku”)
+  if (S.qual.err) return S.settle.quality === "unchecked";
   // także przy dobrej jakości rozdział czeka na „Rozumiem, dalej” — zostaje otwarty razem z lupkami
   // i nawigatorem, żeby można było obejrzeć projekt z bliska (Tomasz 29.09)
   const d = S.qual.data;
   return !!d && d.status === "done" && !!S.settle.quality;
 }
-const goodVerdict = (d) => !!d && d.status === "done" && (d.verdict === "ok" || d.verdict === "vector");
+const goodVerdict = (d) => !!d && d.status === "done" && (d.verdict === "ok" || d.verdict === "vector" || d.verdict === "partial");
 // ------------------------------------------------------------------ jakość: opis
 const areaShort = (a) => {
   const mm = a.mm ? `${fmtMm(a.mm[0])} × ${fmtMm(a.mm[1])} mm` : "";
   if (a.reason === "jpeg") return `${a.whole ? "cały obraz" : "obraz"} ${mm} — mocna kompresja JPEG`;
-  return a.reason === "lowres" ? `${a.whole ? "cały obraz" : "obraz"} ${mm} — ${Math.round(a.ppi)} ppi zamiast ${REQ}`
+  // maska / kontur obrazu (przegląd 09.10, B12) i obraz, którego nie da się odczytać (A7)
+  const what = a.shape ? "kontur (maska)" : a.unreadable ? "obraz nieczytelny" : a.whole ? "cały obraz" : "obraz";
+  return a.reason === "lowres" ? `${what} ${mm} — ${Math.round(a.ppi)} ppi zamiast ${REQ}`
                                : `${a.whole ? "cały obraz" : "miejsce"} ${mm} — jak przy ${Math.round(a.ppi)} ppi`;
 };
 const areaPlain = (a) => a.reason === "jpeg"
@@ -75,8 +79,11 @@ $("quRiskOk").querySelector("button").addEventListener("click", () => {
 });
 
 // po błędzie oceny — nowa próba (serwer zaczyna od nowa, gdy poprzednia skończyła się błędem)
-$("quRetry").querySelector("button").addEventListener("click", () => {
-  S.qual = { key: "", data: null, err: "" };
+$("quRetry").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-chk]");
+  if (!b || !S.job) return;
+  if (b.dataset.chk === "retry") { S.qual = { key: "", data: null, err: "" }; delete S.settle.quality; }
+  else S.settle.quality = "unchecked";
   changed();
 });
 
@@ -112,10 +119,13 @@ export function renderQuality() {
   let st = "open", sum = "", say = "", note = "";
   const bar = $("quBar");
   bar.hidden = true;
-  $("quRetry").hidden = !S.qual.err;
+  $("quRetry").hidden = !S.qual.err || S.settle.quality === "unchecked";
   if (S.qual.err) {
-    st = "done"; sum = "nie udało się sprawdzić";
-    say = `<span class="say warn">Nie udało się sprawdzić jakości.</span>`; note = esc(S.qual.err);
+    const sk = S.settle.quality === "unchecked";
+    st = sk ? "done" : "todo"; sum = sk ? "niesprawdzona" : "";
+    say = sk ? `<span class="say warn">Jakości obrazów nie sprawdzono</span> — obejrzyj projekt z bliska sam.`
+      : `<span class="say warn">Nie udało się sprawdzić jakości.</span> Sprawdź jeszcze raz albo pomiń sprawdzanie.`;
+    note = esc(S.qual.err);
   } else if (!d || d.status === "running") {
     say = `<span class="spin"></span>Sprawdzam jakość obrazów — piksel po pikselu…`;
     if (d?.bands) { bar.hidden = false; bar.firstElementChild.style.width = `${Math.round(d.band / d.bands * 100)}%`; }
@@ -123,6 +133,11 @@ export function renderQuality() {
     st = S.settle.quality ? "done" : "todo"; sum = "sam wektor";
     say = `<span class="say ok">Projekt jest w wektorze</span> — rozdzielczość nie ma tu znaczenia.`;
     note = LOOK;
+  } else if (d.verdict === "partial") {
+    // analiza niepełna — nie „w porządku” (przegląd 09.10, B13)
+    st = S.settle.quality ? "done" : "todo"; sum = "sprawdzona częściowo";
+    say = `<span class="say warn">Nie wszystko udało się sprawdzić</span> — obejrzyj projekt z bliska na podglądzie.`;
+    note = esc(d.partial_reason || "");
   } else if (d.verdict === "ok") {
     st = S.settle.quality ? "done" : "todo"; sum = "w porządku";
     say = `<span class="say ok">Jakość w porządku</span> — każdy obraz ma co najmniej ${REQ} ppi na wydruku.`;
@@ -150,6 +165,7 @@ export function renderQuality() {
       sum = "do obejrzenia";
       say = `Obrazy mają dość pikseli, ale ${jp}`;
     }
+    if (d.partial) note += `${note ? " " : ""}Nie wszystko udało się sprawdzić: ${esc(d.partial_reason || "")}.`;
     if (scaleK() > 1) note += `${note ? " " : ""}Plik w skali 1:10 drukuje się 10× większy — żeby wyszło ${REQ} ppi, w pliku trzeba ${REQ * 10} ppi.`;
   }
   // „Rozumiem, dalej” przy dobrej jakości — rozdział zostaje otwarty z lupkami i nawigatorem (Tomasz 29.09)
@@ -157,9 +173,11 @@ export function renderQuality() {
   chapter("ch-qual", st, sum);
   {
     let b = "";
+    if (S.qual.err && !S.settle.quality) b = `<span class="warn">Nie udało się sprawdzić jakości</span>.`;
     if (!S.qual.err) {
       if (!d || d.status === "running") b = `<span class="spin"></span>Sprawdzam jakość obrazów…`;
       else if (d.verdict === "vector") b = `<span class="ok">Sam wektor</span> — rozdzielczość nie ma znaczenia.`;
+      else if (d.verdict === "partial") b = `<span class="warn">Sprawdzona częściowo</span> — obejrzyj projekt na podglądzie.`;
       else if (d.verdict === "ok") b = `<span class="ok">Jakość w porządku</span> — obrazy mają co najmniej ${REQ} ppi.`;
       else {
         const g = d.groups.map((x) => d.areas[x.i]).find((x) => x.reason !== "jpeg");
@@ -325,6 +343,14 @@ $("acCopy").addEventListener("click", async () => {
   setTimeout(() => { b.textContent = "Kopiuj"; }, 1500);
 });
 
+// Ostrzeżenie o sprawdzeniach pominiętych po błędzie albo niepełnych (krótko; stałe teksty + nazwy rozdziałów).
+function checksWarn(sc) {
+  const out = [];
+  if (sc.unchecked.length) out.push(`<b>Nie sprawdzono:</b> ${esc(sc.unchecked.join(", "))} — sprawdź to w pliku sam.`);
+  if (sc.partial.length) out.push(`<b>Analiza niepełna:</b> ${esc(sc.partial.join(", "))} — część pliku nie została sprawdzona.`);
+  return out.join("<br>");
+}
+
 export const acceptSettled = () => qualitySettled() && S.settle.accept === head()?.id;
 
 export function renderAccept() {
@@ -334,7 +360,10 @@ export function renderAccept() {
   const ok = acceptSettled();
   if (!ok && S.settle.accept) delete S.settle.accept;            // plik się zmienił
   chapter("ch-acc", ok ? "done" : "todo", ok ? "zaakceptowany" : "");
-  const same = !S.job.versions.some((v, i) => i > 0 && !["frames", "trim", "resize"].includes(v.step));
+  // pominięte / niepełne sprawdzenia — widać przed akceptacją (przegląd 09.10, A2)
+  const sc = skippedChecks(), cw = checksWarn(sc);
+  $("acWarn").hidden = !cw; $("acWarn").innerHTML = cw;
+  const same =!S.job.versions.some((v, i) => i > 0 && !["frames", "trim", "resize"].includes(v.step));
   $("acSay").innerHTML = ok
     ? `<span class="say ok">Plik zaakceptowany.</span>`
     : same ? `Od rozdziału Kolory plik nie potrzebował poprawek, więc wydruk <b>przed</b> i <b>po</b> wygląda tak samo. `
@@ -356,13 +385,35 @@ export function renderAccept() {
 
 // W oknie programu (pywebview) pobieranie idzie przez systemowe „Zapisz jako" — okno nie ma
 // paska pobierania przeglądarki. W przeglądarce działa zwykły link.
+// Przed pobraniem: czy serwer ma tę samą ostatnią wersję, którą zaakceptowano. Serwer pobiera zawsze
+// ostatnią wersję (i odpowiada 409, gdy ?v= jest inna) — gdy klient i serwer się rozjadą (np. cofnięcie
+// przeszło, a odpowiedź nie doszła), pobrany plik nie byłby tym zaakceptowanym (przegląd 09.10, A9).
+const STALE = "Plik zmienił się w międzyczasie — odśwież stronę (F5) i sprawdź go jeszcze raz.";
+const dlKey = () => (S.job && head() ? `${S.job.job_id}:${head().id}:${S.page}` : "");
 $("dlDo").addEventListener("click", async (e) => {
-  const api = window.pywebview?.api;
-  if (!api?.save_download || !S.job) return;
+  if (!S.job) return;
   e.preventDefault();
-  const r = await api.save_download(S.job.job_id, S.page, fileName());
-  if (r?.ok || r?.error) { saved = { v: head().id, txt: r.ok ? `Zapisano: ${r.path}` : r.error }; changed(); }
+  const key = dlKey(), jid = S.job.job_id, vid = head().id, pg = S.page, name = fileName();
+  const href = $("dlDo").getAttribute("href");
+  const say = (txt) => { saved = { key, txt }; changed(); };
+  try {
+    const srv = await api(`/api/jobs/${jid}`);
+    if (srv.versions?.[srv.versions.length - 1]?.id !== vid) return say(STALE);
+  } catch (err) {
+    return say(`Nie udało się pobrać pliku: ${err.message}`);
+  }
+  const pw = window.pywebview?.api;
+  if (pw?.save_download) {
+    const pm = printMm();
+    const r = await pw.save_download(jid, pg, name, vid, pm?.w ?? null, pm?.h ?? null);
+    if (r?.ok || r?.error) say(r.ok ? `Zapisano: ${r.path}` : r.error);
+    return;
+  }
+  const a = document.createElement("a");                // zwykłe pobranie przeglądarki
+  a.href = href; a.download = ""; document.body.appendChild(a); a.click(); a.remove();
 });
+// „Zapisano: …” tylko dla tego samego pliku, wersji i strony — oryginał KAŻDEGO pliku to „v0”
+// (przegląd 09.10, C; D z doc 18)
 let saved = null;
 
 export function renderDownload() {
@@ -375,16 +426,23 @@ export function renderDownload() {
   const left = [["cmyk", "kolory"], ["overprint", "overprint"], ["outline", "tekst w fontach"], ["flatten", "warstwy (bez spłaszczenia)"]]
     .filter(([n]) => S.settle[n] === "skip").map(([, t]) => t);
   const bad = S.qual.data?.verdict === "bad";
-  brief("dlBrief", bad ? `<span class="warn">Obrazy są za małe</span> — na wydruku będą rozmyte.` : `<span class="ok">Plik gotowy do druku.</span>`);
+  // pominięte / niepełne sprawdzenia: nie „gotowy do druku” (przegląd 09.10, A2)
+  const sc = skippedChecks(), part = sc.unchecked.length || sc.partial.length;
+  brief("dlBrief", bad ? `<span class="warn">Obrazy są za małe</span> — na wydruku będą rozmyte.`
+    : part ? `<span class="warn">Nie wszystko sprawdzono</span> — szczegóły pod „?”.` : `<span class="ok">Plik gotowy do druku.</span>`);
   $("dlSay").innerHTML = bad
     ? `<span class="say warn">Plik można pobrać, ale obrazy są za małe</span> — na wydruku będą rozmyte.`
+    : part ? `<span class="say warn">Plik można pobrać, ale nie wszystko zostało sprawdzone.</span>`
     : `<span class="say ok">Plik gotowy do druku.</span>`;
   // brak fontu (Tomasz 29.09): można drukować, ale ma być o tym informacja
   const fw = fontWarnings(), fb = fw.filter((f) => f.baked), fl = fw.filter((f) => !f.baked);
   const ha = S.analysisFor === factsKey() && S.analysis && !S.analysis.error ? S.analysis : null;
   const wo = (ha?.white_overprint || []).length, ink = inkNow();
   const nm = (l) => esc(l.map((f) => f.name).join(", "));
-  $("dlSum").innerHTML = (fl.length ? `<li class="warn">Brak fontu w pliku: <b>${nm(fl)}</b> — `
+  $("dlSum").innerHTML = (sc.unchecked.length ? `<li class="warn">Nie sprawdzono: <b>${esc(sc.unchecked.join(", "))}</b> — `
+      + `sprawdź to w pliku sam albo poproś grafika.</li>` : "")
+    + (sc.partial.length ? `<li class="warn">Analiza niepełna (${esc(sc.partial.join(", "))}) — część pliku nie została sprawdzona.</li>` : "")
+    + (fl.length ? `<li class="warn">Brak fontu w pliku: <b>${nm(fl)}</b> — `
       + `drukarnia podstawi swój krój, litery wyjdą inne.</li>` : "")
     + (fb.length ? `<li class="warn">Krój zastępczy utrwalony (krzywe / spłaszczenie): <b>${nm(fb)}</b> — `
       + `te litery wyjdą innym krojem niż w projekcie.</li>` : "")
@@ -396,6 +454,8 @@ export function renderDownload() {
   const name = fileName();
   const ext = isPdf() ? "pdf" : "";           // obraz: rozszerzenie po ostatniej wersji (JPG / TIFF)
   const a = $("dlDo");
-  a.href = `/api/jobs/${S.job.job_id}/download?v=${head().id}&page=${S.page}&name=${encodeURIComponent(name)}`;
-  $("dlName").textContent = saved?.v === head().id ? saved.txt : `Nazwa pliku: ${name}${ext ? "." + ext : ""}`;
+  // wymiar wydruku — z niego DPI obrazu bez DPI (przegląd 09.10, B18)
+  const pm = printMm(), wh = pm ? `&w_mm=${pm.w.toFixed(2)}&h_mm=${pm.h.toFixed(2)}` : "";
+  a.href = `/api/jobs/${S.job.job_id}/download?v=${head().id}&page=${S.page}&name=${encodeURIComponent(name)}${wh}`;
+  $("dlName").textContent = saved && saved.key === dlKey() ? saved.txt : `Nazwa pliku: ${name}${ext ? "." + ext : ""}`;
 }

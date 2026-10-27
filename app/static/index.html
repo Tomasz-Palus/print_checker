@@ -138,6 +138,7 @@
         <p class="say" id="frSay" data-more></p>
         <div class="note" id="frNote" data-more></div>
         <div class="box bad" id="frErr" hidden></div>
+        <div class="row now-only" id="frChk" hidden><button class="btn primary" type="button" data-chk="retry">Sprawdź jeszcze raz</button><button class="btn" type="button" data-chk="skip">Pomiń sprawdzanie</button></div>
         <div class="row">
           <button class="btn primary" id="frDo" type="button">Usuń szablon</button>
           <button class="btn" id="frUndo" type="button">Cofnij</button>
@@ -242,6 +243,8 @@
           <div id="coInkTxt"></div>
         </div>
         <div class="box bad" id="coErr" hidden></div>
+        <!-- błąd analizy / analiza niepełna: rozdział czeka na decyzję (przegląd 09.10, A2) -->
+        <div class="row now-only achk" id="coChk" data-name="cmyk" hidden><button class="btn primary" type="button" data-chk="retry">Sprawdź jeszcze raz</button><button class="btn" type="button" data-chk="skip">Pomiń sprawdzanie</button></div>
         <!-- wybór w rzędach (Tomasz 24.09): w każdym rzędzie jeden przycisk, wybrany = niebieski -->
         <div class="seg rowsel" id="coAct">
           <button type="button" data-v="convert">Zamień na CMYK</button>
@@ -272,6 +275,7 @@
         <p class="say" id="opSay" data-more></p>
         <div class="note" id="opNote" data-more></div>
         <div class="box bad" id="opErr" hidden></div>
+        <div class="row now-only achk" id="opChk" data-name="overprint" hidden><button class="btn primary" type="button" data-chk="retry">Sprawdź jeszcze raz</button><button class="btn" type="button" data-chk="skip">Pomiń sprawdzanie</button></div>
         <div class="seg rowsel" id="opAct">
           <button type="button" data-v="fix">Wyłącz overprint</button>
           <button type="button" data-v="keep">Zostaw jak jest</button>
@@ -290,6 +294,7 @@
         <p class="say" id="foSay" data-more></p>
         <div class="note" id="foNote" data-more></div>
         <div class="box bad" id="foErr" hidden></div>
+        <div class="row now-only achk" id="foChk" data-name="outline" hidden><button class="btn primary" type="button" data-chk="retry">Sprawdź jeszcze raz</button><button class="btn" type="button" data-chk="skip">Pomiń sprawdzanie</button></div>
         <div class="seg rowsel" id="foAct">
           <button type="button" data-v="fix">Zamień na krzywe</button>
           <button type="button" data-v="keep">Zostaw jak jest</button>
@@ -308,6 +313,7 @@
         <p class="say" id="flSay" data-more></p>
         <div class="note" id="flNote" data-more></div>
         <div class="box bad" id="flErr" hidden></div>
+        <div class="row now-only achk" id="flChk" data-name="flatten" hidden><button class="btn primary" type="button" data-chk="retry">Sprawdź jeszcze raz</button><button class="btn" type="button" data-chk="skip">Pomiń sprawdzanie</button></div>
         <div class="seg rowsel" id="flAct">
           <button type="button" data-v="fix">Spłaszcz projekt</button>
           <button type="button" data-v="keep">Zostaw jak jest</button>
@@ -330,7 +336,7 @@
              (Tomasz 29.09). Cienkie linie i obszar bezpieczny usunięte w 0.6.6 (Tomasz 01.10). -->
         <div class="row" id="quRiskOk" hidden><button class="btn primary" type="button">Rozumiem, dalej</button></div>
         <div class="box bad" id="quErr" hidden></div>
-        <div class="row" id="quRetry" hidden><button class="btn" type="button">Sprawdź jeszcze raz</button></div>
+        <div class="row" id="quRetry" hidden><button class="btn primary" type="button" data-chk="retry">Sprawdź jeszcze raz</button><button class="btn" type="button" data-chk="skip">Pomiń sprawdzanie</button></div>
         <div class="seg rowsel" id="quShow" hidden><button type="button">Pokaż na podglądzie</button></div>
         <details class="more" id="quListBox" hidden><summary>Lista miejsc</summary><ol class="qlist" id="quList"></ol></details>
         <p class="note" id="quNotice" data-more>Ocena jakości jest automatyczna i orientacyjna. Program może ocenić
@@ -344,6 +350,7 @@
         <button class="ch-q" type="button">?</button></header>
       <div class="ch-help" hidden></div>
       <div class="ch-b">
+        <div class="box warn" id="acWarn" hidden></div>
         <p class="say" id="acSay" data-more></p>
         <!-- co zostało zrobione — punktami, do skopiowania (Tomasz 01.10) -->
         <div class="acc-client" id="acClient" hidden>
@@ -392,7 +399,8 @@
       <div class="thumbs" id="thumbs" hidden></div>
       <div class="vstage" id="vStage"><div class="vcanvas" id="vCanvas"></div></div>
     </div>
-    <div class="vwait" id="vWait" hidden><div><span class="spin"></span><span class="t">wczytuję podgląd…</span></div></div>
+    <div class="vwait" id="vWait" hidden><div><span class="spin"></span><span class="t">wczytuję podgląd…</span>
+      <button class="btn small" id="vRetry" type="button" hidden>Spróbuj jeszcze raz</button></div></div>
     <div class="navi" id="navi" hidden><div class="nv" id="naviIn"></div></div>
     <!-- Pływający panel podglądu — tylko przy rozdziale „Jakość wydruku” (Tomasz 28.09): lupki, rzeczywista
          wielkość, dopasuj, a pod nimi nawigacja po słabych miejscach (‹ › i Esc). Stała szerokość i wysokość —

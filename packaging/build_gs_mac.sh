@@ -9,6 +9,10 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="$ROOT/build/gs-src"
 mkdir -p "$WORK" && cd "$WORK"
 curl -sSL -o gs.tar.xz "https://github.com/ArtifexSoftware/ghostpdl-downloads/releases/download/$TAG/ghostscript-$VER.tar.xz"
+# suma SHA-256 źródeł (przegląd 09.10, B17) — z build.yml (GS_MAC_SHA256); nowa wersja Ghostscripta
+# = nowa suma: shasum -a 256 ghostscript-<wersja>.tar.xz (zgodna z SHA512SUMS w wydaniu Artifexu)
+if [ -z "${GS_MAC_SHA256:-}" ]; then echo "BŁĄD: brak GS_MAC_SHA256"; exit 1; fi
+echo "$GS_MAC_SHA256  gs.tar.xz" | shasum -a 256 -c -
 tar xf gs.tar.xz && cd "ghostscript-$VER"
 export MACOSX_DEPLOYMENT_TARGET=11.0
 # Homebrew na maszynie GitHuba ma własne libtiff/libpng… — nie wolno ich podlinkować

@@ -69,6 +69,29 @@ def busy() -> bool:
     return False
 
 
+def shutdown() -> None:
+    """Przed os._exit: Ghostscript i procesy oceny jakości nie mogą liczyć dalej bez programu
+    (przegląd kodu 27.09, C20). Wspólne dla zamknięcia okna (desktop.py) i „Zaktualizuj teraz”
+    (server.py — dawniej kończyło bez tego, przegląd 09.10, B23)."""
+    try:
+        import gs
+        n = gs.kill_all()
+        if n:
+            print(f"zatrzymano Ghostscript: {n}")
+    except Exception as e:
+        print(f"zamykanie Ghostscripta: {type(e).__name__}: {e}")
+    try:
+        import multiprocessing
+        for ch in multiprocessing.active_children():
+            ch.kill()
+    except Exception:
+        pass
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+
 def release() -> None:
     global _held
     if _held is None:

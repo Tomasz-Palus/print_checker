@@ -7,4 +7,4 @@ Wpisuje go skrypt packaging/klucz_aktualizacji.py (uruchamia Tomasz — raz, na 
 Od wersji, która ma tu klucz, każda następna musi być podpisana — GitHub pilnuje tego sam
 (build.yml przerywa wydanie bez podpisu).
 """
-PUBLIC_KEY = ""
+PUBLIC_KEY = "44e27b35626d6e039469dcb560bf23636fbd654b537d8160ca3e002813eb6908"

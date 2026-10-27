@@ -111,8 +111,11 @@ def _selftest(url: str) -> int:
 class Api:
     """Funkcje wołane z okna programu (window.pywebview.api.*)."""
 
-    def save_download(self, jid: str, page: int, name: str) -> dict:
-        """„Pobierz plik do druku" w oknie programu: systemowe okno „Zapisz jako"."""
+    def save_download(self, jid: str, page: int, name: str, v: str | None = None,
+                      w_mm: float | None = None, h_mm: float | None = None) -> dict:
+        """„Pobierz plik do druku" w oknie programu: systemowe okno „Zapisz jako".
+        `v` — zaakceptowana wersja (inna niż ostatnia = odmowa, przegląd 09.10, A9);
+        `w_mm`/`h_mm` — wymiar wydruku, z niego DPI obrazu bez DPI (B18)."""
         import webview
         import jobs
         import server
@@ -121,7 +124,15 @@ class Api:
             return {"ok": False, "error": "Nie ma takiego zadania — wgraj plik jeszcze raz."}
         if not 0 <= int(page) < job.info["page_count"]:
             return {"ok": False, "error": "Nie ma takiej strony."}
-        path, fname, _ = server.download_file(job, int(page), name)
+        if v and v != job.head.id:
+            return {"ok": False, "error": "Plik zmienił się od chwili akceptacji — sprawdź go jeszcze raz przed pobraniem."}
+        pm = None
+        try:
+            if w_mm and h_mm and 0 < float(w_mm) < 1e6 and 0 < float(h_mm) < 1e6:
+                pm = (float(w_mm), float(h_mm))
+        except (TypeError, ValueError):
+            pm = None
+        path, fname, _ = server.download_file(job, int(page), name, pm)
         ext = os.path.splitext(fname)[1].lstrip(".") or "*"
         res = webview.windows[0].create_file_dialog(
             webview.FileDialog.SAVE, save_filename=fname, file_types=(f"Plik do druku (*.{ext})",))
@@ -197,20 +208,9 @@ def main() -> None:
 
 def _shutdown() -> None:
     """Przed os._exit: Ghostscript i procesy oceny jakości nie mogą liczyć dalej bez okna
-    (przegląd kodu 27.09, C20)."""
-    try:
-        import gs
-        n = gs.kill_all()
-        if n:
-            print(f"zatrzymano Ghostscript: {n}")
-    except Exception as e:
-        print(f"zamykanie Ghostscripta: {type(e).__name__}: {e}")
-    try:
-        for ch in multiprocessing.active_children():
-            ch.kill()
-    except Exception:
-        pass
-    sys.stdout.flush()
+    (przegląd kodu 27.09, C20). Wspólne z „Zaktualizuj teraz” — instance.shutdown."""
+    import instance
+    instance.shutdown()
 
 
 if __name__ == "__main__":

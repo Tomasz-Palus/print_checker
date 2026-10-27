@@ -4,7 +4,7 @@ export const $ = (id) => document.getElementById(id);
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-export const fmtMm = (v) => v == null ? "?" : (Math.round(v * 10) / 10).toString().replace(".", ",");
+export const fmtMm = (v) => v == null ? "?" : ((Math.round(v * 10) / 10) + 0).toString().replace(".", ",");   // bez „-0”
 export const fmtBytes = (b) => b < 1048576 ? `${Math.round(b / 1024)} KB` : `${(b / 1048576).toFixed(1).replace(".", ",")} MB`;
 export const fold = (s) => String(s || "").toLowerCase().replace(/ł/g, "l").normalize("NFKD").replace(/[̀-ͯ]/g, "");
 
@@ -24,12 +24,21 @@ export const post = (url, body) => api(url, { method: "POST", headers: { "Conten
                                               body: JSON.stringify(body || {}) });
 
 // Pytanie „na pewno?" w oknie programu. Zwraca obietnicę: true = potwierdzone.
+// Nowe pytanie zamyka poprzednie („Zostaw”) — dawniej (np. plik upuszczony przy otwartym pytaniu)
+// nasłuch klawiatury pierwszego okna zostawał na zawsze i Tab nie działał w całym programie
+// (przegląd 09.10, C).
+let closeAsk = null;
 export function ask(title, html, yes = "Tak", no = "Anuluj") {
+  closeAsk?.(false);
   return new Promise((resolve) => {
     const m = $("ask");
     $("askT").textContent = title; $("askX").innerHTML = html;
     $("askYes").textContent = yes; $("askNo").textContent = no;
-    const done = (v) => { m.hidden = true; document.removeEventListener("keydown", key); resolve(v); };
+    const done = (v) => {
+      if (closeAsk === done) closeAsk = null;
+      m.hidden = true; document.removeEventListener("keydown", key); resolve(v);
+    };
+    closeAsk = done;
     // Enter i spacja działają na przycisk, który ma fokus (zaznaczony) — wcześniej Enter zawsze
     // potwierdzał, nawet przy zaznaczonym „Zostaw” (przegląd kodu 27.09, C28). Fokus nie wychodzi
     // z okna (Tab krąży między dwoma przyciskami).

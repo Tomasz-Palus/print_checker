@@ -263,7 +263,10 @@ def suggest_by_content(hints: dict | None, products: list[dict], index: dict | N
             if t.get("missing") or not t.get("w") or not t.get("h"):
                 continue
             for rw, rh in ramki:
-                if abs(rw - t["w"]) <= 1.5 and abs(rh - t["h"]) <= 1.5:
+                # ramka może leżeć obrócona o 90° (projekt poziomy na szablonie pionowym) — jak przy
+                # dopasowaniu po wymiarze strony (przegląd 09.10, C)
+                if (abs(rw - t["w"]) <= 1.5 and abs(rh - t["h"]) <= 1.5) or \
+                        (abs(rw - t["h"]) <= 1.5 and abs(rh - t["w"]) <= 1.5):
                     note = f"w pliku jest ramka szablonu {fmt(rw)}×{fmt(rh)} mm = szablon „{t['role']}” tego produktu"
                     if p["hash"] in wyniki:
                         wyniki[p["hash"]]["score"] = 0.98

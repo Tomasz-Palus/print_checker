@@ -36,7 +36,7 @@ a = Analysis(
     pathex=[APP],
     binaries=binaries,
     datas=datas,
-    hiddenimports=["waitress", "webview"],
+    hiddenimports=["waitress", "webview", "certifi"],   # certifi — HTTPS na Macu (updater._ssl_ctx)
     excludes=["tkinter", "matplotlib", "IPython", "pytest"],
     noarchive=False,
 )
@@ -66,6 +66,7 @@ if sys.platform == "darwin":
             "CFBundleShortVersionString": VERSION,
             "CFBundleVersion": VERSION,
             "NSHighResolutionCapable": True,
-            "LSMinimumSystemVersion": "11.0",
+            # pikepdf ma koło arm64 tylko dla macOS 14+ (przegląd 09.10, C23)
+            "LSMinimumSystemVersion": "14.0",
         },
     )

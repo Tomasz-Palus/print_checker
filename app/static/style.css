@@ -197,6 +197,9 @@ select.sel { width: 100%; padding: 7px 8px; border: 1px solid var(--line); borde
 .hilite span { position: absolute; left: -3px; top: 100%; background: #f43f5e; color: #fff; font-size: 12px; padding: 2px 7px; white-space: nowrap; }
 .vwait { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
 .vwait div { background: rgba(255,255,255,.92); padding: 10px 16px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,.1); color: var(--muted); }
+.vwait.fail div { pointer-events: auto; color: #7f1d1d; }       /* podgląd nie wyszedł — przycisk ponowienia */
+.vwait.fail .spin { display: none; }
+.vwait #vRetry { margin-left: 10px; }
 .vempty { flex: 1; display: grid; place-items: center; color: var(--muted); }
 .spin { display: inline-block; width: 14px; height: 14px; border: 2px solid #c9d4ee; border-top-color: var(--accent);
         border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px; }

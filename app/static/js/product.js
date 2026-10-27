@@ -82,6 +82,7 @@ export function onNewFile() {
 }
 
 function clearGuidelines() {
+  glSeq++;                 // wytyczne w drodze dotyczą poprzedniego produktu (przegląd 09.10, B19)
   S.guidelines = null; S.glLoading = false; S.glError = ""; S.tplIndex = 0; S.tplDims = null;
   S.roleOk = false; S.overlayOn = false;
 }
@@ -90,13 +91,16 @@ function clearGuidelines() {
 let resetSteps = async () => true;
 export function setResetSteps(fn) { resetSteps = fn; }
 
+// Produkt, rola i strona nie zmieniają się, póki nakłada się poprawka (S.busy) — spóźniona poprawka
+// zrobiona pod stary format domykała rozdziały nowego (przegląd 09.10, A9)
 $("pConfirm").onclick = () => {
-  if (!S.candidate) return;
+  if (!S.candidate || S.busy) return;
   S.product = S.candidate; S.custom = null;
   loadGuidelines();
 };
 $("pOther").onclick = () => { S.picking = true; changed(); };
 $("pChange").onclick = async () => {
+  if (S.busy) return;
   if (!(await resetSteps("Zmienić produkt?"))) return;
   S.product = null; S.custom = null; S.picking = !S.candidate; clearGuidelines(); changed();
 };
@@ -108,7 +112,7 @@ const customDims = () => {
 };
 ["cW", "cH"].forEach((id) => $(id).addEventListener("input", () => { $("cConfirm").disabled = !customDims(); }));
 $("cConfirm").onclick = () => {
-  const d = customDims(); if (!d) return;
+  const d = customDims(); if (!d || S.busy) return;
   S.custom = d; S.product = null; S.customOpen = false; clearGuidelines(); changed();
 };
 
@@ -150,6 +154,7 @@ export function renderProduct() {
     $("pDoneName").textContent = name;
     $("pDoneCode").textContent = S.product ? S.product.code : "";
   }
+  $("pChange").disabled = !!S.busy;
 }
 
 // ------------------------------------------------------------------ wytyczne i rola
@@ -208,13 +213,17 @@ function guessTemplate(tpls) {
   return bestErr <= 0.05 ? best : 0;
 }
 
-$("rSelect").addEventListener("change", (e) => { S.tplIndex = +e.target.value; changed(); });
+$("rSelect").addEventListener("change", (e) => {
+  if (S.busy || S.roleOk) { e.target.value = String(S.tplIndex); return; }
+  S.tplIndex = +e.target.value; changed();
+});
 const tplDims = () => {
   const w = parseFloat($("rW").value), h = parseFloat($("rH").value);
   return w > 0 && h > 0 ? { w, h } : null;
 };
 ["rW", "rH"].forEach((id) => $(id).addEventListener("input", () => { S.tplDims = tplDims(); changed(); }));
 $("rConfirm").onclick = async () => {
+  if (S.busy) return;
   if (S.roleOk) {
     if (!(await resetSteps("Zmienić rolę pliku?"))) return;
     S.roleOk = false;
@@ -262,12 +271,12 @@ export function renderRole() {
   sel.disabled = S.roleOk;
   $("rDims").hidden = !t?.dims_missing;
   $("rW").disabled = $("rH").disabled = S.roleOk;
-  $("rInfo").innerHTML = `Skala wytycznych <b>${g.scale || "1:1"}</b>`
+  $("rInfo").innerHTML = `Skala wytycznych <b>${esc(g.scale || "1:1")}</b>`
     + (k > 1 ? ` — plik jest 10× mniejszy niż wydruk` : "");
   const b = $("rConfirm");
   b.textContent = S.roleOk ? "Zmień rolę" : "Zatwierdź";
   b.classList.toggle("primary", !S.roleOk);
-  b.disabled = !S.roleOk && !!t?.dims_missing && !S.tplDims;
+  b.disabled = !!S.busy || (!S.roleOk && !!t?.dims_missing && !S.tplDims);
   $("rPdf").hidden = !g.hash;
   if (g.hash) $("rPdf").href = `https://noname.tey.pl/file/requirements?type=product&hash=${encodeURIComponent(g.hash)}&lang=en`;
 }
@@ -275,6 +284,7 @@ export function renderRole() {
 // ------------------------------------------------------------------ strona
 // Strona idzie PRZED produktem: propozycje produktu i roli liczą się z wymiaru tej strony.
 async function setPage(n, confirm) {
+  if (S.busy) return false;                                // poprawka w toku (przegląd 09.10, A9)
   if (S.job.versions.length > 1 && !(await resetSteps("Wybrać inną stronę?"))) return false;
   // decyzje w rozdziałach („zostaw jak jest”, wymiar „zgadza się”, akceptacja…) dotyczyły tamtej
   // strony — bez tego strona 2 przechodziła do pobrania niesprawdzona (przegląd kodu 27.09, A3)
@@ -290,9 +300,11 @@ async function refreshSuggestions() {
     return;
   }
   try {
-    const job = S.job;
-    const d = await api(`/api/jobs/${job.job_id}/suggest?page=${S.page}`);
-    if (S.job !== job) return;
+    const job = S.job, pg = S.page;
+    const d = await api(`/api/jobs/${job.job_id}/suggest?page=${pg}`);
+    // spóźniona odpowiedź dla innej strony (szybkie przełączanie) — do kosza; serwer podaje `page`
+    // (przegląd 09.10, B20). Produkt potwierdzony w międzyczasie — propozycja już niepotrzebna.
+    if (S.job !== job || S.page !== pg || !S.pageOk || (d.page != null && d.page !== pg) || productOk()) return;
     job.suggestions = d.suggestions; job.file.template_frames = d.file.template_frames;
     const best = d.suggestions[0];
     S.candidate = best && best.score >= 0.6 ? best : null;
@@ -321,7 +333,8 @@ export function renderPage() {
   const sel = $("pgSelect");
   if (sel.dataset.opts !== opts) { sel.innerHTML = opts; sel.dataset.opts = opts; }
   sel.value = String(S.page);
-  sel.disabled = S.pageOk;
+  sel.disabled = S.pageOk || !!S.busy;
+  $("pgConfirm").disabled = !!S.busy;
   $("pgConfirm").textContent = S.pageOk ? "Wybierz inną stronę" : "Wybierz tę stronę";
   $("pgConfirm").classList.toggle("primary", !S.pageOk);
 }

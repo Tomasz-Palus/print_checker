@@ -8,3 +8,7 @@ fonttools==4.66.0
 waitress==3.0.2
 pywebview==6.2.1
 pyinstaller==6.22.3
+certifi==2026.7.22
+# GitHub instaluje z requirements-build.lock (wszystkie zależności, wersje i sumy SHA-256,
+# pip --require-hashes; przegląd 09.10, B17). Po zmianie tego pliku wygeneruj lock na nowo:
+#   uv pip compile --universal --generate-hashes --python-version 3.12 packaging/requirements-build.txt -o packaging/requirements-build.lock

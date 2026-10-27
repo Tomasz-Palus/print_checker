@@ -389,7 +389,7 @@ def remove(src: str, dst: str, page_index: int, targets: list) -> int:
     zostaje bit w bit taka sama."""
     groups = collections.defaultdict(list)
     for t in targets:
-        groups[tuple(t["owner"]) if t.get("owner") else None].append((int(t["index"]), int(t["end"])))
+        groups[tuple(t["owner"]) if t.get("owner") else None].append((int(t["index"]), int(t["end"]), "tekst" in t))
     n = 0
     with pikepdf.open(src) as pdf:
         page = pdf.pages[page_index]
@@ -399,8 +399,32 @@ def remove(src: str, dst: str, page_index: int, targets: list) -> int:
                 ops = list(pikepdf.parse_content_stream(container))
             except Exception:
                 continue
-            drop = {i for a, b in spans for i in range(a, b + 1)}
-            data = pikepdf.unparse_content_stream([op for i, op in enumerate(ops) if i not in drop])
+            drop = {i for a, b, txt in spans if not txt for i in range(a, b + 1)}
+            # napis: wycinamy TYLKO operatory rysujące litery. Stan tekstu i kolor ustawione w bloku
+            # (Tf, Tc, Tw, rg, k…) obowiązują dalej — tekst klienta po nim bywa od nich zależny
+            # i znikał razem z szablonem (przegląd 09.10, C)
+            repl = {}
+            for a, b, txt in spans:
+                if not txt:
+                    continue
+                for i in range(a, min(b, len(ops) - 1) + 1):
+                    ins = ops[i]
+                    o = str(getattr(ins, "operator", ""))
+                    if o in ("Tj", "TJ"):
+                        drop.add(i)
+                    elif o == "'":                     # ' = T* + Tj
+                        repl[i] = [pikepdf.ContentStreamInstruction([], pikepdf.Operator("T*"))]
+                    elif o == '"':                     # aw ac string " = aw Tw, ac Tc, T* + Tj
+                        aw, ac = list(ins.operands)[:2]
+                        repl[i] = [pikepdf.ContentStreamInstruction([aw], pikepdf.Operator("Tw")),
+                                   pikepdf.ContentStreamInstruction([ac], pikepdf.Operator("Tc")),
+                                   pikepdf.ContentStreamInstruction([], pikepdf.Operator("T*"))]
+            kept = []
+            for i, op in enumerate(ops):
+                if i in drop:
+                    continue
+                kept.extend(repl.get(i, [op]))
+            data = pikepdf.unparse_content_stream(kept)
             n += len(spans)
             if owner is None:
                 page.Contents = pdf.make_stream(data)
@@ -445,6 +469,7 @@ def visible(path: str, page_index: int, targets: list) -> bool:
 RASTER_COLORS = [(0, 174, 239), (237, 28, 36)]
 RASTER_TOL = 70           # druk i JPEG rozmywają kolor
 RASTER_MIN_COVER = 0.5    # jaka część wiersza/kolumny ma mieć ten kolor
+RASTER_SIDE_MAX = 0.2     # a w sąsiednich wierszach/kolumnach (po obu stronach linii) — najwyżej tyle
 
 
 def in_pixels(path: str, page_index: int, page_mm: tuple, boxes_mm: list | None = None) -> bool:
@@ -480,12 +505,18 @@ def in_pixels(path: str, page_index: int, page_mm: tuple, boxes_mm: list | None 
         if inside is not None:
             m &= inside
         for vals, mm_px in ((m.mean(axis=1), page_mm[1] / H), (m.mean(axis=0), page_mm[0] / W)):
+            vals = list(vals)
             run = 0
-            for v in list(vals) + [0.0]:
+            for i, v in enumerate(vals + [0.0]):
                 if v >= RASTER_MIN_COVER:
                     run += 1
                 elif run:
-                    if run * mm_px <= 14:
+                    # linia musi się WYRÓŻNIAĆ: tuż obok (po obu stronach) prawie nie ma tego koloru.
+                    # Na szumowym zdjęciu z niebieskawym przejściem wiersze „przeskakiwały” przez próg
+                    # pokrycia i krótkie serie dawały fałszywy „szablon w pikselach” (przegląd 09.10, C)
+                    g = max(3, run)
+                    side = vals[max(0, i - run - g):i - run] + vals[i:i + g]
+                    if run * mm_px <= 14 and side and max(side) <= RASTER_SIDE_MAX:
                         return True
                     run = 0
     return False

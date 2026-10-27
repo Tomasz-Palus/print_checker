@@ -74,7 +74,13 @@ BLOCK_CHOICES = (64, 128)
 FACTORS = (2.0, 2.5, 3.0, 4.0, 6.0, 8.0)   # 8 = odniesienie E(8); 1,5 pominięte (nic nie wnosi, kosztuje 15 %)
 JUMP = 2.0                                    # „kolano”: skok E między kolejnymi f > JUMP × naturalny wzrost (next/f)²
 CHUNK_THREADS = max(2, min(8, (os.cpu_count() or 4) - 1))
-THRESHOLD = 0.045                            # jak analyze.EFF_THRESHOLD
+THRESHOLD = 0.045                            # jak analyze.EFF_THRESHOLD — potwierdzenie FRAGMENTU (_knee_scalar)
+THRESHOLD_BLOCK = 0.08                       # kolano BLOKU (baza elementu). Przy f = prawdziwe powiększenie
+                                             # E(f)/E(8) wychodzi ≈ 0,055, więc 0,045 gubił obrazy powiększone 3–4×
+                                             # (przegląd 09.10, B14). Kalibracja: 0,06 i 0,08 — zero zmian na
+                                             # obrazach i renderach 300 ppi wszystkich przykładowych plików,
+                                             # 1/f powiększone 3×/4× wykryte; próg fragmentów bez zmian (0,06
+                                             # dla fragmentów dawał nowe „upscaled” na gradiencie natywnego JPG).
 MIN_REF = 12.0                               # jak analyze.TILE_MIN_REF (E(8) na piksel) — poniżej blok jednolity
 BAND_MAX_PX = 150_000_000                    # piksele na jeden render pasa (gs/MuPDF)
 CHUNK_ROWS = 512                             # wiersze przetwarzane naraz w numpy (4 wątki × ~0,3 GB przy szer. 47 kpx)
@@ -129,18 +135,20 @@ def _knee(means: dict, ref: np.ndarray, flat: np.ndarray) -> np.ndarray:
     PŁASKĄ do f i dopiero potem skok; obraz z naturalnym detalem rośnie gładko (~(next/f)²
     na stopień). Współczynnik = pierwsze f (≥ 2), przy którym E(f) < THRESHOLD·E(8) ORAZ
     następny stopień skacze > JUMP × naturalny wzrost (i jest zauważalny: > 1 % E(ref)).
-    Samo „E(f) małe” (stara reguła) myliło miękką treść z powiększeniem."""
+    Samo „E(f) małe” (stara reguła) myliło miękką treść z powiększeniem.
+    Przegląd 09.10, B14: bierzemy OSTATNIE takie f na płaskim odcinku (dotąd pierwsze). Na płaskim
+    odcinku E jest bliskie zera i „skok” między dwoma prawie-zerami wychodził przypadkiem — obraz
+    powiększony 4–6× dostawał f = 2,5 (≈ 120 ppi → „ok”). Kalibracja: bez zmian na obrazach
+    przykładowych plików, zdjęcie 4× → 4 (było 2,5), 6× → 4 (było 3)."""
     out = np.ones_like(ref, dtype=np.float32)
-    decided = flat.copy()
+    alive = ~flat                    # wszystkie dotychczasowe f „małe” — wciąż na płaskim odcinku
     e8 = means[8.0]
     for i, f in enumerate(FACTORS[:-1]):
         nxt = FACTORS[i + 1]
-        small = means[f] < THRESHOLD * np.maximum(e8, 1e-6)
+        small = means[f] < THRESHOLD_BLOCK * np.maximum(e8, 1e-6)
         jump = (means[nxt] > JUMP * (nxt / f) ** 2 * np.maximum(means[f], 1e-6)) & (means[nxt] > 0.01 * ref)
-        hit = (~decided) & small & jump
-        out[hit] = f if f >= 2.0 else 1.0
-        decided |= hit
-        decided |= (~small)          # krzywa rośnie monotonicznie — dalsze f już nie przejdą
+        alive &= small               # krzywa rośnie monotonicznie — po pierwszym „dużym” E koniec
+        out[alive & jump] = f
     out[flat] = 0.0
     return out
 
@@ -262,15 +270,16 @@ def _knee_scalar(c: dict, ref_key: float = 8.0) -> float:
     if ref < MIN_REF:
         return 0.0
     keys = [f for f in FACTORS if f <= ref_key]
+    best = 1.0                       # jak _knee: OSTATNIE kolano na płaskim odcinku (przegląd 09.10, B14)
     for i, f in enumerate(keys[:-1]):
         nxt = keys[i + 1]
         small = c[f] < THRESHOLD * max(ref, 1e-6)
         if not small:
-            return 1.0
+            break
         jump = c[nxt] > JUMP * (nxt / f) ** 2 * max(c[f], 1e-6) and c[nxt] > 0.01 * ref
         if jump:
-            return f if f >= 2.0 else 1.0
-    return 1.0
+            best = f
+    return best
 
 
 # ----------------------------------------------------------------------------
@@ -675,7 +684,8 @@ def jpeg_quality_pdf(doc, rec: dict) -> float | None:
     if "DCTDecode" not in f or "Flate" in f or "LZW" in f or not rec.get("xref"):
         return None
     try:
-        raw = doc.xref_stream_raw(rec["xref"])
+        with render.MUPDF_LOCK:
+            raw = doc.xref_stream_raw(rec["xref"])
         if "ASCII85" in f:                               # [/ASCII85Decode /DCTDecode] — np. z Illustratora
             txt = b"".join(raw.split())
             raw = base64.a85decode(txt[:-2] if txt.endswith(b"~>") else txt)
@@ -710,17 +720,33 @@ def _image_only_pdf(path: str, xref: int, w: int, h: int, out: str) -> float:
     return float(s)
 
 
-def _image_bands(doc, path: str, rec: dict, tmpdir: str | None = None):
-    """Generator (y0, gray) po pasach obrazu w natywnej rozdzielczości; małe obrazy — całość."""
-    w, h = rec["width"], rec["height"]
-    if w * h <= IMG_MAX_DECODE_PX and rec.get("xref"):
-        pix = pymupdf.Pixmap(doc, rec["xref"])
+def _decode_gray(doc, xref: int) -> np.ndarray:
+    """Piksele obrazu w skali szarości (natywna rozdzielczość), pod blokadą MuPDF (przegląd 09.10, B24)."""
+    with render.MUPDF_LOCK:
+        pix = pymupdf.Pixmap(doc, xref)
         if pix.alpha:
             pix = pymupdf.Pixmap(pix, 0)
         if pix.n != 1:
             pix = pymupdf.Pixmap(pymupdf.csGRAY, pix)
-        g = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width)
-        yield 0, g.copy()
+        return np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width).copy()
+
+
+def _uniform(doc, xref: int) -> bool:
+    """Mały obraz (< 8 px w boku) bez różnic między pikselami = zwykłe wypełnienie. Nieczytelny → False."""
+    try:
+        with render.MUPDF_LOCK:
+            pix = pymupdf.Pixmap(doc, xref)
+            s = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height * pix.width, pix.n)
+        return bool(s.size) and bool((s == s[0]).all())
+    except Exception:
+        return False
+
+
+def _image_bands(doc, path: str, rec: dict, tmpdir: str | None = None):
+    """Generator (y0, gray) po pasach obrazu w natywnej rozdzielczości; małe obrazy — całość."""
+    w, h = rec["width"], rec["height"]
+    if w * h <= IMG_MAX_DECODE_PX and rec.get("xref"):
+        yield 0, _decode_gray(doc, rec["xref"])
         return
     # ogromny obraz: sam obraz w osobnym PDF-ie, renderowany pasami 1:1 (bez przepróbkowania)
     import tempfile
@@ -795,25 +821,35 @@ def _feed(ex, acc, bands, b: int) -> None:
 VIS_PX_PER_MM = 1.0        # 10 mm = 10 px — do testu „czy cokolwiek tu jest" w zupełności
 VIS_MAX_PX = 4000
 VIS_ALPHA = 16             # poniżej tego uznajemy piksel za niezamalowany
-VIS_MIN_SHARE = 0.02       # < 2 % widocznych pikseli = obszar niewidoczny na wydruku
+VIS_MIN_SHARE = 0.02       # < 2 % widocznych pikseli = obszar niewidoczny — TYLKO gdy obszar nie ma wymiaru w mm
+VIS_MIN_MM2 = MIN_REGION_MM ** 2   # widoczne < 1 cm² NA WYDRUKU = niewidoczny (próg bezwzględny, przegląd 09.10, A7:
+                                   # 2 % chowało okno 70×70 cm w planszy 5×5 m)
 VIS_TRIM_SHARE = 0.90      # < 90 % widocznych = przycinamy prostokąt do widocznej części
 
 
 def page_alpha_map(path: str, page_index: int):
-    """Kanał alfa finalnej strony (True = coś jest namalowane). None, gdy render zawiedzie."""
+    """Kanał alfa finalnej strony (True = coś jest namalowane). None, gdy render zawiedzie — także
+    częściowo: obraz, którego MuPDF nie narysował (JPX, uszkodzony, za duży), zostawiłby „dziurę”
+    i jego słaby fragment uznany byłby za zakryty (przegląd 09.10, A7 — regresja A8)."""
     try:
-        doc = pymupdf.open(path)
-        try:
-            page = doc[page_index]
-            long_pt = max(page.rect.width, page.rect.height) or 1.0
-            long_mm = long_pt * 25.4 / 72.0
-            target = min(VIS_MAX_PX, max(400.0, long_mm * VIS_PX_PER_MM))
-            z = target / long_pt
-            pix = page.get_pixmap(matrix=pymupdf.Matrix(z, z), alpha=True)
-            arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
-            return arr[..., -1] >= VIS_ALPHA
-        finally:
-            doc.close()
+        with render.MUPDF_LOCK:
+            doc = pymupdf.open(path)
+            try:
+                page = doc[page_index]
+                if not render._mupdf_can(page):
+                    return None
+                long_pt = max(page.rect.width, page.rect.height) or 1.0
+                long_mm = long_pt * 25.4 / 72.0
+                target = min(VIS_MAX_PX, max(400.0, long_mm * VIS_PX_PER_MM))
+                z = target / long_pt
+                pymupdf.TOOLS.mupdf_warnings(reset=True)
+                pix = page.get_pixmap(matrix=pymupdf.Matrix(z, z), alpha=True)
+                if "error" in pymupdf.TOOLS.mupdf_warnings(reset=True).lower():
+                    return None      # coś się nie narysowało — w razie wątpliwości NIC nie odrzucamy
+                arr = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
+                return arr[..., -1] >= VIS_ALPHA
+            finally:
+                doc.close()
     except Exception:
         return None      # w razie wątpliwości NIC nie odrzucamy
 
@@ -870,11 +906,16 @@ def apply_visibility(areas: list, vis) -> int:
     H, W = vis.shape
     out = []
     for a in areas:
+        if a.get("unreadable"):          # obrazu nie da się odczytać — MuPDF też go nie narysował
+            out.append(a)
+            continue
         x0 = int(np.clip(np.floor(a["fx"] * W), 0, W - 1)); x1 = int(np.clip(np.ceil((a["fx"] + a["fw"]) * W), x0 + 1, W))
         y0 = int(np.clip(np.floor(a["fy"] * H), 0, H - 1)); y1 = int(np.clip(np.ceil((a["fy"] + a["fh"]) * H), y0 + 1, H))
         sub = vis[y0:y1, x0:x1]
         share = float(sub.mean()) if sub.size else 0.0
-        if share < VIS_MIN_SHARE:
+        # próg bezwzględny: ile cm² tego miejsca WIDAĆ na wydruku (przegląd 09.10, A7)
+        hide = (share * a["mm"][0] * a["mm"][1] < VIS_MIN_MM2) if a.get("mm") else share < VIS_MIN_SHARE
+        if hide or share <= 0.0:
             hidden += 1
             continue
         if share < VIS_TRIM_SHARE:
@@ -915,14 +956,19 @@ _img_lock = threading.Lock()
 def _img_keys(doc, rec, b, scope, recs, i, page_index=0) -> list:
     keys = []
     try:
-        raw = doc.xref_stream_raw(rec["xref"])
+        with render.MUPDF_LOCK:
+            raw = doc.xref_stream_raw(rec["xref"])
         if raw:
             keys.append(("raw", hashlib.md5(raw).hexdigest(), rec["width"], rec["height"], b, bool(rec.get("smask"))))
     except Exception:
         pass
     if scope:
         nth = sum(1 for r in recs[:i] if r["width"] == rec["width"] and r["height"] == rec["height"])
-        keys.append(("job", scope, page_index, rec["width"], rec["height"], b, nth, bool(rec.get("smask"))))
+        # + miejsce pierwszego użycia: dwa obrazy tego samego wymiaru nie zamienią się wynikami, gdy
+        # poprawka zmieni ich kolejność (przegląd 09.10, C)
+        p0 = next((p for p in rec.get("placements") or [] if p.get("page", 0) == page_index), {})
+        pos = tuple(round(float(p0.get(k) or 0), 1) for k in ("x_mm", "y_mm", "bw_mm", "bh_mm"))
+        keys.append(("job", scope, page_index, rec["width"], rec["height"], b, nth, bool(rec.get("smask")), pos))
     return keys
 
 
@@ -973,10 +1019,14 @@ def build_pdf_objects(path: str, images: list, page_index: int, k: int, block: i
     obszary rzutowane na WSZYSTKIE umiejscowienia obrazu na stronie."""
     t0 = time.time()
     pw, ph = (page_mm or (None, None))
-    recs = [r for r in images or [] if not r.get("mask") and r.get("xref") and any(p.get("page", 0) == page_index for p in r["placements"])]
+    on_page = lambda r: any(p.get("page", 0) == page_index for p in r["placements"])
+    # maski (ImageMask, /SMask, /Mask, obrazy w masce miękkiej) — kształt, nie zdjęcie: tylko liczba
+    # pikseli, bez oceny detalu (1 bit wygląda dla metryki zawsze ostro) — przegląd 09.10, B12
+    shape = lambda r: bool(r.get("mask") or r.get("role"))
+    recs = [r for r in images or [] if not shape(r) and r.get("xref") and on_page(r)]
     areas = []
 
-    def lowres_only(rec, pl):
+    def lowres_only(rec, pl, unreadable=False):
         """Za mało pikseli na wydruku — fakt geometryczny, bez dekodowania obrazu. Dla obrazów inline
         (bez numeru obiektu) i takich, których nie da się odczytać (przegląd kodu 27.09, A6/A8):
         wcześniej wypadały z oceny całkiem i plik dostawał „ok”."""
@@ -989,15 +1039,26 @@ def build_pdf_objects(path: str, images: list, page_index: int, k: int, block: i
                           "xref": rec.get("xref"), "page": page_index, "px": [rec["width"], rec["height"]],
                           "uses": len(pl), "mm": [round(p["bw_mm"] * k, 1), round(p["bh_mm"] * k, 1)],
                           "blocks": 0, "scope": "element", "reason": "lowres",
-                          "nominal_ppi": round(nominal, 1), "factor": 1.0, "ppi": round(nominal, 1)})
+                          "nominal_ppi": round(nominal, 1), "factor": 1.0, "ppi": round(nominal, 1),
+                          **({"unreadable": True} if unreadable else {}), **({"shape": True} if shape(rec) else {})})
 
-    for rec in images or []:                       # jak niżej: obrazki < 8 px to wypełnienia, nie zdjęcia
-        if rec.get("inline") and not rec.get("mask") and rec["width"] >= 8 and rec["height"] >= 8:
-            lowres_only(rec, [p for p in rec["placements"] if p.get("page", 0) == page_index])
+    with render.MUPDF_LOCK:
+        doc = pymupdf.open(path)
+    for rec in images or []:
+        if not on_page(rec):
+            continue
+        pl_ = [p for p in rec["placements"] if p.get("page", 0) == page_index]
+        if rec.get("inline"):                      # inline: bez numeru obiektu — tylko liczba pikseli;
+            if rec["width"] * rec["height"] > 1:   # 1×1 to jednolite wypełnienie
+                lowres_only(rec, pl_)
+        elif shape(rec) and rec.get("xref"):
+            lowres_only(rec, pl_)
+        elif rec.get("xref") and (rec["width"] < 8 or rec["height"] < 8) and not _uniform(doc, rec["xref"]):
+            # obrazek < 8 px pomijamy tylko, gdy jest jednolity (przegląd 09.10, C: 4×4 px na stronę → „ok”)
+            lowres_only(rec, pl_)
     blocks_total = 0; n_place = 0; per_image = []; soft_skipped = 0; small_skipped = 0; conf_counts = {}
     invisible_skipped = 0
     reused = 0                                   # obrazy wzięte z pamięci (policzone wcześniej)
-    doc = pymupdf.open(path)
     try:
         with ProcessPoolExecutor(max_workers=CHUNK_THREADS) as ex:
             for i, rec in enumerate(recs):
@@ -1025,7 +1086,7 @@ def build_pdf_objects(path: str, images: list, page_index: int, k: int, block: i
                     except Exception as e:
                         _img_cache_put(mine, None)
                         per_image.append({"xref": rec["xref"], "error": f"{type(e).__name__}: {e}"})
-                        lowres_only(rec, pl)                 # pikseli nie przeczytamy, ale ich liczbę znamy
+                        lowres_only(rec, pl, unreadable=True)   # pikseli nie przeczytamy, ale ich liczbę znamy
                         progress(i + 1, len(recs))
                         continue
                     try:
@@ -1096,7 +1157,15 @@ def build_pdf_objects(path: str, images: list, page_index: int, k: int, block: i
                                       "mm": [round(wmm, 1), round(hmm, 1)]})
                 progress(i + 1, len(recs))
     finally:
-        doc.close()
+        with render.MUPDF_LOCK:
+            doc.close()
+    # maska w tym samym miejscu i nie słabsza niż obraz (np. maska krycia z Illustratora = kopia obrazu)
+    # nic nowego nie mówi — jedno zgłoszenie zamiast dwóch
+    def _same_box(a, b):
+        return all(abs(a[k] - b[k]) <= 0.002 for k in ("fx", "fy", "fw", "fh"))
+    areas[:] = [a for a in areas if not (a.get("shape") and any(
+        not b.get("shape") and b.get("reason") == "lowres" and _same_box(a, b) and (b.get("ppi") or 0) <= (a.get("ppi") or 0) + 0.5
+        for b in areas))]
     # co z tego naprawdę widać na wydruku (maski, przycięcia, przykrycia)
     hidden_skipped = apply_visibility(areas, page_alpha_map(path, page_index))
     _rk = {"element": 0, "fragment": 1}

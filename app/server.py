@@ -6,6 +6,7 @@ Serwer to same trasy HTTP; logika siedzi w modułach (jobs, steps, render, …).
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 import sys
@@ -55,6 +56,44 @@ def job_or_404(jid):
     return job
 
 
+class BadRequest(Exception):
+    """Złe parametry zapytania → 400 z tym komunikatem (dawniej część kończyła się 500)."""
+
+
+def body_dict() -> dict:
+    """Ciało JSON — musi być obiektem (lista, liczba → 400, nie 500) (przegląd 09.10, C)."""
+    b = request.get_json(silent=True)
+    if b is None:
+        return {}
+    if not isinstance(b, dict):
+        raise BadRequest("Złe dane zapytania.")
+    return b
+
+
+def arg_page(job, name: str = "page") -> int:
+    """Numer strony z adresu: brak = 0; nie-liczba albo spoza pliku → 400."""
+    raw = request.args.get(name, "0")
+    try:
+        page = int(raw)
+    except (TypeError, ValueError):
+        raise BadRequest("Zły numer strony.")
+    if not 0 <= page < job.info["page_count"]:
+        raise BadRequest("Nie ma takiej strony.")
+    return page
+
+
+def pos_float(v, what: str = "wartość") -> float:
+    """Liczba skończona i dodatnia — wymiar ≤ 0 albo NaN dawał w ocenie jakości „ok”
+    (przegląd 09.10, B22)."""
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        raise BadRequest(f"Zła {what}.")
+    if not math.isfinite(x) or x <= 0:
+        raise BadRequest(f"Zła {what}.")
+    return x
+
+
 # ---------------------------------------------------------------------------- tylko ten komputer
 # Serwer słucha na 127.0.0.1 na stałym porcie — ale KAŻDA strona otwarta w przeglądarce może
 # wysłać tu zapytanie (formularz, fetch no-cors), a przez „DNS rebinding” nawet czytać odpowiedzi.
@@ -89,6 +128,11 @@ def _only_this_computer():
 @app.errorhandler(JobNotFound)
 def _nojob(_):
     return err("Nie ma takiego zadania — wgraj plik jeszcze raz.", 404)
+
+
+@app.errorhandler(BadRequest)
+def _bad(e):
+    return err(str(e) or "Złe parametry.", 400)
 
 
 @app.errorhandler(Exception)
@@ -182,40 +226,59 @@ def api_upload():
         import prepare
         if isinstance(e, prepare.Unreadable):
             return err(str(e), 415)
-        return err(f"Nie udało się otworzyć pliku: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()                 # szczegóły (ze ścieżką) tylko w dzienniku
+        return err(f"Nie udało się otworzyć pliku ({type(e).__name__}).", 415)
     if job.info.get("page_count", 0) < 1:
         jobs.delete(job.id)
         return err("Plik nie ma żadnej strony.", 415)
-    try:
-        job.suggestions = suggestions_for(job, 0)
-    except Exception as e:                    # propozycje to wygoda — plik i tak się otwiera
-        print(f"[propozycje] {type(e).__name__}: {e}")
-        job.suggestions = []
-    return jsonify(job.to_json())
+    # propozycje dla strony 1 zapisane przy wgraniu — zadanie nie jest jeszcze nikomu znane;
+    # dla innych stron /suggest liczy je bez zapisu w zadaniu (przegląd 09.10, B20)
+    sugs, ramki = suggestions_safe(job, 0)
+    job.suggestions, job.info["template_frames"] = sugs, ramki
+    return jsonify({**job.to_json(), "page": 0})
 
 
-def suggestions_for(job, page: int) -> list:
-    """Propozycje produktu dla strony: z nazwy pliku, z treści (szablon zostawiony w pliku)
-    i z wymiaru strony (także netto, gdy strona ma spady)."""
+def suggestions_for(job, page: int) -> tuple[list, list]:
+    """(propozycje, ramki szablonu) dla strony: z nazwy pliku, z treści (szablon zostawiony
+    w pliku) i z wymiaru strony (także netto, gdy strona ma spady). Nic nie zapisuje w zadaniu —
+    wspólny `job.info["template_frames"]` przy szybkim przełączaniu stron dostawał ramki innej
+    strony (przegląd 09.10, B20)."""
     p = job.info["pages"][page]
     hints = content_hints(job.original.path, page)
-    job.info["template_frames"] = hints.get("ramki", [])
-    return suggest.suggest_all(job.info["name"], p.get("width_mm"), p.get("height_mm"),
-                               products.get_products(), sizeindex.load(), limit=5,
-                               trim_mm=p.get("trim_mm"), hints=hints)
+    return (suggest.suggest_all(job.info["name"], p.get("width_mm"), p.get("height_mm"),
+                                products.get_products(), sizeindex.load(), limit=5,
+                                trim_mm=p.get("trim_mm"), hints=hints),
+            hints.get("ramki", []))
+
+
+def suggestions_safe(job, page: int) -> tuple[list, list]:
+    try:
+        return suggestions_for(job, page)
+    except Exception as e:                    # propozycje to wygoda — plik i tak się otwiera
+        print(f"[propozycje] {type(e).__name__}: {e}")
+        return [], []
+
+
+def job_json_for_page(job, page: int, sugs: list, ramki: list) -> dict:
+    """Stan zadania z propozycjami KONKRETNEJ strony (pole `page`) — bez zapisu w zadaniu."""
+    out = job.to_json()
+    out["file"] = {**out["file"], "template_frames": ramki}
+    out["suggestions"], out["page"] = sugs, page
+    return out
 
 
 @app.get("/api/jobs/<jid>/suggest")
 def api_suggest(jid):
-    """Propozycje dla wybranej strony (strona jest wybierana przed produktem)."""
+    """Propozycje dla wybranej strony (strona jest wybierana przed produktem). Odpowiedź ma
+    `page` — interfejs odrzuca propozycje dla strony, która nie jest już wybrana."""
     job = job_or_404(jid)
-    page = request.args.get("page", 0, type=int)
-    if not 0 <= page < job.info["page_count"]:
-        return err("Nie ma takiej strony.", 404)
-    job.suggestions = suggestions_for(job, page)
-    return jsonify(job.to_json())
+    page = arg_page(job)
+    sugs, ramki = suggestions_for(job, page)
+    return jsonify(job_json_for_page(job, page, sugs, ramki))
 
 
+@render._pdfutil.mupdf_locked
 def content_hints(path: str, page: int = 0) -> dict:
     """Podpowiedzi do sugestii produktu z TREŚCI pliku: napisy i ramki w kolorach wytycznych.
     Klient często zostawia szablon w projekcie, a ten mówi wprost, do jakiego jest produktu."""
@@ -276,18 +339,12 @@ def api_analysis(jid):
     v = job.version(request.args.get("v"))
     if v is None:
         return err("Tej wersji pliku już nie ma.", 404)
-    page = request.args.get("page", 0, type=int)
-    if not 0 <= page < job.info["page_count"]:
-        return err("Nie ma takiej strony.")
-    cache = job.analysis.setdefault(v.id, {})
-    if page not in cache:
-        try:
-            res = analyze.analyze(v.path, page)
-        except Exception as e:
-            return err(f"Analiza nie powiodła się: {type(e).__name__}: {e}", 500)
-        job.images.setdefault(v.id, {})[page] = res.pop("_images", None)
-        cache[page] = res
-    return jsonify({"version": v.id, "page": page, **cache[page]})
+    page = arg_page(job)
+    try:
+        res = job.analysis_of(v, page)       # raz na wersję i stronę (przegląd 09.10, C)
+    except Exception as e:
+        return err(f"Analiza nie powiodła się: {type(e).__name__}: {e}", 500)
+    return jsonify({"version": v.id, "page": page, **res})
 
 
 @app.get("/api/jobs/<jid>/ink")
@@ -297,9 +354,7 @@ def api_ink(jid):
     v = job.version(request.args.get("v"))
     if v is None:
         return err("Tej wersji pliku już nie ma.", 404)
-    page = request.args.get("page", 0, type=int)
-    if not 0 <= page < job.info["page_count"]:
-        return err("Nie ma takiej strony.")
+    page = arg_page(job)
     if render.is_raster(v.path):
         return jsonify({"version": v.id, "page": page, "skip": True})
     cache, key = job.ink, (v.id, page)
@@ -326,11 +381,7 @@ def _image_boxes(job, page: int) -> list:
     """Gdzie na stronie oryginału leżą obrazy (mm, y od góry) — z analizy (ta sama pamięć co
     /analysis). Obrazki < 8 px to wypełnienia, nie zdjęcia."""
     v = job.original
-    cache = job.analysis.setdefault(v.id, {})
-    if page not in cache:
-        res = analyze.analyze(v.path, page)
-        job.images.setdefault(v.id, {})[page] = res.pop("_images", None)
-        cache[page] = res
+    job.analysis_of(v, page)
     out = []
     for rec in job.images.get(v.id, {}).get(page) or []:
         if rec.get("mask") or rec.get("width", 0) < 8 or rec.get("height", 0) < 8:
@@ -346,9 +397,7 @@ def api_frames(jid):
     """Czy w pliku został szablon z wytycznych. Zawsze na ORYGINALE — usuwanie szablonu jest
     pierwszą poprawką, więc to dokładnie ten plik, na którym zadziała."""
     job = job_or_404(jid)
-    page = request.args.get("page", 0, type=int)
-    if not 0 <= page < job.info["page_count"]:
-        return err("Nie ma takiej strony.", 404)
+    page = arg_page(job)
     glp = request.args.get("glpage", -1, type=int)
     mm = job.original.pages_mm[page]
     if job.info["kind"] == "raster" or not mm or not mm[0]:
@@ -375,28 +424,69 @@ def api_frames(jid):
 def api_rotate(jid):
     """Obraca cały plik o 90° / 180° (Tomasz 29.09) — nowy punkt wyjścia, poprawki przepadają."""
     job = job_or_404(jid)
-    body = request.get_json(silent=True) or {}
+    body = body_dict()
     try:
         deg = int(body.get("deg", 90))
+        page = int(body.get("page", 0))
+    except (TypeError, ValueError):
+        return err("Złe parametry obrotu.")
+    if not 0 <= page < job.info["page_count"]:
+        return err("Nie ma takiej strony.")
+    try:
         quality.forget(job)
         job.rotate(deg)
     except ValueError as e:
         return err(str(e))
     except Exception as e:
         return err(f"Nie udało się obrócić pliku: {type(e).__name__}: {e}", 500)
+    sugs, ramki = suggestions_safe(job, page)
+    return jsonify(job_json_for_page(job, page, sugs, ramki))
+
+
+RASTER_STEPS = {"resize", "cmyk"}            # obraz (JPG/PNG/TIFF) ma tylko te poprawki
+
+
+def check_step_params(job, name: str, p: dict) -> dict:
+    """Strona i liczby poprawki (przegląd 09.10, C): `w_mm=0` dawało stronę US Letter,
+    `flatten k=0` — 1,2 ppi opisane jako 120; kroki PDF dla obrazu kończyły się 500."""
     try:
-        job.suggestions = suggestions_for(job, int(body.get("page", 0)))
-    except Exception as e:
-        print(f"[propozycje] {type(e).__name__}: {e}")
-    return jsonify(job.to_json())
+        page = int(p.get("page", 0) or 0)
+    except (TypeError, ValueError):
+        raise BadRequest("Zły numer strony.")
+    if not 0 <= page < job.info["page_count"]:
+        raise BadRequest("Nie ma takiej strony.")
+    p["page"] = page
+    if job.info.get("kind") == "raster" and name not in RASTER_STEPS:
+        raise BadRequest("Ta poprawka nie dotyczy obrazu (JPG, PNG, TIFF).")
+    if name == "resize":
+        p["w_mm"], p["h_mm"] = pos_float(p.get("w_mm"), "szerokość"), pos_float(p.get("h_mm"), "wysokość")
+    elif name == "trim":                                  # 0 = bez wymiaru netto
+        for k in ("w_mm", "h_mm"):
+            if p.get(k) not in (None, "", 0):
+                p[k] = pos_float(p[k], "wymiar")
+    for k in ("scale", "k"):
+        if k in p and p[k] is not None:
+            p[k] = pos_float(p[k], "skala")
+    for k in ("dx_mm", "dy_mm"):
+        if k in p and p[k] is not None:
+            try:
+                p[k] = float(p[k])
+            except (TypeError, ValueError):
+                raise BadRequest("Złe przesunięcie.")
+            if not math.isfinite(p[k]):
+                raise BadRequest("Złe przesunięcie.")
+    return p
 
 
 @app.post("/api/jobs/<jid>/steps")
 def api_step(jid):
     """Nakłada poprawkę na ostatnią wersję pliku → nowa wersja."""
     job = job_or_404(jid)
-    body = request.get_json(silent=True) or {}
-    name, params = body.get("name", ""), dict(body.get("params") or {})
+    body = body_dict()
+    name, params = body.get("name", ""), body.get("params") or {}
+    if not isinstance(name, str) or not isinstance(params, dict):
+        return err("Złe dane poprawki.")
+    params = check_step_params(job, name, dict(params))
     if name == "frames":
         params["gl_pdf"] = gl_pdf(params.get("gl", ""))
         glp = params.get("glpage")
@@ -422,14 +512,16 @@ def api_quality(jid):
     k = ile razy wydruk jest większy od strony pliku (skala wytycznych; raster — z wymiaru
     wydruku); w_mm/h_mm = wymiar wydruku (raster: z niego liczy się ppi)."""
     job = job_or_404(jid)
+    page = arg_page(job)
     try:
-        page = request.args.get("page", 0, type=int)
-        k = round(float(request.args.get("k", "1")), 4)
+        k = round(pos_float(request.args.get("k", "1"), "skala"), 4)
         block = int(request.args.get("block", "128"))
-        pm = (float(request.args["w_mm"]), float(request.args["h_mm"])) if request.args.get("w_mm") else None
+        # wymiar wydruku ≤ 0 albo NaN dawał werdykt „ok” (przegląd 09.10, B22)
+        pm = (pos_float(request.args["w_mm"], "szerokość"), pos_float(request.args.get("h_mm"), "wysokość")) \
+            if request.args.get("w_mm") else None
     except (TypeError, ValueError, KeyError):
         return err("Złe parametry.")
-    if not (0 <= page < job.info["page_count"]) or not (0.01 <= k <= 100):
+    if not (0.01 <= k <= 100):
         return err("Złe parametry.")
     if block not in (64, 128):
         block = 128
@@ -452,10 +544,16 @@ def api_download(jid):
     """Plik do druku: OSTATNIA wersja, zawsze JEDNA strona (zasada Tomasza — PDF-a z kilkoma
     stronami nie pobieramy nigdy). Obraz — jak jest (JPG/TIFF po ewentualnej zamianie na CMYK)."""
     job = job_or_404(jid)
-    page = request.args.get("page", 0, type=int)
-    if not 0 <= page < job.info["page_count"]:
-        return err("Nie ma takiej strony.", 404)
-    path, fname, mime = download_file(job, page, request.args.get("name", ""))
+    page = arg_page(job)
+    # `v` = wersja, którą użytkownik zaakceptował. Gdy to nie ostatnia (cofnięcie przeszło, a
+    # odpowiedź nie doszła) — 409, zamiast pobrać plik o innym wymiarze (przegląd 09.10, A9)
+    want = request.args.get("v")
+    if want and want != job.head.id:
+        return err("Plik zmienił się od chwili akceptacji — sprawdź go jeszcze raz przed pobraniem.", 409)
+    pm = None
+    if request.args.get("w_mm") or request.args.get("h_mm"):
+        pm = (pos_float(request.args.get("w_mm"), "szerokość"), pos_float(request.args.get("h_mm"), "wysokość"))
+    path, fname, mime = download_file(job, page, request.args.get("name", ""), pm)
     resp = send_file(path, mimetype=mime, as_attachment=True, download_name=fname)
     resp.headers["Cache-Control"] = "no-store"
     return resp
@@ -464,14 +562,19 @@ def api_download(jid):
 _download_lock = threading.Lock()
 
 
-def download_file(job, page: int, name: str) -> tuple[str, str, str]:
+def download_file(job, page: int, name: str, print_mm: tuple | None = None) -> tuple[str, str, str]:
     """(ścieżka, nazwa pliku, typ) pliku do druku — wspólne dla przeglądarki i okna programu
-    (tam zapisuje go okno „Zapisz jako", desktop.py)."""
+    (tam zapisuje go okno „Zapisz jako", desktop.py). `print_mm` = wymiar wydruku (mm) — obraz
+    bez zapisanego DPI dostaje DPI = piksele / ten wymiar (przegląd 09.10, B18)."""
     v = job.head
-    base = safe_name(name) or os.path.splitext(job.info["name"])[0] + "_do_druku"
-    ext = os.path.splitext(v.path)[1].lower()
-    path = v.path
-    if not render.is_raster(v.path):
+    # zapasowa nazwa też przez safe_name — trafia do okna „Zapisz jako” (przegląd 09.10, C)
+    base = safe_name(name) or safe_name(os.path.splitext(job.info["name"])[0] + "_do_druku") or "do_druku"
+    path = job.page_path(v, page)            # wielostronicowy obraz: tylko wybrana strona (A8)
+    ext = os.path.splitext(path)[1].lower()
+    if render.is_raster(path):
+        if print_mm:
+            path = _with_dpi(job, path, print_mm)
+    else:
         ext = ".pdf"
         import prepare
         wmm, hmm = (v.pages_mm[page] if page < len(v.pages_mm) else (0, 0))
@@ -501,6 +604,92 @@ def download_file(job, page: int, name: str) -> tuple[str, str, str]:
     return path, base + ext, mime
 
 
+def _with_dpi(job, path: str, print_mm: tuple) -> str:
+    """Obraz BEZ zapisanego DPI → kopia z DPI = piksele / wymiar wydruku. Bez DPI RIP przyjmie
+    72 dpi: 600×1200 px wyszłoby 212×423 mm zamiast 1015×2014 (przegląd 09.10, B18).
+    Piksele zostają nietknięte: JPG i PNG — tylko nagłówek; TIFF — zapis bezstratny.
+    DPI jednakowe w obu osiach (większe z dwóch — obraz nie wyjdzie poza wymiar wydruku)."""
+    from PIL import Image
+    with Image.open(path) as im:
+        d = im.info.get("dpi")
+        if im.format == "TIFF" and 282 not in getattr(im, "tag_v2", {}):
+            d = None                                     # Pillow podaje wtedy umowne (1, 1)
+        if d and d[0] and d[1]:
+            return path                                  # DPI jest — nic nie zmieniamy
+        W, H, fmt = im.width, im.height, im.format
+    pw, ph = print_mm
+    if (W >= H) != (pw >= ph):                           # wymiar podany w drugiej orientacji
+        pw, ph = ph, pw
+    dpi = max(W / (pw / 25.4), H / (ph / 25.4))
+    ext = os.path.splitext(path)[1].lower()
+    out = os.path.join(job.dir, f"pobierz_{os.path.splitext(os.path.basename(path))[0]}_dpi{dpi:.3f}{ext}")
+    with _download_lock:
+        if os.path.exists(out):
+            return out
+        tmp = f"{out}.{threading.get_ident()}.part"
+        with open(path, "rb") as f:
+            data = f.read()
+        if fmt == "JPEG":
+            data = _jpeg_density(data, dpi)
+            with open(tmp, "wb") as f:
+                f.write(data)
+        elif fmt == "PNG":
+            data = _png_phys(data, dpi)
+            with open(tmp, "wb") as f:
+                f.write(data)
+        elif fmt == "TIFF":
+            with Image.open(path) as im:
+                kw = {"dpi": (dpi, dpi)}
+                if im.info.get("icc_profile"):
+                    kw["icc_profile"] = im.info["icc_profile"]
+                comp = im.info.get("compression")
+                # JPEG w TIFF-ie zapisany jeszcze raz straciłby jakość — wtedy LZW (bezstratnie)
+                kw["compression"] = comp if comp in ("raw", "tiff_lzw", "tiff_adobe_deflate", "packbits") else "tiff_lzw"
+                im.save(tmp, "TIFF", **kw)
+        else:
+            return path                                  # GIF/BMP/WEBP — bez zmian
+        os.replace(tmp, out)
+    return out
+
+
+def _jpeg_density(data: bytes, dpi: float) -> bytes:
+    """Gęstość w nagłówku JFIF (APP0): istniejący poprawiony, brakujący dopisany za SOI.
+    JFIF zapisuje liczby całkowite — jednostka (cale / cm) dająca mniejszy błąd."""
+    import struct
+    per_cm = dpi / 2.54
+    unit, val = (1, round(dpi)) if abs(round(dpi) - dpi) / dpi <= abs(round(per_cm) - per_cm) / per_cm or round(per_cm) < 1 \
+        else (2, round(per_cm))
+    val = max(1, min(65535, val))
+    dens = struct.pack(">BHH", unit, val, val)
+    if data[2:4] == b"\xff\xe0" and data[6:11] == b"JFIF\x00":
+        return data[:13] + dens + data[18:]
+    app0 = b"\xff\xe0" + struct.pack(">H", 16) + b"JFIF\x00\x01\x01" + dens + b"\x00\x00"
+    return data[:2] + app0 + data[2:]
+
+
+def _png_phys(data: bytes, dpi: float) -> bytes:
+    """Chunk pHYs (piksele na metr) przed pierwszym IDAT; stary pHYs (np. bez jednostki) wypada."""
+    import struct
+    import zlib
+    ppm = max(1, round(dpi / 0.0254))
+    body = b"pHYs" + struct.pack(">IIB", ppm, ppm, 1)
+    phys = struct.pack(">I", 9) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+    out, i, done = [data[:8]], 8, False
+    while i + 8 <= len(data):
+        n = struct.unpack(">I", data[i:i + 4])[0]
+        typ = data[i + 4:i + 8]
+        chunk = data[i:i + 12 + n]
+        if typ == b"pHYs":
+            i += 12 + n
+            continue
+        if typ == b"IDAT" and not done:
+            out.append(phys)
+            done = True
+        out.append(chunk)
+        i += 12 + n
+    return b"".join(out)
+
+
 @app.delete("/api/jobs/<jid>/steps/<name>")
 def api_step_undo(jid, name):
     """Cofa poprawkę razem ze wszystkim, co zrobiono po niej."""
@@ -520,16 +709,13 @@ def api_view(jid):
     v = job.version(request.args.get("v"))
     if v is None:
         return jsonify({"state": "gone"})
-    try:
-        page = int(request.args.get("page", 0))
-        mm = (float(request.args["w_mm"]), float(request.args["h_mm"]))
-    except (KeyError, ValueError):
-        return err("Złe parametry.")
-    if not 0 <= page < job.info["page_count"] or min(mm) <= 0:
-        return err("Złe parametry.")
+    page = arg_page(job)
+    # NaN / nieskończoność / ≤ 0 — 400 (przegląd 09.10, B22); 1e9 mm podgląd i tak przycina (MAX_MPX)
+    mm = (pos_float(request.args.get("w_mm"), "szerokość"), pos_float(request.args.get("h_mm"), "wysokość"))
     op, pr = request.args.get("op") == "1", request.args.get("pr") == "1"
     try:
-        return jsonify(views.request(job, v.id, v.path, page, mm, op, pr, request.method == "POST",
+        # wielostronicowy obraz: podgląd wybranej strony, nie zawsze pierwszej (A8)
+        return jsonify(views.request(job, v.id, job.page_path(v, page), page, mm, op, pr, request.method == "POST",
                                      full=request.args.get("full", "1") == "1"))
     except Exception as e:
         return jsonify({"state": "err", "err": f"{type(e).__name__}: {e}"})
@@ -569,7 +755,10 @@ def api_update_install():
     msg = updater.install()
     if msg:
         return err(msg)
-    threading.Timer(1.0, lambda: os._exit(0)).start()      # najpierw odpowiedź, potem koniec
+    # najpierw odpowiedź, potem koniec — po zatrzymaniu Ghostscripta i procesów jakości, jak przy
+    # zamknięciu okna (przegląd 09.10, B23)
+    import instance
+    threading.Timer(1.0, lambda: (instance.shutdown(), os._exit(0))).start()
     return jsonify({"ok": True})
 
 

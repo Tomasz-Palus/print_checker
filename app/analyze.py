@@ -99,6 +99,14 @@ class Analyzer:
         self._active_forms = set()      # formy w toku (ochrona przed cyklem: forma rysuje samą siebie)
         self._budget = OPS_BUDGET       # ile operatorów wolno przejść (formy wielokrotnie zagnieżdżone)
         self.truncated = False          # budżet się skończył — analiza niepełna
+        self.partial = set()            # powody niepełnej analizy: budget | depth | stream (przegląd 09.10, B13)
+        self._ops_cache: dict = {}      # objgen formy/wzoru/glifu → sparsowane operatory (przegląd 09.10, B25)
+        self._in_mask = 0               # > 0: wewnątrz formy maski miękkiej (/SMask /G) — jej kolory się nie drukują
+        self._mask_seen = set()         # (maska, macierz) już przejrzane
+        self._plog = None               # lista (rekord, umiejscowienie) obrazów z bieżącego wzoru
+        self._t3_plain = set()          # glify Type3 bez obrazów — kolejne wystąpienia pomijamy
+        self._n_place = 0               # licznik umiejscowień obrazów
+        self.group_rgb = False          # grupa przezroczystości strony/formy z /CS RGB (kontrakt `group_rgb`)
         self.page_index = 0
         self.page_box = (0.0, 0.0, 0.0, 0.0)   # MediaBox bieżącej strony (x0, y0, x1, y1) w pt
 
@@ -179,6 +187,8 @@ class Analyzer:
         return res
 
     def _record(self, c: dict, kind: str):
+        if self._in_mask:               # maska miękka to kształt, nie farba
+            return
         fam = c.get("family", "Unknown")
         if fam == "Spot":
             self.spots[c["spot"]] += 1
@@ -203,12 +213,39 @@ class Analyzer:
             self.icc_profiles[(c["icc"], fam if fam not in ("Spot", "DeviceN") else c.get("alt"))] += 1
 
     # --- ExtGState
-    def _extgstate(self, name, resources):
+    def _extgstate(self, name, resources, ctm=None, depth=0):
         try:
             gsd = resources.get("/ExtGState")
             if gsd is None or name not in gsd:
-                return
+                return {}
             g = gsd[name]
+            sm = g.get("/SMask")
+            if ctm is not None and isinstance(sm, pikepdf.Dictionary) and isinstance(sm.get("/G"), pikepdf.Stream):
+                self._soft_mask(sm.get("/G"), ctm, resources, depth)
+            return self._extgstate_dict(g)
+        except Exception:
+            return {}
+
+    def _soft_mask(self, form, ctm, resources, depth):
+        """Forma maski miękkiej (/SMask /G): jej obrazy wyznaczają kształt na wydruku — mają mieć
+        rozdzielczość jak każdy obraz; kolorów i overprintu w niej nie liczymy (przegląd 09.10, B12)."""
+        try:
+            key = (form.objgen, tuple(round(float(v), 3) for v in ctm[:6]))
+        except Exception:
+            key = (id(form), 0)
+        if key in self._mask_seen:
+            return
+        self._mask_seen.add(key)
+        self._in_mask += 1
+        try:
+            self._form(form, ctm, resources, depth, mask=True)
+        finally:
+            self._in_mask -= 1
+
+    def _extgstate_dict(self, g) -> dict:
+        try:
+            if self._in_mask:
+                return {}
             if bool(g.get("/OP", False)) or bool(g.get("/op", False)):
                 self.overprint_uses += 1
             ov = {}
@@ -268,11 +305,13 @@ class Analyzer:
         return [min(xs), min(ys), max(xs), max(ys)]
 
     # --- obrazy
-    def _image(self, xobj, ctm, resources, name, inline=False):
+    def _image(self, xobj, ctm, resources, name, inline=False, role=None):
         try:
             key = xobj.objgen if not inline else ("inline", id(xobj))
         except Exception:
             key = (id(xobj), 0)
+        if role is None and self._in_mask:
+            role = "softmask"           # obraz w formie maski miękkiej — kształt, nie kolor
         w = int(xobj.get("/Width", 0)); h = int(xobj.get("/Height", 0))
         # rozmiar na stronie z CTM (jednostkowy kwadrat obrazu -> CTM)
         a, b, c, d = ctm[0], ctm[1], ctm[2], ctm[3]
@@ -301,13 +340,27 @@ class Analyzer:
                 # liczbę pikseli (przegląd kodu 27.09, A6)
                 "xref": None if inline else (key[0] if isinstance(key, tuple) else None), "inline": inline,
                 "page": self.page_index, "rect_pdf": rect_pdf,
+                # „smask”/„softmask” — maska (kształt), nie farba: tylko liczba pikseli (przegląd 09.10, B12)
+                "role": role,
             }
             self._img_by_xref[key] = rec
             self.images.append(rec)
-            if not mask:
+            if not mask and role is None:
                 self._record(c, "image")
-            if rec["smask"]:
+            if rec["smask"] and role is None:
                 self.transparency["obraz z maską (SMask)"] += 1
+        # maska obrazu (/SMask albo /Mask-strumień) o MNIEJSZEJ liczbie pikseli niż obraz — schodki na
+        # konturze; ta sama rozdzielczość nic nowego nie mówi. Obraz < 8 px (kolor) — kształt niesie maska.
+        if not inline and role is None:
+            for mk in ("/SMask", "/Mask"):
+                ms = xobj.get(mk)
+                if isinstance(ms, pikepdf.Stream):
+                    try:
+                        mw, mh = int(ms.get("/Width", 0)), int(ms.get("/Height", 0))
+                        if mw * mh and (mw * mh < w * h or min(w, h) < 8):
+                            self._image(ms, ctm, resources, f"{name}{mk}", role="smask")
+                    except Exception:
+                        self.unknown_ops += 1
         bx0, by0, bx1, by1 = self.page_box
         rec["placements"].append({"w_mm": round(w_pt * MM_PER_PT, 2), "h_mm": round(h_pt * MM_PER_PT, 2),
                                   "ppi": round(ppi, 1) if ppi else None,
@@ -322,19 +375,43 @@ class Analyzer:
                                   "ctm": [round(float(v), 4) for v in ctm[:6]],
                                   "rect_pdf": [round(float(v), 3) for v in rect_pdf],
                                   "page": self.page_index})
+        self._n_place += 1
+        if self._plog is not None:                   # obraz we wzorze — miejsce poprawi wypełnienie
+            self._plog.append((rec, rec["placements"][-1]))
         if ppi and (rec["min_ppi"] is None or ppi < rec["min_ppi"]):
             rec["min_ppi"] = round(ppi, 1)
 
     # --- strumień treści
+    def _ops(self, container):
+        """Sparsowane operatory strumienia; formy, wzory i glify — raz na obiekt (przegląd 09.10, B25:
+        forma użyta 12 000 razy była parsowana 12 000 razy)."""
+        key = None
+        if isinstance(container, pikepdf.Stream):
+            try:
+                key = container.objgen if container.objgen != (0, 0) else None
+            except Exception:
+                key = None
+        if key is not None and key in self._ops_cache:
+            return self._ops_cache[key]
+        ops = [(operands, str(op)) for operands, op in pikepdf.parse_content_stream(container)]
+        if key is not None:
+            self._ops_cache[key] = ops
+        return ops
+
     def walk(self, container, resources, ctm, depth=0):
-        if depth > 12 or self._budget <= 0:
-            if self._budget <= 0:
-                self.truncated = True
+        # Niepełna analiza nie może przejść po cichu (przegląd 09.10, B13): powód trafia do `partial`.
+        if self._budget <= 0:
+            self.truncated = True
+            self.partial.add("budget")
+            return
+        if depth > MAX_DEPTH:
+            self.partial.add("depth")
             return
         try:
-            ops = pikepdf.parse_content_stream(container)
+            ops = self._ops(container)
         except Exception:
             self.unknown_ops += 1
+            self.partial.add("stream")
             return
         self._budget -= len(ops)
         # przestrzeń WZORU (pattern) = domyślna przestrzeń tego strumienia (strony albo formy),
@@ -350,37 +427,69 @@ class Analyzer:
         lw = self._lw_in
         tm, tsize = [1, 0, 0, 1, 0, 0], 12.0
         pbox = None
-        for operands, op in ops:
-            o = str(op)
+        # kolor ustawiony samym `cs`/`CS` (bez sc) maluje kolorem początkowym — liczymy go przy
+        # malowaniu (przegląd 09.10, C); wzór: obrazy z ostatniego `scn` czekają na obszar wypełnienia
+        fill_dirty = stroke_dirty = False
+        pat_fill = pat_stroke = None
+        t3 = None                              # bieżący font Type3 (Tf)
+        in_mask = self._in_mask
+        for operands, o in ops:
             try:
                 if o in ("m", "l", "c", "v", "y", "re"):
+                    # obrys ścieżki potrzebny tylko dla bieli z overprintem i obszaru wzoru —
+                    # poza tym wystarczy wiedzieć, że ścieżka jest (przegląd 09.10, B25)
+                    if not (ov.get("op") or ov.get("OP") or pat_fill or pat_stroke):
+                        if pbox is None:
+                            pbox = True
+                        continue
                     vals = [float(x) for x in operands]
                     if o == "re":
                         x, y, w, h = vals
                         vals = [x, y, x + w, y + h]
                     for j in range(0, len(vals) - 1, 2):
                         px, py = ctm[0] * vals[j] + ctm[2] * vals[j + 1] + ctm[4], ctm[1] * vals[j] + ctm[3] * vals[j + 1] + ctm[5]
-                        pbox = [px, py, px, py] if pbox is None else [min(pbox[0], px), min(pbox[1], py),
-                                                                      max(pbox[2], px), max(pbox[3], py)]
+                        pbox = [px, py, px, py] if not isinstance(pbox, list) else [min(pbox[0], px), min(pbox[1], py),
+                                                                                    max(pbox[2], px), max(pbox[3], py)]
                     continue
                 if o == "w":
                     lw = float(operands[0])
                     continue
                 if o in ("f", "F", "f*", "B", "B*", "b", "b*", "S", "s", "n"):
                     if pbox is not None and o != "n":
-                        if (o not in ("S", "s") and _heavy(fill_cs, fill_v)) or \
-                                (o not in ("f", "F", "f*") and _heavy(stroke_cs, stroke_v)):
-                            self.heavy_black += 1
-                        if o not in ("S", "s") and ov.get("op") and _white(fill_cs, fill_v, ov.get("OPM", 0)):
-                            self._white_hit(pbox)
-                        elif o not in ("f", "F", "f*") and ov.get("OP") and _white(stroke_cs, stroke_v, ov.get("OPM", 0)):
-                            self._white_hit(pbox)
+                        fills, strokes = o not in ("S", "s"), o not in ("f", "F", "f*")
+                        if fills and fill_dirty:
+                            self._record(fill_cs, "fill"); fill_dirty = False
+                        if strokes and stroke_dirty:
+                            self._record(stroke_cs, "stroke"); stroke_dirty = False
+                        if fills and pat_fill and isinstance(pbox, list):
+                            self._pattern_area(pat_fill, pbox)
+                        if strokes and pat_stroke and isinstance(pbox, list):
+                            self._pattern_area(pat_stroke, pbox)
+                        if not in_mask:
+                            if (fills and _heavy(fill_cs, fill_v)) or (strokes and _heavy(stroke_cs, stroke_v)):
+                                self.heavy_black += 1
+                            if isinstance(pbox, list):
+                                if fills and ov.get("op") and _white(fill_cs, fill_v, ov.get("OPM", 0)):
+                                    self._white_hit(pbox)
+                                elif strokes and ov.get("OP") and _white(stroke_cs, stroke_v, ov.get("OPM", 0)):
+                                    self._white_hit(pbox)
                     pbox = None
                     continue
-                if o in ("Tj", "TJ", "'", '"') and tr not in (3, 7) and \
+                if o in ("Tj", "TJ", "'", '"') and tr not in (3, 7):
+                    fills = tr in (0, 2, 4, 6)
+                    if fills and fill_dirty:
+                        self._record(fill_cs, "fill"); fill_dirty = False
+                    if tr in (1, 2, 5, 6) and stroke_dirty:
+                        self._record(stroke_cs, "stroke"); stroke_dirty = False
+                    pat = pat_fill if fills else pat_stroke
+                    if pat:
+                        self._pattern_area(pat, self._text_box(operands, ctm, tm, tsize))
+                    if t3 is not None:               # glify Type3 to zwykła treść (przegląd 09.10, B12)
+                        self._type3(t3, operands, o, ctm, tm, tsize, resources, depth, ov, lw)
+                if not in_mask and o in ("Tj", "TJ", "'", '"') and tr not in (3, 7) and \
                         _heavy(*((fill_cs, fill_v) if tr in (0, 2, 4, 6) else (stroke_cs, stroke_v))):
                     self.heavy_black += 1
-                if o in ("Tj", "TJ", "'", '"') and tr not in (3, 7) and ov.get("op" if tr in (0, 2, 4, 6) else "OP"):
+                if not in_mask and o in ("Tj", "TJ", "'", '"') and tr not in (3, 7) and ov.get("op" if tr in (0, 2, 4, 6) else "OP"):
                     cs_, v_ = (fill_cs, fill_v) if tr in (0, 2, 4, 6) else (stroke_cs, stroke_v)
                     if _white(cs_, v_, ov.get("OPM", 0)):
                         self._white_hit(self._text_box(operands, ctm, tm, tsize))
@@ -394,39 +503,39 @@ class Analyzer:
                     tm = [tm[0], tm[1], tm[2], tm[3], tm[4] + float(operands[0]) * tm[0] + float(operands[1]) * tm[2],
                           tm[5] + float(operands[0]) * tm[1] + float(operands[1]) * tm[3]]
                 if o == "q":
-                    stack.append((ctm, fill_cs, stroke_cs, dict(ov), fill_v, stroke_v, lw))
+                    stack.append((ctm, fill_cs, stroke_cs, dict(ov), fill_v, stroke_v, lw,
+                                  fill_dirty, stroke_dirty, pat_fill, pat_stroke))
                 elif o == "Q":
                     if stack:
-                        ctm, fill_cs, stroke_cs, ov, fill_v, stroke_v, lw = stack.pop()
+                        (ctm, fill_cs, stroke_cs, ov, fill_v, stroke_v, lw,
+                         fill_dirty, stroke_dirty, pat_fill, pat_stroke) = stack.pop()
                 elif o == "cm":
                     m = [float(x) for x in operands]
                     ctm = _mul(m, ctm)
-                elif o == "g":
-                    fill_cs = {"family": "Gray"}; self._record(fill_cs, "fill"); fill_v = _nums(operands)
-                elif o == "G":
-                    stroke_cs = {"family": "Gray"}; self._record(stroke_cs, "stroke"); stroke_v = _nums(operands)
-                elif o == "rg":
-                    fill_cs = {"family": "RGB"}; self._record(fill_cs, "fill"); fill_v = _nums(operands)
-                elif o == "RG":
-                    stroke_cs = {"family": "RGB"}; self._record(stroke_cs, "stroke"); stroke_v = _nums(operands)
-                elif o == "k":
-                    fill_cs = {"family": "CMYK"}; self._record(fill_cs, "fill"); fill_v = _nums(operands)
-                elif o == "K":
-                    stroke_cs = {"family": "CMYK"}; self._record(stroke_cs, "stroke"); stroke_v = _nums(operands)
+                elif o in ("g", "rg", "k"):
+                    fill_cs = {"family": {"g": "Gray", "rg": "RGB", "k": "CMYK"}[o]}; self._record(fill_cs, "fill")
+                    fill_v = _nums(operands); fill_dirty = False; pat_fill = None
+                elif o in ("G", "RG", "K"):
+                    stroke_cs = {"family": {"G": "Gray", "RG": "RGB", "K": "CMYK"}[o]}; self._record(stroke_cs, "stroke")
+                    stroke_v = _nums(operands); stroke_dirty = False; pat_stroke = None
                 elif o == "cs":
-                    fill_cs = self.classify(operands[0], resources); fill_v = [0.0]
+                    fill_cs = self.classify(operands[0], resources); fill_v = [0.0]; fill_dirty = True; pat_fill = None
                 elif o == "CS":
-                    stroke_cs = self.classify(operands[0], resources); stroke_v = [0.0]
+                    stroke_cs = self.classify(operands[0], resources); stroke_v = [0.0]; stroke_dirty = True; pat_stroke = None
                 elif o in ("sc", "scn"):
-                    fill_v = _nums(operands)
+                    fill_v = _nums(operands); fill_dirty = False
                     if fill_cs.get("family") == "Pattern":
-                        self._pattern(operands, resources, base_ctm, "fill", depth)
+                        if fill_cs.get("base"):          # wzór bezbarwny (PaintType 2): kolor z bazy
+                            self._record(fill_cs["base"], "fill")
+                        pat_fill = self._pattern(operands, resources, base_ctm, "fill", depth)
                     else:
                         self._record(fill_cs, "fill")
                 elif o in ("SC", "SCN"):
-                    stroke_v = _nums(operands)
+                    stroke_v = _nums(operands); stroke_dirty = False
                     if stroke_cs.get("family") == "Pattern":
-                        self._pattern(operands, resources, base_ctm, "stroke", depth)
+                        if stroke_cs.get("base"):
+                            self._record(stroke_cs["base"], "stroke")
+                        pat_stroke = self._pattern(operands, resources, base_ctm, "stroke", depth)
                     else:
                         self._record(stroke_cs, "stroke")
                 elif o == "sh":
@@ -434,15 +543,18 @@ class Analyzer:
                     if shd is not None and operands[0] in shd:
                         self._record(self.classify(shd[operands[0]].get("/ColorSpace"), resources), "shading")
                 elif o == "gs":
-                    ov.update(self._extgstate(operands[0], resources))
+                    ov.update(self._extgstate(operands[0], resources, ctm, depth))
                 elif o == "Tf":
                     tsize = float(operands[1])
-                    self._font(operands[0], resources)
+                    t3 = self._font(operands[0], resources)
                 elif o in ("BI", "INLINE IMAGE"):   # pikepdf: „INLINE IMAGE” (przegląd kodu 27.09, A6)
                     self.inline_images += 1
                     if operands and isinstance(operands[0], pikepdf.PdfInlineImage):
                         try:
-                            self._image(_InlineDict(operands[0].obj), ctm, resources, "inline", inline=True)
+                            idict = _InlineDict(operands[0].obj)
+                            if fill_dirty and bool(idict.get("/ImageMask", False)):   # maska maluje kolorem wypełnienia
+                                self._record(fill_cs, "fill"); fill_dirty = False
+                            self._image(idict, ctm, resources, "inline", inline=True)
                         except Exception:
                             self.unknown_ops += 1
                 elif o == "Do":
@@ -452,6 +564,8 @@ class Analyzer:
                     xo = xod[operands[0]]
                     st = str(xo.get("/Subtype", ""))
                     if st == "/Image":
+                        if fill_dirty and bool(xo.get("/ImageMask", False)):
+                            self._record(fill_cs, "fill"); fill_dirty = False
                         self._image(xo, ctm, resources, operands[0])
                     elif st == "/Form":
                         self._ov_in = dict(ov)          # forma dziedziczy stan overprintu i grubość linii
@@ -464,7 +578,7 @@ class Analyzer:
             except Exception:
                 self.unknown_ops += 1
 
-    def _form(self, xo, ctm, parent_res, depth):
+    def _form(self, xo, ctm, parent_res, depth, mask=False):
         try:
             key = xo.objgen
         except Exception:
@@ -476,7 +590,11 @@ class Analyzer:
             res = parent_res
         grp = xo.get("/Group")
         if grp is not None and str(grp.get("/S", "")) == "/Transparency" and key not in self.visited_forms:
-            self.transparency["grupa przezroczystości"] += 1
+            if not self._in_mask:
+                self.transparency["grupa przezroczystości"] += 1
+            # grupa mieszana w RGB (nie maska miękka — tam /CS to przestrzeń maski) — kontrakt `group_rgb`
+            if not mask and not self._in_mask and self._group_rgb(grp, res):
+                self.group_rgb = True
         self.visited_forms.add(key)
         if key in self._active_forms:                # forma rysuje samą siebie (cykl) — koniec
             self.unknown_ops += 1
@@ -486,6 +604,98 @@ class Analyzer:
             self.walk(xo, res, _mul(m, ctm), depth + 1)
         finally:
             self._active_forms.discard(key)
+
+    def _group_rgb(self, grp, res) -> bool:
+        try:
+            cs = grp.get("/CS")
+            return cs is not None and self.classify(cs, res).get("family") == "RGB"
+        except Exception:
+            return False
+
+    def _pattern_area(self, entry, box):
+        """Obrazy ze wzoru dostają miejsce WYPEŁNIANEGO obszaru, nie pierwszej płytki (ta bywa poza
+        stroną albo tam, gdzie nic nie jest namalowane — przegląd 09.10, A7). Pierwsze malowanie
+        poprawia umiejscowienie, kolejne dokładają nowe (do 200 na wzór)."""
+        if not box or not isinstance(box, list):
+            return
+        bx0, by0, bx1, by1 = self.page_box
+        for rec, p in entry["items"]:
+            q = p if not entry["used"] else dict(p)
+            if entry["used"] and len(rec["placements"]) >= 200 + entry["n0"]:
+                continue
+            x0, y0, x1, y1 = box
+            q.update({"x_mm": round((x0 - bx0) * MM_PER_PT, 2), "y_mm": round((by1 - y1) * MM_PER_PT, 2),
+                      "bw_mm": round((x1 - x0) * MM_PER_PT, 2), "bh_mm": round((y1 - y0) * MM_PER_PT, 2),
+                      "rect_pdf": [round(float(v), 3) for v in box], "ctm": None, "pattern": True})
+            if entry["used"]:
+                rec["placements"].append(q)
+        entry["used"] = True
+
+    def _type3(self, f, operands, o, ctm, tm, tsize, resources, depth, ov, lw):
+        """Glify fontu Type3 (/CharProcs) — obrazy, kolory (glif d0) i fonty w nich drukują się jak
+        reszta strony (przegląd 09.10, B12). Macierz glifu: FontMatrix × rozmiar i przesunięcie
+        w tekście × Tm × CTM; przesunięcie z /Widths (bez Tc/Tw/Tz — wystarczy do miejsca obrazu)."""
+        try:
+            procs = f.get("/CharProcs")
+            if procs is None:
+                return
+            fm = [float(v) for v in (f.get("/FontMatrix") or [0.001, 0, 0, 0.001, 0, 0])]
+            res = f.get("/Resources") or resources
+            diffs = {}
+            enc = f.get("/Encoding")
+            if isinstance(enc, pikepdf.Dictionary) and enc.get("/Differences") is not None:
+                code = 0
+                for x in enc.get("/Differences"):
+                    if isinstance(x, pikepdf.Name):
+                        diffs[code] = x; code += 1
+                    else:
+                        code = int(x)
+            first = int(f.get("/FirstChar", 0) or 0)
+            widths = [float(w) for w in (f.get("/Widths") or [])]
+            items = operands[0] if o == "TJ" else ([operands[2]] if o == '"' else [operands[0]])
+            tx = 0.0
+            done = set()
+            for it in items:
+                if not isinstance(it, (pikepdf.String, bytes, str)):        # TJ: przesunięcie w 1/1000
+                    try:
+                        tx -= float(it) / 1000.0 * tsize
+                        continue
+                    except Exception:
+                        pass
+                for code in bytes(it):
+                    name = diffs.get(code)
+                    proc = procs.get(name) if name is not None else None
+                    if proc is None:                     # bez /Differences: kod = nazwa niepewna — każdy glif raz
+                        for nm in list(procs.keys()):
+                            if nm not in done:
+                                done.add(nm)
+                                self._glyph(procs[nm], res, _mul(_mul(fm, [tsize, 0, 0, tsize, tx, 0]), _mul(tm, ctm)), depth, ov, lw)
+                    else:
+                        self._glyph(proc, res, _mul(_mul(fm, [tsize, 0, 0, tsize, tx, 0]), _mul(tm, ctm)), depth, ov, lw)
+                    wi = code - first
+                    tx += (widths[wi] if 0 <= wi < len(widths) else 0.0) * fm[0] * tsize
+        except Exception:
+            self.unknown_ops += 1
+
+    def _glyph(self, proc, res, m, depth, ov, lw):
+        if not isinstance(proc, pikepdf.Stream):
+            return
+        try:
+            key = proc.objgen
+        except Exception:
+            key = id(proc)
+        if key in self._t3_plain or key in self._active_forms:
+            return
+        n0 = self._n_place
+        self._ov_in, self._lw_in = dict(ov), lw
+        self._active_forms.add(key)
+        try:
+            self.walk(proc, res, m, depth + 1)
+        finally:
+            self._active_forms.discard(key)
+            self._ov_in, self._lw_in = {}, 1.0
+        if self._n_place == n0:
+            self._t3_plain.add(key)                  # bez obrazów — kolory i fonty już policzone
 
     # --- adnotacje (stemple, pola formularzy…) — ich wygląd drukuje się jak treść strony
     def annotations(self, page):
@@ -522,11 +732,24 @@ class Analyzer:
             if ptype == 2:
                 sh = pat.get("/Shading")
                 self._record(self.classify(sh.get("/ColorSpace"), resources), "shading")
-            else:
-                res = pat.get("/Resources") or resources
+                eg = pat.get("/ExtGState")              # overprint w samym wzorze cieniowanym (przegląd 09.10, C)
+                if isinstance(eg, pikepdf.Dictionary):
+                    self._extgstate_dict(eg)
+                return None
+            res = pat.get("/Resources") or resources
+            outer, self._plog = self._plog, []
+            try:
                 self.walk(pat, res, _mul(m, ctm), depth + 1)
+                items = self._plog
+            finally:
+                self._plog = outer
+            if outer is not None:
+                outer.extend(items)
+            # obrazy wzoru — ich miejsce na stronie ustali dopiero malowanie (_pattern_area)
+            return {"items": items, "used": False, "n0": 0} if items else None
         except Exception:
             self.unknown_ops += 1
+        return None
 
     def _font(self, name, resources):
         try:
@@ -541,11 +764,14 @@ class Analyzer:
             embedded = desc is not None and any(k in desc for k in ("/FontFile", "/FontFile2", "/FontFile3"))
             # Type 3: kształty liter są w samym pliku (/CharProcs), bez pliku fontu — to font
             # w pełni osadzony, choć nie ma /FontFile (częste w eksportach z CorelDRAW)
-            if str(f.get("/Subtype", "")) == "/Type3":
+            t3 = str(f.get("/Subtype", "")) == "/Type3"
+            if t3:
                 embedded = True
             self.fonts[(base, embedded)] += 1
+            return f if t3 else None                 # Type3 — walk przejdzie glify (_type3)
         except Exception:
             pass
+        return None
 
 
 def _nums(operands) -> list:
@@ -603,7 +829,11 @@ class _InlineDict:
         return self.get(key) is not None
 
 
-OPS_BUDGET = 3_000_000        # operatorów na analizę — powyżej: formy zagnieżdżone setki razy
+OPS_BUDGET = 5_000_000        # operatorów na analizę — powyżej: formy zagnieżdżone setki razy (po B25 ~3 s / mln)
+MAX_DEPTH = 40                # zagnieżdżenie form/wzorów/glifów (cykle łapie _active_forms); głębiej → `partial`
+PARTIAL_TEXT = {"budget": "plik ma bardzo dużo elementów — przejrzana tylko część",
+                "depth": "elementy zagnieżdżone zbyt głęboko — część pominięta",
+                "stream": "części treści strony nie da się odczytać"}
 
 
 def _annot_ctm(form, rect):
@@ -664,12 +894,18 @@ def font_boxes(path: str, page: int, names: list, limit: int = 80) -> dict:
     out: dict = {}
     if not want:
         return out
+    import render
     try:
-        d = pymupdf.open(path)
-        try:
-            pg = d[page]
-            W, H = pg.rect.width or 1, pg.rect.height or 1
-            for b in pg.get_text("dict", flags=pymupdf.TEXTFLAGS_TEXT)["blocks"]:
+        with render.MUPDF_LOCK:          # PyMuPDF z wątków serwera (przegląd 09.10, B24)
+            d = pymupdf.open(path)
+            try:
+                pg = d[page]
+                W, H = pg.rect.width or 1, pg.rect.height or 1
+                blocks = pg.get_text("dict", flags=pymupdf.TEXTFLAGS_TEXT)["blocks"]
+            finally:
+                d.close()
+        if True:
+            for b in blocks:
                 for ln in b.get("lines", []):
                     rows: dict = {}
                     for sp in ln.get("spans", []):
@@ -683,8 +919,6 @@ def font_boxes(path: str, page: int, names: list, limit: int = 80) -> dict:
                         lst = out.setdefault(k, [])
                         if len(lst) < limit:
                             lst.append([round(x0 / W, 5), round(y0 / H, 5), round((x1 - x0) / W, 5), round((y1 - y0) / H, 5)])
-        finally:
-            d.close()
     except Exception as e:
         print(f"[adChecker] font_boxes: {type(e).__name__}: {e}")
     return out
@@ -751,6 +985,8 @@ def analyze_pdf(path: str, only_page: int | None = None) -> dict:
             grp = page.get("/Group")
             if grp is not None and (only_page is None or i == only_page) and str(grp.get("/S", "")) == "/Transparency":
                 an.transparency["strona z grupą przezroczystości"] += 1
+                if an._group_rgb(grp, res):          # kontrakt `group_rgb` (przegląd 09.10, A4)
+                    an.group_rgb = True
             before_imgs = len(an.images)
             an.page_index = i
             try:
@@ -878,6 +1114,10 @@ def _summarize_pdf(an: Analyzer, pages, intents, meta, coverage=None, page_sizes
         "transparency": dict(an.transparency),
         "fonts": [{"name": n, "embedded": e, "uses": c} for (n, e), c in an.fonts.most_common()],
         "parse_warnings": an.unknown_ops + (1 if an.truncated else 0),
+        # analiza niepełna (budżet, głębokość, nieczytelny strumień) — jakość nie da wtedy „ok”/„vector”
+        "partial": bool(an.partial),
+        "partial_reason": "; ".join(PARTIAL_TEXT[k] for k in ("budget", "depth", "stream") if k in an.partial),
+        "group_rgb": an.group_rgb,
         "per_page": pages,
         "_images": an.images,     # pełne rekordy (xref, wszystkie umiejscowienia) — server zdejmuje przed wysłaniem do UI
     }
@@ -896,7 +1136,8 @@ def analyze_raster(path: str) -> dict:
         mode = im.mode
         frames = getattr(im, "n_frames", 1)
         icc = icc_info(im.info["icc_profile"]) if im.info.get("icc_profile") else None
-        dpi = im.info.get("dpi")
+        import pdfutil
+        dpi = pdfutil.raster_dpi(im)
         fam = _MODE_FAMILY.get(mode, mode)
         alpha = mode in ("RGBA", "LA", "PA") or "transparency" in im.info
         bits = {"1": 1, "I;16": 16, "I": 32, "F": 32}.get(mode, 8)
@@ -924,7 +1165,7 @@ def analyze_raster(path: str) -> dict:
             "overprint_uses": 0,
             "transparency": {"kanał alfa": 1} if alpha else {},
             "fonts": [],
-            "parse_warnings": 0,
+            "parse_warnings": 0, "partial": False, "partial_reason": "", "group_rgb": False,
             "per_page": [{"index": i, "images": 1} for i in range(frames)],
         }
 
