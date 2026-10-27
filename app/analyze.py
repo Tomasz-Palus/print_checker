@@ -107,6 +107,7 @@ class Analyzer:
         self._t3_plain = set()          # glify Type3 bez obrazów — kolejne wystąpienia pomijamy
         self._n_place = 0               # licznik umiejscowień obrazów
         self.group_rgb = False          # grupa przezroczystości strony/formy z /CS RGB (kontrakt `group_rgb`)
+        self.blend_undeclared = False   # przezroczystość na stronie bez /Group /CS (kontrakt `blend_space_missing`)
         self.page_index = 0
         self.page_box = (0.0, 0.0, 0.0, 0.0)   # MediaBox bieżącej strony (x0, y0, x1, y1) w pt
 
@@ -973,6 +974,11 @@ def flat_image(path: str, page: int | None) -> dict | None:
         return None
 
 
+def _real_transparency(t) -> int:
+    """Ile razy strona naprawdę miesza (krycie, tryby, maski) — sama grupa przezroczystości nie miesza."""
+    return sum(v for k, v in t.items() if "grupa przezroczystości" not in k)
+
+
 def analyze_pdf(path: str, only_page: int | None = None) -> dict:
     """`only_page` — fakty tylko o tej stronie (do druku idzie zawsze jedna strona)."""
     pdf = pikepdf.open(path)
@@ -999,8 +1005,15 @@ def analyze_pdf(path: str, only_page: int | None = None) -> dict:
                 pages.append({"index": i, "images": 0})
                 continue
             w0 = len(an.white_op)
+            t0 = _real_transparency(an.transparency)
             an.walk(page, res, [1, 0, 0, 1, 0, 0])
             an.annotations(page)
+            # Przezroczystość bez zadeklarowanej przestrzeni mieszania (Tomasz 27.10, „Multiply”): przestrzeń
+            # wybiera wtedy urządzenie — podgląd na ekran miesza w RGB, RIP i spłaszczenie (urządzenie
+            # CMYK) w CMYK. Zmierzone: K50 × szarość 50 % w Multiply — podgląd 78, druk 100 (jaśniej);
+            # krycie 50 % i Screen — też wyraźnie inaczej. Z /CS /DeviceCMYK podgląd = druk.
+            if _real_transparency(an.transparency) > t0 and (grp is None or grp.get("/CS") is None):
+                an.blend_undeclared = True
             pages.append({"index": i, "images": len(an.images) - before_imgs})
             # biały z overprintem → ułamki strony (y od góry), do ramek na podglądzie
             bx0, by0, bx1, by1 = an.page_box
@@ -1118,6 +1131,7 @@ def _summarize_pdf(an: Analyzer, pages, intents, meta, coverage=None, page_sizes
         "partial": bool(an.partial),
         "partial_reason": "; ".join(PARTIAL_TEXT[k] for k in ("budget", "depth", "stream") if k in an.partial),
         "group_rgb": an.group_rgb,
+        "blend_space_missing": an.blend_undeclared,
         "per_page": pages,
         "_images": an.images,     # pełne rekordy (xref, wszystkie umiejscowienia) — server zdejmuje przed wysłaniem do UI
     }
@@ -1166,6 +1180,7 @@ def analyze_raster(path: str) -> dict:
             "transparency": {"kanał alfa": 1} if alpha else {},
             "fonts": [],
             "parse_warnings": 0, "partial": False, "partial_reason": "", "group_rgb": False,
+            "blend_space_missing": False,
             "per_page": [{"index": i, "images": 1} for i in range(frames)],
         }
 

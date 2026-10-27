@@ -683,6 +683,22 @@ def _rgb_groups(page_obj, fix: bool = False) -> int:
     return n
 
 
+def _declare_cmyk_blend(page_obj) -> bool:
+    """Przezroczystość strony miesza się w CMYK: grupa strony dostaje /CS /DeviceCMYK (Tomasz 27.10,
+    „Multiply”). Bez deklaracji przestrzeń wybiera urządzenie — podgląd RGB mieszał inaczej niż druk.
+    RIP drukujący w CMYK i tak miesza w CMYK, więc wydruk się nie zmienia — tylko podgląd zaczyna mu
+    odpowiadać. Zwraca True, gdy coś dopisano."""
+    g = page_obj.get("/Group")
+    if g is None:
+        page_obj["/Group"] = pikepdf.Dictionary(Type=pikepdf.Name.Group, S=pikepdf.Name.Transparency,
+                                                CS=pikepdf.Name.DeviceCMYK)
+        return True
+    if g.get("/CS") is None:
+        g["/CS"] = pikepdf.Name.DeviceCMYK
+        return True
+    return False
+
+
 def color_need(facts: dict) -> dict:
     """Co w kolorach strony trzeba przeliczyć: {rgb, lab, spots:[nazwy], other}. Gray obok
     CMYK nie jest problemem (drukuje się czarną farbą)."""
@@ -691,6 +707,7 @@ def color_need(facts: dict) -> dict:
     spots = [s["name"] for s in c.get("spots") or []]
     return {"rgb": "RGB" in fam or any("RGB" in f for f in fam), "lab": "Lab" in fam,
             "spots": spots, "other": bool(fam & {"Unknown", "Indexed"}),
+            "blend": bool(facts.get("blend_space_missing")),
             "spot_alt_ok": all((s.get("alt") or "CMYK") in ("CMYK", "Gray") for s in c.get("spots") or [])}
 
 
@@ -730,19 +747,23 @@ def step_cmyk(src, dst, p, job) -> dict:
     with pikepdf.open(src) as _pdf:
         groups = _rgb_groups(_pdf.pages[page].obj)
     if fast and not need["spots"]:
-        if not groups:
+        if not groups and not need["blend"]:
             raise ValueError("Kolory na tej stronie są już w CMYK-u — nie ma czego zamieniać.")
-        # Kolory już CMYK, tylko przezroczystość miesza się w RGB (przegląd 09.10, A4): bez Ghostscripta,
-        # wartości kolorów zostają nietknięte — zmieniamy tylko przestrzeń mieszania.
+        # Kolory już CMYK, tylko przezroczystość miesza się w RGB (przegląd 09.10, A4) albo nie ma
+        # zadeklarowanej przestrzeni mieszania (Tomasz 27.10): bez Ghostscripta, wartości kolorów
+        # zostają nietknięte — zmieniamy tylko przestrzeń mieszania.
         with pikepdf.open(src) as pdf:
             _rgb_groups(pdf.pages[page].obj, fix=True)
+            if need["blend"]:
+                _declare_cmyk_blend(pdf.pages[page].obj)
             if profile == PROFILE_NONE:
                 set_intent(pdf, None)
             elif profile != PROFILE_KEEP:
                 set_intent(pdf, data, name)
             pdf.save(dst)
-        return {"text": "kolory były już w CMYK-u (wartości nietknięte); przezroczystość mieszała się w RGB — "
-                        "przestawiona na CMYK" + {PROFILE_KEEP: "; profil kolorystyczny z pliku zostaje",
+        why = "mieszała się w RGB" if groups else "nie miała ustawionej przestrzeni mieszania"
+        return {"text": f"kolory były już w CMYK-u (wartości nietknięte); przezroczystość {why} — "
+                        "ustawiona na CMYK" + {PROFILE_KEEP: "; profil kolorystyczny z pliku zostaje",
                                                   PROFILE_NONE: "; plik bez deklaracji profilu"}.get(profile, f"; profil pliku: {name}")}
     common = ["-dSAFER", "-sDEVICE=pdfwrite", "-dPreserveSeparation=false", "-dPreserveDeviceN=false",
               "-dProcessColorModel=/DeviceCMYK"]
@@ -788,6 +809,8 @@ def step_cmyk(src, dst, p, job) -> dict:
         def doc_fn(pdf):
             # grupy przezroczystości strony i form → CMYK (pdfwrite zostawia RGB; przegląd 09.10, A4)
             _rgb_groups(pdf.pages[page].obj, fix=True)
+            if need["blend"]:                            # pdfwrite grupy strony nie dopisze (Tomasz 27.10)
+                _declare_cmyk_blend(pdf.pages[page].obj)
             if profile == PROFILE_NONE:
                 set_intent(pdf, None)
             elif profile != PROFILE_KEEP:                # KEEP: deklaracja z pliku zostaje, jaka była
@@ -1186,13 +1209,14 @@ FLATTEN_TIMEOUT_PER_MPX = 1.5
 
 
 def _flatten_supersampled(base: list, dpi: float, ss: int, src: str, out_path: str,
-                          timeout: float | None = None) -> tuple[str, int, int]:
+                          timeout: float | None = None, on_rows=None) -> tuple[str, int, int]:
     """Spłaszczenie z nadpróbkowaniem: render ss× gęściej, uśrednienie bloków ss×ss (Pillow reduce),
     zapis BEZSTRATNY: strumień Flate (zlib) wierszy CMYK z predyktorem PNG „Sub” (filtr 1),
     gotowy do wstawienia do PDF-a jako /FlateDecode z /DecodeParms Predictor 15.
 
     Obraz idzie strumieniem pasmami — ani render, ani wynik nie siedzą w pamięci w całości
-    (spłaszczenie 400 Mpx). Zwraca (dziennik gs, szerokość, wysokość)."""
+    (spłaszczenie 400 Mpx). `on_rows(gotowe, wszystkie)` — postęp po każdym paśmie (pasek w interfejsie).
+    Zwraca (dziennik gs, szerokość, wysokość)."""
     import math
     import zlib
     import numpy as np
@@ -1227,6 +1251,8 @@ def _flatten_supersampled(base: list, dpi: float, ss: int, src: str, out_path: s
                 f[:, 5:] = row[:, 4:] - row[:, :-4]                # uint8 — zawija modulo 256, jak w PNG
                 fh.write(comp.compress(f.tobytes()))
                 del a, f, row
+                if on_rows:
+                    on_rows(y + hgt, H)
         finally:
             render._close(p)
         log = bytes(p.err_all).decode("utf-8", "replace")
@@ -1293,7 +1319,13 @@ def step_flatten(src, dst, p, job) -> dict:
     import pdfutil
     import analyze
     from PIL import Image
+
+    def prog(pct: float, phase: str) -> None:
+        # postęp dla interfejsu (/api/jobs/<id>/progress) — przy dużej stronie spłaszczanie trwa minuty
+        # i nie było widać, czy coś się dzieje (Tomasz 27.10)
+        job.progress = {"step": "flatten", "pct": max(0, min(99, round(pct))), "phase": phase}
     page = int(p.get("page", 0))
+    prog(0, "przygotowuję plik")
     fi = analyze.flat_image(src, page)
     if fi:
         raise ValueError(f"Strona już jest jednym obrazem ({fi['w']} × {fi['h']} px) — spłaszczanie niczego nie "
@@ -1324,7 +1356,9 @@ def step_flatten(src, dst, p, job) -> dict:
         op = (_page_facts(job, src, page).get("overprint_uses") or 0) > 0
     except Exception:
         op = pdfutil.uses_overprint(src)
+    prog(2, "sprawdzam fonty")
     gs_src, finfo = _prepare_fonts(src, dst, page)
+    prog(5, "Ghostscript czyta projekt")
     zpath = dst + ".flate"
     # Zawsze nadpróbkowanie 2× (jak podgląd, render.SS): Ghostscript nie wygładza krawędzi gradientu
     # przyciętego kształtem liter (Tomasz 25.09), a przy dużej stronie z overprintem nie wygładza
@@ -1343,7 +1377,10 @@ def step_flatten(src, dst, p, job) -> dict:
         # limit czasu skalowany do renderu: ok. 20× czasu zmierzonego (0,075 s na Mpx renderu na 2 rdzeniach)
         # + 10 min zapasu (przegląd 09.10, C — zawieszony gs trzymał blokadę zadania)
         limit = FLATTEN_TIMEOUT_BASE + FLATTEN_TIMEOUT_PER_MPX * plan["px"][0] * plan["px"][1] * ss * ss / 1e6
-        (log, pw_, ph_), err = _flatten_supersampled(base, plan["dpi"], ss, gs_src, zpath, limit), None
+        # rysowanie 5–92 %: wiersze przychodzą z Ghostscripta równo (zmierzone: 5×3 m, 113 s — liniowo)
+        (log, pw_, ph_), err = _flatten_supersampled(
+            base, plan["dpi"], ss, gs_src, zpath, limit,
+            on_rows=lambda y, h: prog(5 + 87 * y / max(1, h), "rysuję stronę")), None
     finally:
         _rm(gs_src if gs_src != src else None)
     try:
@@ -1355,6 +1392,7 @@ def step_flatten(src, dst, p, job) -> dict:
         # obraz NIE jest wczytywany do pamięci: osobny jednostronicowy PDF pisany strumieniem z pliku,
         # a qpdf kopiuje dane obcej strony dopiero przy zapisie (Tomasz 27.10 — bez sufitu Mpx)
         ppath = dst + ".img.pdf"
+        prog(93, "zapisuję plik")
         _flate_page_pdf(zpath, ppath, px, w_pt, h_pt, data)
         with pikepdf.open(src) as pdf, pikepdf.open(ppath) as one:
             pdf.pages[page] = one.pages[0]

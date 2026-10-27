@@ -1280,7 +1280,7 @@ Numery jak w `18_przeglad_kodu.md`.
 - Pułapka na przyszłość: MuPDF podaje wymiar strony obrazu przeliczony z DPI (przy DPI ≥ 72); testy
   rastrów zawsze w 100, 150 i 300 dpi oraz TIFF bez rozdzielczości.
 
-## 0.6.8 — spłaszczenie zawsze 120 ppi, bez sufitu megapikseli (Tomasz 27.10)
+## 0.6.9 — spłaszczenie zawsze 120 ppi, bez sufitu megapikseli (Tomasz 27.10)
 
 - Tomasz: „musi być zawsze minimum 120 ppi”. Usunięty sufit 400 Mpx (`FLATTEN_MAX_MPX`) — wcześniej
   5×5 m wychodziło 100 ppi, baner 20 m 114 ppi (`steps.flatten_plan`, `state.js flattenPlan`).
@@ -1294,3 +1294,38 @@ Numery jak w `18_przeglad_kodu.md`.
   300 MB RAM (gs + Python); mała strona — wynik bajt w bajt jak przed zmianą (różnica renderu 0).
 - „Multiply” bez zadeklarowanej przestrzeni mieszania (Ghostscript jaśniej niż Acrobat/MuPDF) —
   na razie bez zmian, decyzja odłożona (Tomasz 27.10).
+
+## 0.6.9 — pasek postępu spłaszczania (Tomasz 27.10)
+
+- Tomasz: „przy spłaszczaniu dobrze, żeby był pasek postępu, bo teraz nie widać tego”.
+- Serwer: `step_flatten` zapisuje postęp w `job.progress` ({step, pct, phase}); nowa trasa
+  `GET /api/jobs/<id>/progress` (bez blokady zadania — poprawka ją trzyma). Etapy: fonty 0–5 %,
+  „Ghostscript czyta projekt” 5 %, „rysuję stronę” 5–92 % (z wierszy obrazu przychodzących
+  z Ghostscripta, `_flatten_supersampled(on_rows=…)`), „zapisuję plik” 93 %. Po poprawce (także po
+  błędzie) `job.progress` = None.
+- Zmierzone (strona 5×3 m, 2 rdzenie): ok. 9 s czytania projektu, potem wiersze płyną równo do końca —
+  procent rośnie liniowo, więc czas do końca liczony z tempa rysowania jest wiarygodny.
+- Interfejs: `steps.watchProgress` pyta co sekundę, póki trwa spłaszczenie; w rozdziale pasek z opisem
+  „42 % — rysuję stronę, zostało ok. 2 min” (widoczny też w wyglądzie minimalnym), na podglądzie
+  „Spłaszczam projekt… 42 %”.
+
+## 0.6.9 — przezroczystość bez przestrzeni mieszania („Multiply”, Tomasz 27.10)
+
+- Problem (doc 19, D): strona z przezroczystością, ale bez `/Group /CS`. Przestrzeń mieszania wybiera
+  wtedy urządzenie: podgląd (Ghostscript na ekran, MuPDF, Acrobat) miesza w RGB, a RIP drukujący w CMYK
+  i nasze spłaszczenie — w CMYK. Zmierzone (Ghostscript 10.02, FOGRA39):
+  - K50 pod szarością 50 % w Multiply: podgląd 78, druk 100 (jaśniej),
+  - CMYK z kryciem 50 % (zwykła półprzezroczystość): różnica do 32/255, Screen — jeszcze więcej,
+  - ta sama strona z `/Group /CS /DeviceCMYK`: podgląd = druk co do piksela.
+- Decyzja: wydruku nie zmieniamy (RIP i tak miesza w CMYK), poprawiamy zgodność podglądu z drukiem.
+  - analiza: kontrakt `blend_space_missing` — strona naprawdę miesza (krycie, tryby, maski), a jej
+    grupa nie ma `/CS` albo jej nie ma (`analyze._real_transparency`);
+  - Kolory: taki plik wymaga „Zamień na CMYK” (jak `group_rgb` z 0.6.8), z wyjaśnieniem pod „?”;
+  - `steps._declare_cmyk_blend`: grupa strony dostaje `/CS /DeviceCMYK` (szybka ścieżka bez
+    Ghostscripta — wartości kolorów nietknięte; przy pełnej zamianie RGB → CMYK po pdfwrite).
+- Sprawdzone: render CMYK (druk) przed i po zamianie — różnica 0; podgląd po zamianie vs druk —
+  różnica 0 (wcześniej do 22–32/255); plik z RGB → CMYK dostaje grupę CMYK, analiza po zamianie
+  czysta; spłaszczenie po zamianie działa.
+- Do sprawdzenia u Tomasza: założenie, że RIP drukarni bez deklaracji miesza w CMYK (tak robi
+  Ghostscript; tak też zakłada podgląd „symulacja druku”). Gdyby
+  drukarnia mieszała w RGB, wydruk wyszedłby jak dawny podgląd.

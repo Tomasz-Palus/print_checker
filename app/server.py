@@ -690,6 +690,12 @@ def _png_phys(data: bytes, dpi: float) -> bytes:
     return b"".join(out)
 
 
+@app.get("/api/jobs/<jid>/progress")
+def api_step_progress(jid):
+    """Postęp trwającej poprawki (dziś: spłaszczenie) — bez blokady zadania, bo poprawka ją trzyma."""
+    return jsonify(job_or_404(jid).progress or {})
+
+
 @app.delete("/api/jobs/<jid>/steps/<name>")
 def api_step_undo(jid, name):
     """Cofa poprawkę razem ze wszystkim, co zrobiono po niej."""
