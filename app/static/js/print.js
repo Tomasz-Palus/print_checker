@@ -5,7 +5,7 @@
 import { $, esc, chapter, plural, brief } from "./util.js";
 import { S, changed, hasStep, isPdf, facts, colorNeed, fileProfile, transparencyKinds, flattenPlan, scaleK,
          sizeSettled, printSettled, colorSettled, overprintSettled, fontsSettled, fontWarnings, inkNow, factsKey } from "./state.js";
-import { applyStep, undoStep, etaText } from "./steps.js";
+import { applyStep, undoStep, etaText, clock } from "./steps.js";
 
 const stepText = (name) => S.job.versions.find((v) => v.step === name)?.text || "";
 const loading = (what) => `<span class="spin"></span>Sprawdzam ${what}…`;
@@ -507,10 +507,16 @@ export function renderFlatten() {
   const pr = S.busy && c.act === "fix" && !on ? S.prog : null;
   $("flProg").hidden = !pr;
   if (pr) {
-    $("flProg").querySelector("i").style.width = Math.max(2, pr.pct) + "%";
+    // Zanim Ghostscript odda pierwszy wiersz, wczytuje cały projekt — przy dużym wydruku ze zdjęciami
+    // i przezroczystością to minuty, a procent stoi na 5 (Tomasz 27.10: „chyba się zacięło”). Wtedy
+    // pasek pulsuje i liczy czas — widać, że program pracuje.
+    const wait = pr.phase !== "rysuję stronę" && pr.phase !== "zapisuję plik";
+    $("flProg").classList.toggle("pulse", wait);
+    $("flProg").querySelector("i").style.width = wait ? "" : Math.max(2, pr.pct) + "%";
     const eta = etaText(pr.eta);
-    $("flProg").querySelector(".t").textContent = pr.phase
-      ? `${pr.pct} % — ${pr.phase}${eta ? `, ${eta}` : ""}` : "zaczynam spłaszczanie…";
+    $("flProg").querySelector(".t").textContent = !pr.phase ? "zaczynam spłaszczanie…"
+      : wait ? `${pr.phase}… ${clock(pr.sec || 0)} — przy dużym projekcie to może potrwać kilka minut`
+      : `${pr.pct} % — ${pr.phase}${eta ? `, ${eta}` : ""}`;
   }
   $("flNote").innerHTML = note; $("flNote").hidden = !note;
   rowsFor("fl", "flatten", (!!a && !a.error && !a.flat_image) || on || !!c.act, on);

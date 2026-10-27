@@ -22,6 +22,7 @@ const SLOW = { flatten: "Spłaszczam projekt" };
 function watchProgress(jid, name) {
   if (!SLOW[name]) return () => {};
   let stop = false, first = null;
+  const t0 = Date.now();
   const tick = async () => {
     if (stop) return;
     try {
@@ -33,7 +34,7 @@ function watchProgress(jid, name) {
           if (!first) first = { t: now, pct: pr.pct };
           else if (pr.pct > first.pct + 2) eta = (now - first.t) / (pr.pct - first.pct) * (100 - pr.pct) / 1000;
         }
-        S.prog = { pct: pr.pct, phase: pr.phase, eta };
+        S.prog = { pct: pr.pct, phase: pr.phase, eta, sec: (now - t0) / 1000 };
         S.busy = `${SLOW[name]}… ${pr.pct} %`;
         changed();
       }
@@ -43,6 +44,9 @@ function watchProgress(jid, name) {
   setTimeout(tick, 400);
   return () => { stop = true; S.prog = null; };
 }
+
+// czas od początku: „0:45”, „12:03”
+export const clock = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
 
 // „zostało ok. 3 min” / „zostało kilka sekund”
 export function etaText(sec) {

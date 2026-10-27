@@ -1349,3 +1349,7 @@ Numery jak w `18_przeglad_kodu.md`.
   wytycznych przy krawędzi strony), napisy i reszta projektu zostają. Tylko gdy szablonu produktu
   w pliku nie znaleziono; suwak przed/po i „Cofnij” jak przy szablonie. Sprawdzone: obie ramki
   usunięte, tło i element projektu nietknięte; bez kliknięcia — jak dawniej.
+- Spłaszczanie dużego projektu „stało” na 5 % (Tomasz 27.10, adWall Vario Prosta Light 400, 4030 × 2270 mm,
+  20 MB zdjęć z maskami): zanim Ghostscript odda pierwszy wiersz, wczytuje cały projekt — przy takim
+  wydruku (ok. 200 Mpx, z nadpróbkowaniem 4× tyle) to minuty. Wtedy pasek pulsuje, a opis liczy czas
+  („Ghostscript czyta projekt… 1:25 — przy dużym projekcie to może potrwać kilka minut”).
