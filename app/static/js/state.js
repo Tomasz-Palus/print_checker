@@ -203,11 +203,18 @@ export function colorNeed(a = facts()) {
   const other = fam.includes("Unknown") || fam.includes("Indexed");
   // grupa przezroczystości strony / formy w RGB: przezroczystość miesza się w RGB, choć wszystkie
   // kolory są CMYK — też trzeba zamienić (kontrakt analizy `group_rgb`, przegląd 09.10)
-  const group = !!a.group_rgb;
+  // …ale nie przy prawdziwej przezroczystości: tam mieszanie w RGB to wygląd projektu i zostaje (Tomasz 27.10,
+  // strony.pdf — zielona nakładka w CMYK wychodziła beżowa); steps.step_cmyk liczy tak samo
+  const group = !!a.group_rgb && !transparencyKinds(a).length;
   // przezroczystość bez zadeklarowanej przestrzeni mieszania: podgląd miesza w RGB, druk w CMYK
   // (kontrakt `blend_space_missing`, Tomasz 27.10 — „Multiply”)
   const blend = !!a.blend_space_missing;
-  return { rgb, lab, spots, other, group, blend, any: rgb || lab || other || group || blend || spots.length > 0 };
+  // Przezroczystość liczona w RGB + kolory RGB: zamiana OBIEKTÓW na CMYK przed zmieszaniem zmienia wygląd —
+  // nasycona zieleń RGB nakładki staje się zielenią do druku i nakładka 46 % na zdjęciu wychodzi beżowa zamiast
+  // zielonej (Tomasz 27.10, strony.pdf). Wiernie przelicza to spłaszczenie (miesza jak projekt, wynik w CMYK).
+  const rgbBlend = !!a.group_rgb && transparencyKinds(a).length > 0 && (rgb || lab || other);
+  return { rgb, lab, spots, other, group, blend, rgbBlend,
+           any: rgb || lab || other || group || blend || spots.length > 0 };
 }
 // Profil CMYK zapisany w pliku (deklaracja albo osadzony) — do wyboru „zostaw profil z pliku".
 export function fileProfile(a = facts()) {

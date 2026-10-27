@@ -1371,3 +1371,16 @@ Numery jak w `18_przeglad_kodu.md`.
 - Panel lupek nad podglądem da się przesuwać (Tomasz: „to menu dajmy floating, żeby dało się je przesuwać”):
   uchwyt ⋮⋮ albo puste miejsce panelu; położenie zapamiętane w przeglądarce (ułamek podglądu), nie wychodzi
   poza podgląd; dwuklik w uchwyt — z powrotem na środek.
+- **Błąd z testów na projektach Tomasza (strony.pdf):** zielona nakładka (RGB 18/237/0, krycie 46 %) na łososiowym
+  zdjęciu, cała strona z mieszaniem w RGB. „Zamień na CMYK” zmieniała wygląd: pudełko z zielonego (145/185/98
+  w symulacji druku) robiło się beżowe (184/181/122). Dwie przyczyny:
+  - przestawienie grupy przezroczystości na CMYK (A4 z 0.6.8) — mieszanie w CMYK daje inny kolor;
+  - nawet z grupą RGB: obiekty przeliczone na CMYK PRZED zmieszaniem — nasycona zieleń RGB staje się zielenią
+    do druku, a jej mieszanina ze zdjęciem — beżem. RIP miesza w RGB, a przelicza dopiero wynik.
+  - Poprawka: grupy RGB, w których coś się naprawdę miesza (krycie, tryby, maski), zostają RGB
+    (`steps.real_transparency`); gdy do tego są kolory RGB/Lab — „Zamień na CMYK” odmawia z wyjaśnieniem, Kolory
+    zalecają „Zostaw jak jest”, a Spłaszczenie — „Spłaszcz projekt” (Ghostscript miesza jak projekt i zapisuje
+    wynik w CMYK). Sprawdzone: po spłaszczeniu wygląd = oryginał (średnio 0,6/255 zamiast 18,5).
+- `narzedzia/test_projektu.py` — test „jak użytkownik” na folderze projektów (API działającego serwera): kroki,
+  czasy, niezależne sprawdzenie pliku do druku i porównanie wyglądu z oryginałem. Przebieg na 12 projektach Tomasza
+  (27.10): bez wywrotek; każdy plik do druku — 1 strona, sam CMYK, bez overprintu, tekst na krzywych.
