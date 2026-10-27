@@ -23,6 +23,7 @@ export const S = {
   page: 0, pageOk: false,
   // poprawki (etap 2+)
   busy: null,              // co się właśnie nakłada (napis na podglądzie) albo null
+  prog: null,              // postęp długiej poprawki (spłaszczenie): {pct, phase, eta} albo null
   stepErr: {},             // nazwa poprawki → komunikat błędu
   settle: {},              // rozdziały domknięte bez poprawki: {frames: "skip", trim: "skip", resize: "ok"}
   choice: {},              // wybór w rzędach (Kolory, Overprint): {act, profile, seen}
@@ -51,7 +52,7 @@ try {
 // nowym pliku nic nie zrobiono („Nie udało się wyłączyć overprintu”, „…zamienić tekstu na krzywe”).
 export function resetJobState() {
   Object.assign(S, {
-    settle: {}, choice: {}, stepErr: {}, busy: null,
+    settle: {}, choice: {}, stepErr: {}, busy: null, prog: null,
     fscan: { key: "", data: null, err: "" }, qual: { key: "", data: null, err: "" },
     accShown: null, pin: null, factsCache: {}, rotErr: "", anRetry: false, fmtEpoch: (S.fmtEpoch || 0) + 1, sz: null, sizeEdit: false, cmp: null, sim: null, simMix: 100, cmykProfile: "fogra39",
   });
@@ -203,7 +204,10 @@ export function colorNeed(a = facts()) {
   // grupa przezroczystości strony / formy w RGB: przezroczystość miesza się w RGB, choć wszystkie
   // kolory są CMYK — też trzeba zamienić (kontrakt analizy `group_rgb`, przegląd 09.10)
   const group = !!a.group_rgb;
-  return { rgb, lab, spots, other, group, any: rgb || lab || other || group || spots.length > 0 };
+  // przezroczystość bez zadeklarowanej przestrzeni mieszania: podgląd miesza w RGB, druk w CMYK
+  // (kontrakt `blend_space_missing`, Tomasz 27.10 — „Multiply”)
+  const blend = !!a.blend_space_missing;
+  return { rgb, lab, spots, other, group, blend, any: rgb || lab || other || group || blend || spots.length > 0 };
 }
 // Profil CMYK zapisany w pliku (deklaracja albo osadzony) — do wyboru „zostaw profil z pliku".
 export function fileProfile(a = facts()) {

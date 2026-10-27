@@ -59,6 +59,7 @@ class Job:
         self.lock = threading.RLock()    # jedna poprawka naraz
         self._plock = threading.Lock()   # wycinanie stron wielostronicowego obrazu
         self._alocks: dict = {}          # (id wersji, strona) -> blokada analizy (jedna naraz)
+        self.progress: dict | None = None  # postęp trwającej poprawki (spłaszczenie) — pasek w interfejsie
 
     def analysis_of(self, v: Version, page: int) -> dict:
         """Analiza strony wersji — liczona RAZ. Równoległe /analysis i /frames tej samej strony
@@ -180,7 +181,10 @@ class Job:
             dst = os.path.join(self.dir, vid + ".pdf")
             page = int(params.get("page", 0) or 0)
             # wielostronicowy obraz: poprawka działa na wybranej stronie (przegląd 09.10, A8)
-            result = steps.run(step, self.page_path(self.head, page), dst, params, self)
+            try:
+                result = steps.run(step, self.page_path(self.head, page), dst, params, self)
+            finally:
+                self.progress = None
             dst = result.pop("path", dst)          # obraz zostaje obrazem (JPG/TIFF), reszta to PDF
             mm = result.pop("pages_mm", None)      # obraz po dopasowaniu wymiaru: nowy wymiar z DPI
             if not os.path.exists(dst):

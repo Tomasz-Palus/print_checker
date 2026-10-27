@@ -16,13 +16,53 @@ function forgetFrom(name) {
 // S.job — program wracał do usuniętego zadania (przegląd kodu 27.09, A4).
 const same = (jid) => S.job?.job_id === jid;
 
+// Postęp długiej poprawki — dziś tylko spłaszczenia (duża strona to kilka minut; Tomasz 27.10: „nie
+// widać, czy coś się dzieje”). Serwer podaje procent i etap; czas do końca liczymy z tempa rysowania.
+const SLOW = { flatten: "Spłaszczam projekt" };
+function watchProgress(jid, name) {
+  if (!SLOW[name]) return () => {};
+  let stop = false, first = null;
+  const tick = async () => {
+    if (stop) return;
+    try {
+      const pr = await api(`/api/jobs/${jid}/progress`);
+      if (!stop && same(jid) && pr.step === name) {
+        const now = Date.now();
+        let eta = null;
+        if (pr.phase === "rysuję stronę") {
+          if (!first) first = { t: now, pct: pr.pct };
+          else if (pr.pct > first.pct + 2) eta = (now - first.t) / (pr.pct - first.pct) * (100 - pr.pct) / 1000;
+        }
+        S.prog = { pct: pr.pct, phase: pr.phase, eta };
+        S.busy = `${SLOW[name]}… ${pr.pct} %`;
+        changed();
+      }
+    } catch (_) { /* postęp to tylko podpowiedź — błąd zapytania nie przerywa poprawki */ }
+    if (!stop) setTimeout(tick, 1000);
+  };
+  setTimeout(tick, 400);
+  return () => { stop = true; S.prog = null; };
+}
+
+// „zostało ok. 3 min” / „zostało kilka sekund”
+export function etaText(sec) {
+  if (sec == null || !isFinite(sec)) return "";
+  if (sec < 20) return "zostało kilka sekund";
+  if (sec < 90) return `zostało ok. ${Math.max(1, Math.round(sec / 10) * 10)} s`;
+  return `zostało ok. ${Math.round(sec / 60)} min`;
+}
+
 export async function applyStep(name, params) {
   if (!S.job || S.busy) return;
   const jid = S.job.job_id, ep = S.fmtEpoch;
-  S.busy = `Pracuję: ${STEP_NAME[name]}…`; delete S.stepErr[name];
+  S.busy = SLOW[name] ? `${SLOW[name]}…` : `Pracuję: ${STEP_NAME[name]}…`; delete S.stepErr[name];
+  S.prog = SLOW[name] ? { pct: 0, phase: "", eta: null } : null;
   changed();
+  const unwatch = watchProgress(jid, name);
   try {
-    const job = await post(`/api/jobs/${jid}/steps`, { name, params: { page: S.page, ...params } });
+    let job;
+    try { job = await post(`/api/jobs/${jid}/steps`, { name, params: { page: S.page, ...params } }); }
+    finally { unwatch(); }
     if (!same(jid)) return;
     // W międzyczasie zmienił się format (strona / produkt / rola / obrót — „epoka” S.fmtEpoch): poprawka
     // zrobiona pod stary format nie może domknąć rozdziałów nowego — zdejmujemy ją na serwerze

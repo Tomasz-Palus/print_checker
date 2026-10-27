@@ -5,7 +5,7 @@
 import { $, esc, chapter, plural, brief } from "./util.js";
 import { S, changed, hasStep, isPdf, facts, colorNeed, fileProfile, transparencyKinds, flattenPlan, scaleK,
          sizeSettled, printSettled, colorSettled, overprintSettled, fontsSettled, fontWarnings, inkNow, factsKey } from "./state.js";
-import { applyStep, undoStep } from "./steps.js";
+import { applyStep, undoStep, etaText } from "./steps.js";
 
 const stepText = (name) => S.job.versions.find((v) => v.step === name)?.text || "";
 const loading = (what) => `<span class="spin"></span>Sprawdzam ${what}…`;
@@ -166,11 +166,19 @@ export function renderColor() {
       say = what.length
         ? `W projekcie są kolory ${what.join(" i ")}. Drukujemy w CMYK — lepiej przeliczyć je tutaj `
           + `i zobaczyć wynik, niż zdać się na drukarnię. Podgląd pokazuje teraz, jak przeliczy je drukarnia.`
-        : `Kolory są w CMYK, ale <b>przezroczystość miesza się w RGB</b> — trzeba zamienić na CMYK.`;
+        : n.group ? `Kolory są w CMYK, ale <b>przezroczystość miesza się w RGB</b> — trzeba zamienić na CMYK.`
+        : `Kolory są w CMYK, ale <b>przezroczystość nie ma ustawionej przestrzeni mieszania</b> — `
+          + `podgląd pokazuje ją inaczej, niż wydrukuje drukarnia. Kliknij <b>Zamień na CMYK</b> — wartości `
+          + `kolorów zostaną nietknięte, a podgląd pokaże to, co wyjdzie z drukarki.`;
       // grupa przezroczystości w RGB (kontrakt `group_rgb`, przegląd 09.10) — wyjaśnienie pod „?”
       if (n.group) note = `Strona (albo jej fragment) ma ustawione mieszanie przezroczystości w RGB. Cienie, `
         + `półprzezroczystość i tryby mieszania wyjdą wtedy w druku inaczej niż na podglądzie. Zamiana na CMYK `
         + `ustawia mieszanie w CMYK.`;
+      // brak przestrzeni mieszania (kontrakt `blend_space_missing`, Tomasz 27.10) — wyjaśnienie pod „?”
+      else if (n.blend) note = `Cienie, półprzezroczystość i tryby mieszania (np. Multiply) nie mają w pliku `
+        + `ustawionej przestrzeni kolorów. Drukarnia miesza je wtedy w CMYK, a ekran w RGB — zwykle wydruk `
+        + `wychodzi jaśniej niż podgląd (np. cień z Multiply). Zamiana zapisuje w pliku mieszanie w CMYK: `
+        + `wydruk się nie zmieni, a podgląd zacznie mu odpowiadać.`;
     }
   }
   if (a && !a.error && a.partial) note = partialNote(a) + (note ? "<br>" + note : "");
@@ -207,7 +215,8 @@ export function renderColor() {
     else if (!on && a && !a.error && need.any) {
       const n = colorNeed(a);
       const sp = n.spots.length ? `spot (${esc(n.spots.slice(0, 3).join(", "))}${n.spots.length > 3 ? "…" : ""})` : "";
-      b = `Kolory: <b>${[n.rgb && "RGB", n.lab && "Lab", sp, n.other && "inne", n.group && "przezroczystość w RGB"].filter(Boolean).join(", ")}</b> — do druku potrzebny CMYK.`;
+      b = `Kolory: <b>${[n.rgb && "RGB", n.lab && "Lab", sp, n.other && "inne", n.group && "przezroczystość w RGB",
+        n.blend && !n.group && "przezroczystość bez przestrzeni mieszania"].filter(Boolean).join(", ")}</b> — do druku potrzebny CMYK.`;
     }
     if (!on && a?.error && !S.settle.cmyk) b = `<span class="warn">Nie udało się sprawdzić kolorów</span>.`;
     if (!on && a && !a.error && a.partial) b += `${b ? "<br>" : ""}${partialBrief}`;
@@ -407,6 +416,15 @@ function flattenAdvice(a, kinds, live) {
   return { rec: "keep", why: `zwykła przezroczystość (${esc(kinds.join(", "))}) — drukarnia spłaszczy ją bez problemu` };
 }
 
+// „Spłaszczam projekt… 42 % — rysuję stronę, zostało ok. 2 min” (postęp z serwera, steps.watchProgress)
+function busyFlat() {
+  const p = S.prog;
+  if (!p || !p.phase) return "Spłaszczam projekt…";
+  const eta = etaText(p.eta);
+  return `Spłaszczam projekt… <b>${p.pct} %</b> — ${esc(p.phase)}${eta ? `, ${eta}` : ""}. `
+    + `Przy dużym wydruku to może potrwać kilka minut.`;
+}
+
 export function renderFlatten() {
   const el = $("ch-flat");
   el.hidden = !fontsSettled() || !isPdf();
@@ -436,7 +454,7 @@ export function renderFlatten() {
       sum = on ? "spłaszczone" : "";
       say = on ? `<span class="say ok">Projekt spłaszczony</span> — na maszynę pójdzie dokładnie to, co widać.`
                  + `<span class="now-only"> Suwakiem niżej porównasz przed i po.</span>`
-               : S.busy ? "Spłaszczam projekt…" : "Nie udało się spłaszczyć projektu.";
+               : S.busy ? busyFlat() : "Nie udało się spłaszczyć projektu.";
       note = on ? esc(stepText("flatten").split("; UWAGA:")[0]) : plan;
     } else if (c.act === "keep" && !kinds.length) {
       sum = "zostawione";
@@ -485,6 +503,15 @@ export function renderFlatten() {
     if (btn.textContent !== t) btn.textContent = t;
   });
   $("flSay").innerHTML = say;
+  // pasek postępu — widoczny także w wyglądzie minimalnym (opis `flSay` mieszka wtedy pod „?”)
+  const pr = S.busy && c.act === "fix" && !on ? S.prog : null;
+  $("flProg").hidden = !pr;
+  if (pr) {
+    $("flProg").querySelector("i").style.width = Math.max(2, pr.pct) + "%";
+    const eta = etaText(pr.eta);
+    $("flProg").querySelector(".t").textContent = pr.phase
+      ? `${pr.pct} % — ${pr.phase}${eta ? `, ${eta}` : ""}` : "zaczynam spłaszczanie…";
+  }
   $("flNote").innerHTML = note; $("flNote").hidden = !note;
   rowsFor("fl", "flatten", (!!a && !a.error && !a.flat_image) || on || !!c.act, on);
   checkRow("fl", "flatten", a, !!a?.flat_image);
