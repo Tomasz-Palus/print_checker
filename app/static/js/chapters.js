@@ -1,14 +1,20 @@
 // Rozdziały „Szablon z wytycznych" i „Spady".
 import { $, esc, fmtMm, api, chapter, plural, brief } from "./util.js";
-import { S, changed, template, hasStep, roleSettled, framesSettled, trimInfo, isPdf } from "./state.js";
+import { S, changed, template, hasStep, roleSettled, framesSettled, trimInfo, isPdf, printMm, scaleK } from "./state.js";
 import { applyStep, undoStep, stepControls } from "./steps.js";
 
 // ------------------------------------------------------------------ szablon z wytycznych
 // Program porównuje CAŁY szablon z wytycznych tego produktu (ramki, kolory, położenie) z tym,
 // co jest w pliku. Szukamy raz, na oryginale — usuwanie szablonu jest pierwszą poprawką.
+// Obraz bez DPI: wymiar wydruku (w jednostkach pliku) — serwerowi potrzebny tylko do progu grubości linii
+function rasterMm() {
+  if (isPdf()) return null;
+  const p = printMm(), k = scaleK();
+  return p ? { w: p.w / k, h: p.h / k } : null;
+}
 function scanKey() {
-  const t = S.product ? template() : null;
-  return [S.job.job_id, S.page, S.guidelines?.hash || "", t ? t.page : -1].join("|");
+  const t = S.product ? template() : null, r = rasterMm();
+  return [S.job.job_id, S.page, S.guidelines?.hash || "", t ? t.page : -1, r ? `${r.w}x${r.h}` : ""].join("|");
 }
 async function scan() {
   const key = scanKey();
@@ -16,7 +22,8 @@ async function scan() {
   const t = S.product ? template() : null;
   try {
     const d = await api(`/api/jobs/${S.job.job_id}/frames?page=${S.page}`
-      + (t && S.guidelines?.hash ? `&gl=${encodeURIComponent(S.guidelines.hash)}&glpage=${t.page}` : ""));
+      + (t && S.guidelines?.hash ? `&gl=${encodeURIComponent(S.guidelines.hash)}&glpage=${t.page}` : "")
+      + (rasterMm() ? `&w_mm=${rasterMm().w}&h_mm=${rasterMm().h}` : ""));
     if (S.fscan.key === key) S.fscan.data = d;
   } catch (e) {
     if (S.fscan.key === key) S.fscan.err = e.message;
@@ -80,6 +87,11 @@ export function renderFrames() {
     say = `W pliku są ramki w kolorach wytycznych, ale <b>nie pasują do szablonu tego produktu</b> — nie usuwam. `
       + `Obejrzyj je na podglądzie.`;
     skip = "rozumiem, idę dalej";
+  } else if (d.raster) {
+    // obraz: szablonu wektorowego w nim nie ma; sprawdzone tylko linie wtopione w piksele (Tomasz 27.10)
+    st = "done"; sum = d.checked ? "czysto" : "nie dotyczy";
+    say = d.checked ? `<span class="say ok">W obrazie nie ma linii szablonu z wytycznych.</span>`
+      : `Obraz bez zapisanego wymiaru — linie szablonu sprawdzę, gdy będzie znany wymiar wydruku.`;
   } else {
     st = "done"; sum = d.known ? "czysto" : "nie dotyczy";
     say = d.known ? `<span class="say ok">W projekcie nie ma szablonu z wytycznych.</span>`

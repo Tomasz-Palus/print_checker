@@ -165,7 +165,9 @@ export function renderSize() {
     // obraz bez zapisanej rozdzielczości (DPI) — nie wiadomo, ile ma milimetrów
     st = "todo"; sum = "";
     say = `<span class="say warn">Obraz nie ma zapisanej rozdzielczości (DPI)</span>, więc nie wiadomo, ile ma `
-      + `milimetrów — nie da się go porównać z wytycznymi (${printT}) ani dopasować. Ustaw DPI w programie graficznym.`;
+      + `milimetrów — nie da się go porównać z wytycznymi (${printT}) ani dopasować. Ustaw DPI w programie graficznym. `
+      // Tomasz 27.10: „Właściwości” w Windows pokazują 96 dpi — to wartość zastępcza Windowsa, w pliku jej nie ma
+      + `(Windows we „Właściwościach” pokazuje wtedy 96 dpi — to jego wartość zastępcza, nie zapisana w pliku.)`;
   } else if (match) {
     st = "todo"; sum = "";
     say = `<span class="say ok">Wymiar się zgadza</span>: plik ${fmtMm(f.w)} × ${fmtMm(f.h)} mm`

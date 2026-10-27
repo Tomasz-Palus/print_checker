@@ -1329,3 +1329,16 @@ Numery jak w `18_przeglad_kodu.md`.
 - Do sprawdzenia u Tomasza: założenie, że RIP drukarni bez deklaracji miesza w CMYK (tak robi
   Ghostscript; tak też zakłada podgląd „symulacja druku”). Gdyby
   drukarnia mieszała w RGB, wydruk wyszedłby jak dawny podgląd.
+
+## 0.6.10 — szablon i DPI w obrazach JPG/PNG/TIFF (Tomasz 27.10)
+
+- Rozdział „Szablon z wytycznych” przy obrazie pisał „nie dotyczy — bez wytycznych nie ma z czym
+  porównać”, choć wytyczne produktu były wczytane (adWall L 200, JPG bez DPI). Serwer dla obrazu od
+  razu odpowiadał `known: False` i niczego nie sprawdzał.
+- Teraz `/frames` dla obrazu szuka linii wytycznych wtopionych w piksele (`frames.in_pixels`); obraz bez
+  DPI dostaje do progu grubości linii wymiar wydruku z interfejsu (`w_mm`, `h_mm`). Wynik: „W obrazie
+  nie ma linii szablonu” albo „Linie … wtopione w obraz”. Sprawdzone na JPG bez DPI: czysty → czysto,
+  z cyjanową ramką → wtopione.
+- „Obraz nie ma zapisanego DPI”, choć Windows we „Właściwościach” pokazuje 96 dpi: w JFIF pliku
+  jednostka gęstości = 0 (same proporcje pikseli, bez DPI), a 96 dpi to wartość zastępcza Windowsa.
+  Program działa dobrze — dopisana o tym uwaga w rozdziale „Wymiar wydruku”.

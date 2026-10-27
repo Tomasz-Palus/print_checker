@@ -400,7 +400,23 @@ def api_frames(jid):
     page = arg_page(job)
     glp = request.args.get("glpage", -1, type=int)
     mm = job.original.pages_mm[page]
-    if job.info["kind"] == "raster" or not mm or not mm[0]:
+    if job.info["kind"] == "raster":
+        # Obraz (JPG/PNG/TIFF): szablonu wektorowego w nim nie ma — sprawdzamy tylko, czy linie
+        # wytycznych nie są wtopione w piksele. Wcześniej od razu „bez wytycznych” (known: False),
+        # choć wytyczne produktu były wczytane (Tomasz 27.10, adWall L 200, JPG bez DPI).
+        # Wymiar w mm służy tylko do progu grubości linii (14 mm) — obraz bez DPI dostaje wymiar
+        # wydruku z interfejsu (w_mm, h_mm).
+        size = tuple(mm) if mm and mm[0] else None
+        if not size:
+            w, h = request.args.get("w_mm", type=float), request.args.get("h_mm", type=float)
+            size = (w, h) if w and h and w > 0 and h > 0 and math.isfinite(w) and math.isfinite(h) else None
+        try:
+            pixels = bool(size) and frames.in_pixels(job.page_path(job.original, page), 0, size, None)
+        except Exception as e:
+            return err(f"Nie udało się przeszukać obrazu: {type(e).__name__}: {e}", 500)
+        return jsonify({"found": 0, "known": bool(gl_pdf(request.args.get("gl", ""))), "raster": True,
+                        "pixels": bool(pixels), "checked": bool(size), "foreign": 0})
+    if not mm or not mm[0]:
         return jsonify({"found": 0, "known": False, "pixels": False, "foreign": 0})
     try:
         r = frames.find(job.original.path, page, tuple(mm), gl_pdf(request.args.get("gl", "")), glp if glp >= 0 else None)
