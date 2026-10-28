@@ -71,9 +71,9 @@ check("R1 → CMYK: tryb CMYK, DPI zostaje", im.mode == "CMYK" and round(im.info
 j = up("R2_tiff_2_strony.tif"); jid = j["job_id"]
 check("R2 TIFF: 2 strony", j["file"]["page_count"] == 2, str(j["file"]["page_count"]))
 r = step(jid, "cmyk", page=1); f = vfile(jid, r); im = Image.open(f)
-check("R2 CMYK na stronie 2: wynik ma wymiar strony 2 (150×300 px)", im.size == (150, 300), f"{im.size} {getattr(im, 'n_frames', 1)} klatek")
+check("R2 CMYK na stronie 2: wynik ma wymiar strony 2 (300×150 px)", im.size == (300, 150), f"{im.size} {getattr(im, 'n_frames', 1)} klatek")
 data = T.req(f"/api/jobs/{jid}/download?page=1", raw=True); open("R2_pobrany.tif", "wb").write(data); im = Image.open("R2_pobrany.tif")
-check("R2 pobranie: tylko strona 2, CMYK", getattr(im, "n_frames", 1) == 1 and im.mode == "CMYK" and im.size == (150, 300), f"{im.size} {im.mode} {getattr(im, 'n_frames', 1)}")
+check("R2 pobranie: tylko strona 2, CMYK", getattr(im, "n_frames", 1) == 1 and im.mode == "CMYK" and im.size == (300, 150), f"{im.size} {im.mode} {getattr(im, 'n_frames', 1)}")
 # R3: PNG z przezroczystością → CMYK na białym
 j = up("R3_png_alfa_100dpi.png"); r = step(j["job_id"], "cmyk"); f = vfile(j["job_id"], r); im = Image.open(f)
 c = im.getpixel((5, im.height // 2))

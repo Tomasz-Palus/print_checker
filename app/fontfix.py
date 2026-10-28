@@ -489,11 +489,76 @@ def embed(src: str, dst: str, fetcher=fetch, page: int | None = None) -> dict:
     """Osadza w pliku pobrane fonty dla wszystkich WIDOCZNYCH nieosadzonych fontów.
     Zwraca {"osadzone": [(nazwa, źródło)], "niewidoczne": [nazwy], "brak": [(nazwa, powód)]}.
     Plik `dst` powstaje tylko wtedy, gdy coś osadzono."""
-    from fontTools.ttLib import TTFont
-    brak, osadzone, niewidoczne = [], [], []
     lista = missing(src, page)            # `page` — tylko fonty tej strony (inna strona nie idzie do druku)
     if not lista:
         return {"osadzone": [], "niewidoczne": [], "brak": []}
+    # Font zapisany BEZPOŚREDNIO w zasobach (bez numeru obiektu) — dawniej tylko „brak” (przegląd 09.10,
+    # ograniczenie 0.6.8). Najpierw dostaje numer obiektu (kopia pliku), potem osadzanie jak zwykle.
+    tmp = None
+    if any(e["widoczny"] and not e["objgens"] for e in lista):
+        tmp = dst + ".fonty.pdf"
+        with pikepdf.open(src) as p:
+            if _indirect_fonts(p, page):
+                p.save(tmp)
+            else:
+                tmp = None
+        if tmp:
+            src, lista = tmp, missing(tmp, page)
+    try:
+        return _embed(src, dst, fetcher, lista)
+    finally:
+        if tmp:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def _indirect_fonts(pdf, page: int | None) -> int:
+    """Fonty zapisane bezpośrednio w słownikach /Font (strony, formy, wzory, glify Type3) → obiekty
+    pośrednie (z numerem), żeby dało się je osadzić. Zwraca liczbę zamienionych."""
+    n, seen = 0, set()
+
+    def res(r, depth):
+        nonlocal n
+        if r is None or depth > 12:
+            return
+        rk = tuple(r.objgen)
+        if rk != (0, 0):
+            if rk in seen:
+                return
+            seen.add(rk)
+        try:
+            fonts = r.get("/Font")
+            for k in (list(fonts.keys()) if fonts is not None else []):
+                f = fonts[k]
+                if isinstance(f, pikepdf.Dictionary) and not f.is_indirect:
+                    fonts[k] = f = pdf.make_indirect(f)
+                    n += 1
+                if str(f.get("/Subtype", "")) == "/Type3":
+                    res(f.get("/Resources"), depth + 1)
+        except Exception:
+            pass
+        for kind in ("/XObject", "/Pattern"):
+            try:
+                d = r.get(kind)
+                for k in (list(d.keys()) if d is not None else []):
+                    x = d[k]
+                    if kind == "/XObject" and str(x.get("/Subtype", "")) != "/Form":
+                        continue
+                    res(x.get("/Resources"), depth + 1)
+            except Exception:
+                continue
+
+    for i, pg in enumerate(pdf.pages):
+        if page is None or i == page:
+            res(pg.obj.get("/Resources"), 0)
+    return n
+
+
+def _embed(src: str, dst: str, fetcher, lista: list) -> dict:
+    from fontTools.ttLib import TTFont
+    brak, osadzone, niewidoczne = [], [], []
     with pikepdf.open(src) as pdf:
         targets = {tuple(g) for e in lista for g in e["objgens"]}
         used = _used_codes(pdf, targets)

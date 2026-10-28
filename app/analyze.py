@@ -89,6 +89,13 @@ class Analyzer:
         self.overprint_uses = 0
         self.white_op = []              # biały z overprintem — w druku znika: [x0,y0,x1,y1] w pt strony
         self._ov_in = {}                # stan overprintu przekazywany do formy
+        # Gradient przycięty kształtem (litery, krzywe) albo kształt wypełniony wzorem gradientowym —
+        # Ghostscript nie wygładza krawędzi przycięcia nawet z AlphaBits; spłaszczenie liczy wtedy z
+        # nadpróbkowaniem (steps.step_flatten, 28.10). Kontrakt `clipped_shading`.
+        self.clipped_shading = 0
+        self.clipped_shading_text = 0   # …w tym gradient w LITERACH (przycięcie tekstem, tekst wypełniony wzorem)
+        self._clip_in = False
+        self._clip_text_in = False
         self.heavy_black = 0            # jednolite czernie ponad limit farby (CMYK / Registration) — da się poprawić
         self._lw_in = 1.0               # grubość linii przekazywana do formy
         self.transparency = Counter()   # rodzaj -> liczba
@@ -434,8 +441,13 @@ class Analyzer:
         pat_fill = pat_stroke = None
         t3 = None                              # bieżący font Type3 (Tf)
         in_mask = self._in_mask
+        clip_shaped = self._clip_in            # przycięcie nieprostokątne (krzywe, ukos, litery)
+        clip_text = self._clip_text_in         # …z liter
+        path_shaped = text_clip = pat_shading = False
         for operands, o in ops:
             try:
+                if o in ("c", "v", "y", "l"):
+                    path_shaped = True
                 if o in ("m", "l", "c", "v", "y", "re"):
                     # obrys ścieżki potrzebny tylko dla bieli z overprintem i obszaru wzoru —
                     # poza tym wystarczy wiedzieć, że ścieżka jest (przegląd 09.10, B25)
@@ -455,7 +467,16 @@ class Analyzer:
                 if o == "w":
                     lw = float(operands[0])
                     continue
+                if o in ("W", "W*"):
+                    if path_shaped:
+                        clip_shaped = True
+                    continue
                 if o in ("f", "F", "f*", "B", "B*", "b", "b*", "S", "s", "n"):
+                    if pat_shading and o not in ("S", "s", "n"):
+                        self.clipped_shading += 1
+                        if clip_text:
+                            self.clipped_shading_text += 1
+                    path_shaped = False
                     if pbox is not None and o != "n":
                         fills, strokes = o not in ("S", "s"), o not in ("f", "F", "f*")
                         if fills and fill_dirty:
@@ -476,6 +497,11 @@ class Analyzer:
                                     self._white_hit(pbox)
                     pbox = None
                     continue
+                if o in ("Tj", "TJ", "'", '"') and tr >= 4:
+                    text_clip = True                     # tekst jako przycięcie — działa od ET
+                if o in ("Tj", "TJ", "'", '"') and pat_shading and tr in (0, 2, 4, 6):
+                    self.clipped_shading += 1
+                    self.clipped_shading_text += 1
                 if o in ("Tj", "TJ", "'", '"') and tr not in (3, 7):
                     fills = tr in (0, 2, 4, 6)
                     if fills and fill_dirty:
@@ -498,6 +524,8 @@ class Analyzer:
                     tr = int(operands[0])
                 elif o == "BT":
                     tm = [1, 0, 0, 1, 0, 0]
+                elif o == "ET" and text_clip:
+                    clip_shaped, clip_text, text_clip = True, True, False
                 elif o == "Tm":
                     tm = [float(x) for x in operands]
                 elif o in ("Td", "TD"):
@@ -505,27 +533,33 @@ class Analyzer:
                           tm[5] + float(operands[0]) * tm[1] + float(operands[1]) * tm[3]]
                 if o == "q":
                     stack.append((ctm, fill_cs, stroke_cs, dict(ov), fill_v, stroke_v, lw,
-                                  fill_dirty, stroke_dirty, pat_fill, pat_stroke))
+                                  fill_dirty, stroke_dirty, pat_fill, pat_stroke, clip_shaped, pat_shading, clip_text))
                 elif o == "Q":
                     if stack:
                         (ctm, fill_cs, stroke_cs, ov, fill_v, stroke_v, lw,
-                         fill_dirty, stroke_dirty, pat_fill, pat_stroke) = stack.pop()
+                         fill_dirty, stroke_dirty, pat_fill, pat_stroke, clip_shaped, pat_shading, clip_text) = stack.pop()
                 elif o == "cm":
                     m = [float(x) for x in operands]
                     ctm = _mul(m, ctm)
                 elif o in ("g", "rg", "k"):
                     fill_cs = {"family": {"g": "Gray", "rg": "RGB", "k": "CMYK"}[o]}; self._record(fill_cs, "fill")
-                    fill_v = _nums(operands); fill_dirty = False; pat_fill = None
+                    fill_v = _nums(operands); fill_dirty = False; pat_fill = None; pat_shading = False
                 elif o in ("G", "RG", "K"):
                     stroke_cs = {"family": {"G": "Gray", "RG": "RGB", "K": "CMYK"}[o]}; self._record(stroke_cs, "stroke")
                     stroke_v = _nums(operands); stroke_dirty = False; pat_stroke = None
                 elif o == "cs":
                     fill_cs = self.classify(operands[0], resources); fill_v = [0.0]; fill_dirty = True; pat_fill = None
+                    pat_shading = False
                 elif o == "CS":
                     stroke_cs = self.classify(operands[0], resources); stroke_v = [0.0]; stroke_dirty = True; pat_stroke = None
                 elif o in ("sc", "scn"):
                     fill_v = _nums(operands); fill_dirty = False
                     if fill_cs.get("family") == "Pattern":
+                        try:                             # wzór gradientowy (PatternType 2) — wypełniony kształt
+                            pd = resources.get("/Pattern") if resources is not None else None
+                            pat_shading = bool(pd is not None and operands and int(pd[operands[-1]].get("/PatternType", 1)) == 2)
+                        except Exception:
+                            pat_shading = False
                         if fill_cs.get("base"):          # wzór bezbarwny (PaintType 2): kolor z bazy
                             self._record(fill_cs["base"], "fill")
                         pat_fill = self._pattern(operands, resources, base_ctm, "fill", depth)
@@ -540,6 +574,10 @@ class Analyzer:
                     else:
                         self._record(stroke_cs, "stroke")
                 elif o == "sh":
+                    if clip_shaped:
+                        self.clipped_shading += 1
+                        if clip_text:
+                            self.clipped_shading_text += 1
                     shd = resources.get("/Shading") if resources is not None else None
                     if shd is not None and operands[0] in shd:
                         self._record(self.classify(shd[operands[0]].get("/ColorSpace"), resources), "shading")
@@ -571,11 +609,13 @@ class Analyzer:
                     elif st == "/Form":
                         self._ov_in = dict(ov)          # forma dziedziczy stan overprintu i grubość linii
                         self._lw_in = lw
+                        self._clip_in, self._clip_text_in = clip_shaped, clip_text     # …i przycięcie
                         try:
                             self._form(xo, ctm, resources, depth)
                         finally:
                             self._ov_in = {}
                             self._lw_in = 1.0
+                            self._clip_in = self._clip_text_in = False
             except Exception:
                 self.unknown_ops += 1
 
@@ -1122,6 +1162,8 @@ def _summarize_pdf(an: Analyzer, pages, intents, meta, coverage=None, page_sizes
             "page_sizes_mm": page_sizes or [],
         },
         "overprint_uses": an.overprint_uses,
+        "clipped_shading": an.clipped_shading,
+        "clipped_shading_text": an.clipped_shading_text,
         "white_overprint": getattr(an, "white_boxes", []),
         "heavy_black": an.heavy_black,
         "transparency": dict(an.transparency),

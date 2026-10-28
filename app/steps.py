@@ -1228,11 +1228,12 @@ def flatten_plan(w_pt: float, h_pt: float, k: float) -> dict:
             "px": [round(w_pt / 72 * dpi), round(h_pt / 72 * dpi)]}
 
 
-FLATTEN_SS = 2              # nadpróbkowanie spłaszczenia (zawsze; jak podgląd)
+FLATTEN_SS = 2              # nadpróbkowanie spłaszczenia bez wygładzania gs (najmniej; niżej FLATTEN_SS_NOAA)
 # Gdy wygładzanie Ghostscripta jest wyłączone (overprint na dużej stronie — błąd gs, gs.aa_args),
 # 2× daje tylko 4 próbki na piksel: krawędzie wychodzą „szarpane” (Tomasz 29.09). Wtedy 4× = 16
 # próbek, tyle co AlphaBits=4 — o ile render się mieści w FLATTEN_SS_MAX_MPX (dalej 3×, a dla bardzo
 # dużych stron 2× — czas renderu rośnie z kwadratem nadpróbkowania).
+FLATTEN_SS_SMALL_MPX = 60   # do tylu Mpx (120 ppi ≈ 1,8 m²) gradientowe kształty liczymy z nadpróbkowaniem
 FLATTEN_SS_NOAA = 4
 FLATTEN_SS_MAX_MPX = 4000
 FLATTEN_TIMEOUT_BASE = 600          # s — limit czasu spłaszczenia = podstawa + s na Mpx renderu
@@ -1384,17 +1385,35 @@ def step_flatten(src, dst, p, job) -> dict:
     # wystarczył dowolny stan graficzny z /OP w całym pliku (Illustrator zostawia nieużywane) —
     # i spłaszczenie traciło wygładzanie krawędzi (Tomasz 29.09).
     try:
-        op = (_page_facts(job, src, page).get("overprint_uses") or 0) > 0
+        facts = _page_facts(job, src, page)
+        op = (facts.get("overprint_uses") or 0) > 0
+        clipped = (facts.get("clipped_shading") or 0) > 0
+        # gradient w literach — także gdy litery zamieniono na krzywe w „Fonty” (wtedy widać go w oryginale)
+        clipped_text = (facts.get("clipped_shading_text") or 0) > 0
+        if not clipped_text and job.versions[0].path != src:
+            try:
+                clipped_text = (job.analysis_of(job.versions[0], page).get("clipped_shading_text") or 0) > 0
+            except Exception:
+                pass
     except Exception:
         op = pdfutil.uses_overprint(src)
+        clipped = clipped_text = True           # nie wiemy — bezpiecznie, z nadpróbkowaniem
     prog(2, "sprawdzam fonty")
     gs_src, finfo = _prepare_fonts(src, dst, page)
     prog(5, "Ghostscript czyta projekt")
     zpath = dst + ".flate"
-    # Zawsze nadpróbkowanie 2× (jak podgląd, render.SS): Ghostscript nie wygładza krawędzi gradientu
-    # przyciętego kształtem liter (Tomasz 25.09), a przy dużej stronie z overprintem nie wygładza
-    # niczego (błąd — gs.aa_args). Wygładzanie Ghostscripta dokładamy, gdy jest bezpieczne.
-    ss = FLATTEN_SS
+    # Do 27.10 zawsze nadpróbkowanie 2× (jak podgląd, render.SS) — przez poszarpane litery z gradientem
+    # (Tomasz 25.09); przy dużej stronie z overprintem Ghostscript nie wygładza niczego (błąd — gs.aa_args).
+    # Z wygładzaniem Ghostscripta — BEZ nadpróbkowania (28.10, „użytkownicy mają słabe komputery”): 2× to
+    # 4× więcej pikseli; zmierzone na adWall 400 (zdjęcia, maski): odchyłka od wzorca 4× 1,8 zamiast 1,1/255
+    # (niewidoczne), czas 2,6× krótszy. Wyjątek — gradient przycięty kształtem (litery, krzywe, wzór
+    # gradientowy; analiza `clipped_shading`): Ghostscript nie wygładza krawędzi przycięcia. Schodki widać
+    # przy kontraście — gradient w LITERACH na tle (zmierzone: 37 zamiast 20/255 na krawędzi) — wtedy 2×.
+    # Gradientowe KSZTAŁTY (pasy kurtyny adWall 400, SOFT_BAG, Skolae) bez nadpróbkowania różnią się od wzorca
+    # najwyżej o 3/255 — 2× tylko na małym wydruku (render ≤ FLATTEN_SS_SMALL_MPX, koszt niewielki, ogląda się
+    # z bliska). Bez wygładzania (overprint na dużej stronie — błąd gs) nadpróbkowanie zostaje: 4× / 3× / 2×.
+    small = plan["px"][0] * plan["px"][1] / 1e6 <= FLATTEN_SS_SMALL_MPX
+    ss = FLATTEN_SS if clipped_text or (clipped and small) else 1
     aa = gs.aa_args(op, plan["px"][0] * ss, plan["px"][1] * ss, 4)
     if not aa:                                   # bez wygładzania gs — więcej próbek na piksel
         mpx = plan["px"][0] * plan["px"][1] / 1e6

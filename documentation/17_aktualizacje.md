@@ -1385,7 +1385,7 @@ Numery jak w `18_przeglad_kodu.md`.
   czasy, niezależne sprawdzenie pliku do druku i porównanie wyglądu z oryginałem. Przebieg na 12 projektach Tomasza
   (27.10): bez wywrotek; każdy plik do druku — 1 strona, sam CMYK, bez overprintu, tekst na krzywych.
 
-## 0.6.12 (w przygotowaniu) — testy syntetyczne, szablon (28.10)
+## 0.6.12 — testy syntetyczne, szablon, szybsze spłaszczenie, fonty (28.10)
 
 - Testy na własnych plikach z błędami (`narzedzia/testy_syntetyczne`, opis w README tam):
   - szablon: pełny, przesunięty o 3 mm, w formie, pod grafiką (ukryty), skala 1:10 — znaleziony cały
@@ -1398,3 +1398,25 @@ Numery jak w `18_przeglad_kodu.md`.
 - Poprawka: gruby pas w kolorze wytycznych przy krawędzi (cyjanowy pasek projektu, 80 mm) był brany
   za „obcą ramkę szablonu” i szedł do „Usuń te ramki”. Teraz obca ramka to ramka dookoła strony albo
   cienka linia (`frames._edge_frame`).
+- **Szybsze spłaszczenie** (użytkownicy mają przeważnie słabe komputery — mniej pracy, nie więcej
+  rdzeni). Do tej pory spłaszczenie zawsze liczyło stronę 2× większą (nadpróbkowanie) z powodu gradientów
+  obciętych tekstem/krzywą — Ghostscript nie wygładza krawędzi przycięcia. Teraz analiza liczy takie
+  miejsca (`clipped_shading`, `clipped_shading_text`), a nadpróbkowanie 2× zostaje tylko dla gradientu
+  w literach (tam ząbki widać) albo dla małych wydruków (≤ 60 Mpx — szybkie i tak). Reszta: zwykłe
+  wygładzanie Ghostscripta. Czasy (kontener Claude'a):
+
+  | plik | przed | po |
+  |---|---|---|
+  | adWall 400 (21 MB zdjęć z maskami) | ~800 s | 179 s |
+  | SOFT_BAG | 39,5 s | 10 s |
+  | strony | 13–18 s | 5 s |
+  | gradient w literach (2× zostaje) | — | 1 s |
+
+  Wygląd vs oryginał w symulacji druku bez zmian (p99 6–11, w tym zamierzone poprawki).
+- **Fonty wpisane wprost w stronę** (słownik fontu bez osobnego obiektu — rzadkie, ale bywa z generatorów)
+  nie dawały się osadzić. Teraz kopia pliku z takimi fontami jako osobnymi obiektami i osadzanie jak
+  zwykle (`fontfix._indirect_fonts`; także w formach, wzorkach i fontach Type3).
+- Przybliżanie na ciężkich plikach: **bez liczenia w tle** zaraz po wgraniu — na słabym komputerze
+  zajęłoby procesor na minuty, gdy użytkownik robi co innego. Zostaje liczenie na żądanie (kafle).
+- Sprawdzone i odrzucone: wykrywanie powiększonych obrazów 1-bitowych (piksele schodkami). Kody QR
+  (moduły po 8–20 px) wyglądają dokładnie tak samo — program fałszywie mówiłby „zła jakość” na każdym QR.
