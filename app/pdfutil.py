@@ -133,6 +133,44 @@ def iter_ops(container):
     return _StreamOps(parts)
 
 
+def inline_image_bytes(img) -> bytes:
+    """Obraz wpisany w treść (PdfInlineImage z `iter_ops`) z powrotem jako bajty `BI … ID … EI`, tak samo
+    jak zapisuje pikepdf. Obraz z czytania strumieniowego ma dane jako String — podajemy je zapisowi wprost."""
+    try:
+        return img.unparse()
+    except Exception:
+        pass
+    raw = bytes(img._data)
+    img.read_raw_bytes = lambda: raw
+    return img.unparse()
+
+
+class Writer:
+    """Treść zapisywana kawałkami (unparse po STREAM_BATCH instrukcji) — do przepisywania dużej treści
+    bez listy wszystkich instrukcji w pamięci. `add(operandy, operator)`; obraz w treści: ([img], "INLINE IMAGE")."""
+
+    def __init__(self):
+        self.parts, self.pending = [], []
+
+    def add(self, operands, o: str):
+        if o == "INLINE IMAGE":
+            self.flush()
+            self.parts.append(inline_image_bytes(operands[0]))
+            return
+        self.pending.append(pikepdf.ContentStreamInstruction(operands, pikepdf.Operator(o)))
+        if len(self.pending) >= STREAM_BATCH:
+            self.flush()
+
+    def flush(self):
+        if self.pending:
+            self.parts.append(pikepdf.unparse_content_stream(self.pending))
+            self.pending = []
+
+    def data(self) -> bytes:
+        self.flush()
+        return b"\n".join(self.parts)
+
+
 class _Stop(Exception):
     pass
 

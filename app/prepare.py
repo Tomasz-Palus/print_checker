@@ -23,6 +23,8 @@ import os
 
 import pikepdf
 
+import pdfutil
+
 PDF_MAX_PT = 14400.0            # 200 cali — największa strona, jaką przyjmuje Acrobat
 
 ANNOT_NAMES = {"/Stamp": "stempel", "/FreeText": "pole tekstowe", "/Text": "komentarz", "/Widget": "pole formularza",
@@ -95,21 +97,13 @@ def _strip_oc(pdf, container, resources, L: _Layers, done: set, stats: dict, dep
         return
     done.add(ck)
     try:
-        ops = list(pikepdf.parse_content_stream(container))
+        ops = pdfutil.iter_ops(container)       # duża treść — strumieniowo, zapis kawałkami (28.10)
     except Exception:
         return
     props = resources.get("/Properties") if resources is not None else None
     xobj = resources.get("/XObject") if resources is not None else None
-    out, skip, changed = [], 0, False      # skip = głębokość znaczników wewnątrz ukrytej warstwy
-    for ins in ops:
-        # obraz wpisany w treść (BI … ID … EI) przepisujemy bez zmian — rozebrany na (operandy, operator)
-        # nie dał się złożyć z powrotem („don't know how to encode value PdfInlineImage”) i „Popraw czerń”
-        # padała po cichu (Tomasz 01.10, plik z gs 10.07)
-        if isinstance(ins, pikepdf.ContentStreamInlineImage):
-            out.append(ins)
-            continue
-        operands, op = ins.operands, ins.operator
-        o = str(op)
+    out, skip, changed = pdfutil.Writer(), 0, False      # skip = głębokość znaczników wewnątrz ukrytej warstwy
+    for operands, o in ops:
         if skip:
             changed = True
             if o in ("BMC", "BDC"):
@@ -125,7 +119,7 @@ def _strip_oc(pdf, container, resources, L: _Layers, done: set, stats: dict, dep
                 skip, changed = 1, True
                 stats["removed"] += 1
                 continue
-            out.append(pikepdf.ContentStreamInstruction([pikepdf.Name("/OC")], pikepdf.Operator("BMC")))
+            out.add([pikepdf.Name("/OC")], "BMC")
             changed = True
             continue
         if o == "Do" and xobj is not None and operands and operands[0] in xobj:
@@ -139,9 +133,12 @@ def _strip_oc(pdf, container, resources, L: _Layers, done: set, stats: dict, dep
                 del xo["/OC"]
             if str(xo.get("/Subtype", "")) == "/Form":
                 _strip_oc(pdf, xo, xo.get("/Resources") or resources, L, done, stats, depth + 1)
-        out.append(pikepdf.ContentStreamInstruction(operands, op))
+        # obraz wpisany w treść (BI … ID … EI) przepisujemy bez zmian (Writer składa go z powrotem)
+        out.add(operands, o)
+    if getattr(ops, "error", None) is not None:
+        changed = False                      # treść urwana błędem — nie zapisujemy jej obciętej
     if changed:
-        data = pikepdf.unparse_content_stream(out)
+        data = out.data()
         if isinstance(container, pikepdf.Page):
             container.obj.Contents = pdf.make_stream(data)
         else:

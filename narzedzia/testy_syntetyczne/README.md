@@ -24,7 +24,7 @@ font (analiza, która nie dojdzie do końca, ich nie zobaczy):
 |---|---|---|
 | D1 | symbol (400 operatorów) powtórzony 30 000 razy | 12 mln |
 | D2 | formy zagnieżdżone 100 × 100 × symbol 1000 | 10 mln |
-| D3 | płaska treść bez form (wektor z CAD) | 8 mln, 232 MB treści |
+| D3 | płaska treść bez form (wektor z CAD): 800 000 małych kształtów | 8,8 mln operatorów |
 | D4 | symbol z obrazem powtórzony 20 000 razy | 20 000 miejsc obrazu |
 
 `test_duze.py [folder]` — analiza każdego w osobnym procesie: pełna, błędy z końca wykryte, czas, pamięć.

@@ -83,9 +83,21 @@ a = form(pdf, grid(100, "B", 200), (0, 0, 2000, 2000), {"/B": b})
 page(pdf, b"q 1 0 0 1 10 10 cm /A Do Q\n" + TAIL, {"/A": a})
 pdf.save(f"{OUT}/D2_zagniezdzone_100x100.pdf")
 
-# D3: płaska treść, 8 mln operatorów bez form (mapa, wektorowy raster z CAD)
+# D3: płaska treść, 8 mln operatorów bez form (mapa, wektor z CAD): 800 000 małych kształtów po
+# 10 operatorów (m, 8 × c, f), każdy w innym miejscu i kolorze. (Jeden kształt z 8 mln krzywych —
+# pierwsza wersja — to przypadek nierealny: Ghostscript wypełnia go ponad 15 min.)
+rng = np.random.default_rng(3)
+n = 800_000
+xy = rng.uniform(0, W - 30, size=(n, 2))
+d = rng.uniform(0, 20, size=(n, 8, 6))
+col = rng.uniform(0, 1, size=(n, 4))
+lines = []
+for i in range(n):
+    x, y = xy[i]
+    seg = " ".join("%.1f %.1f %.1f %.1f %.1f %.1f c" % tuple(v) for v in (d[i] + [x, y, x, y, x, y]))
+    lines.append(("%.2f %.2f %.2f %.2f k %.1f %.1f m %s f" % (*col[i], x, y, seg)).encode())
 pdf = pikepdf.new()
-page(pdf, symbol(8_000_000, 3) + b"\n" + TAIL)
+page(pdf, b"\n".join(lines) + b"\n" + TAIL)
 pdf.save(f"{OUT}/D3_plaski_8mln.pdf")
 
 # D4: symbol z obrazem (300 operatorów + obraz) powtórzony 20 000 razy — miejsca obrazu się liczą

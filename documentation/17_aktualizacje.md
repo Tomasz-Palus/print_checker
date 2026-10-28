@@ -1427,7 +1427,7 @@ Numery jak w `18_przeglad_kodu.md`.
   | D1 symbol (400 operatorów) × 30 000 | 75 s, **niepełna** | 9 s, pełna |
   | D2 formy 100 × 100 × symbol 1000 | 61 s, **niepełna** | 6 s, pełna |
   | D4 symbol z obrazem × 20 000 | 39 s, **niepełna** | 6 s, pełna (20 000 miejsc obrazu) |
-  | D3 płaska treść 8 mln operatorów (232 MB) | 240 s, **11 GB pamięci** | 90 s, 0,5 GB |
+  | D3 płaska treść, 800 000 kształtów (8,8 mln operatorów) | 292 s, **12 GB pamięci** | 121 s, 0,7 GB |
 
   Co zmienione:
   - **Powtórka formy** (`analyze._form`): forma użyta drugi raz w tym samym stanie (overprint,
@@ -1446,7 +1446,11 @@ Numery jak w `18_przeglad_kodu.md`.
     każda forma raz — D1: 67 s → poniżej 1 s.
   - Sprawdzone na 36 projektach (prawdziwe i syntetyczne): wynik analizy i wykrywania szablonu
     identyczny jak przed zmianą.
-  - Zostaje: usuwanie ukrytych warstw (przy wgraniu, tylko pliki z warstwami) i „Popraw czerń” nadal
-    wczytują treść w całości — przepisują ją, nie tylko czytają.
+  - **„Popraw czerń” i usuwanie ukrytych warstw** (przy wgraniu) przepisują treść kawałkami
+    (`pdfutil.Writer`): na D3 stara „Popraw czerń” zajęła 14 GB i system zabił program; teraz strumieniowo.
+    Wynik sprawdzony ze starym kodem (czerń 4 × 100 %, Registration, obrazy w treści, forma, ukryta
+    warstwa — także z wymuszonym czytaniem strumieniowym): treść identyczna co do operatora.
+  - Ghostscript (kolory, krzywe, spłaszczenie) liczy taki plik sam — 2–4 min na D1–D3. Jeden kształt
+    z milionami krzywych (pierwsza wersja D3) przekracza limit 15 min; program zgłasza to czytelnie.
 - Sprawdzone i odrzucone: wykrywanie powiększonych obrazów 1-bitowych (piksele schodkami). Kody QR
   (moduły po 8–20 px) wyglądają dokładnie tak samo — program fałszywie mówiłby „zła jakość” na każdym QR.

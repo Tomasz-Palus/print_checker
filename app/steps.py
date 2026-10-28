@@ -958,10 +958,11 @@ def _fix_black(pdf, container, resources, st: dict, done: set, depth=0) -> int:
         return 0
     done.add(key)
     try:
-        ops = list(pikepdf.parse_content_stream(container))
+        ops = pdfutil.iter_ops(container)       # duża treść — strumieniowo, zapis kawałkami (28.10)
     except Exception:
         return 0
-    n, out, stack, changed = 0, [], [], False
+    n, stack, changed = 0, [], False
+    out = pdfutil.Writer()
     pending = {"f": False, "s": False}    # Registration zamieniona bez `scn` — liczymy przy rysowaniu
     st = dict(st)
     xobj = resources.get("/XObject") if resources is not None else None
@@ -976,15 +977,13 @@ def _fix_black(pdf, container, resources, st: dict, done: set, depth=0) -> int:
 
     def rb(t=1.0):
         return [Decimal(f"{c * t:.4f}") for c in RICH_BLACK]
-    for ins in ops:
+    for operands, o in ops:
         # obraz wpisany w treść (BI … ID … EI) przepisujemy bez zmian — rozebrany na (operandy, operator)
         # nie dał się złożyć z powrotem („don't know how to encode value PdfInlineImage”) i „Popraw czerń”
         # padała po cichu (Tomasz 01.10, plik z gs 10.07)
-        if isinstance(ins, pikepdf.ContentStreamInlineImage):
-            out.append(ins)
+        if o == "INLINE IMAGE":
+            out.add(operands, o)
             continue
-        operands, op = ins.operands, ins.operator
-        o = str(op)
         if o == "q":
             stack.append(dict(st))
         elif o == "Q":
@@ -1008,8 +1007,8 @@ def _fix_black(pdf, container, resources, st: dict, done: set, depth=0) -> int:
                 # sama czerń K100. Bez `scn` po zamianie wychodziło K100 zamiast zalecanej czerni
                 # (przegląd 09.10, C) — dopisujemy jawnie zalecaną czerń.
                 changed = True
-                out.append(pikepdf.ContentStreamInstruction([pikepdf.Name("/DeviceCMYK")], op))
-                out.append(pikepdf.ContentStreamInstruction(rb(), pikepdf.Operator("sc" if side == "f" else "SC")))
+                out.add([pikepdf.Name("/DeviceCMYK")], o)
+                out.add(rb(), "sc" if side == "f" else "SC")
                 pending[side] = True
                 continue
         elif (o in PAINT_FILL or o in PAINT_STROKE) and any(pending.values()):
@@ -1031,9 +1030,11 @@ def _fix_black(pdf, container, resources, st: dict, done: set, depth=0) -> int:
             xo = xobj[operands[0]]
             if str(xo.get("/Subtype", "")) == "/Form":
                 n += _fix_black(pdf, xo, xo.get("/Resources") or resources, st, done, depth + 1)
-        out.append(pikepdf.ContentStreamInstruction(operands, op))
+        out.add(operands, o)
+    if getattr(ops, "error", None) is not None:
+        changed = False                      # treść urwana błędem — nie zapisujemy jej obciętej
     if changed:
-        data = pikepdf.unparse_content_stream(out)
+        data = out.data()
         if isinstance(container, pikepdf.Page):
             container.obj.Contents = pdf.make_stream(data)
         else:
