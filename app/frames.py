@@ -354,8 +354,14 @@ def _text_like(tpl: str, mine: str) -> bool:
 
 
 def _edge_frame(z, W, H) -> bool:
-    """Ramka/pas przy krawędzi: prawie cała szerokość albo wysokość, przy brzegu."""
+    """Ramka/linia przy krawędzi: prawie cała szerokość albo wysokość, przy brzegu — i kształt ramki
+    (obejmuje stronę w obu osiach) albo cienkiej linii. Gruby pas w kolorze wytycznych (cyjanowy pasek
+    projektu, 80 mm u góry) to grafika, nie szablon — dawniej szedł do „Usuń te ramki” (test 28.10)."""
     if not (z["w"] >= W * 0.8 or z["h"] >= H * 0.8):
+        return False
+    frame = z["w"] >= W * 0.5 and z["h"] >= H * 0.5
+    thin = min(z["w"], z["h"]) <= max(6.0, 0.005 * max(W, H))
+    if not (frame or thin):
         return False
     return min(z["x"], z["y"], W - z["x"] - z["w"], H - z["y"] - z["h"]) <= max(60.0, 0.06 * max(W, H))
 

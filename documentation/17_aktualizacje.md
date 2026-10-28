@@ -1384,3 +1384,17 @@ Numery jak w `18_przeglad_kodu.md`.
 - `narzedzia/test_projektu.py` — test „jak użytkownik” na folderze projektów (API działającego serwera): kroki,
   czasy, niezależne sprawdzenie pliku do druku i porównanie wyglądu z oryginałem. Przebieg na 12 projektach Tomasza
   (27.10): bez wywrotek; każdy plik do druku — 1 strona, sam CMYK, bez overprintu, tekst na krzywych.
+
+## 0.6.12 (w przygotowaniu) — testy syntetyczne, szablon (28.10)
+
+- Testy na własnych plikach z błędami (`narzedzia/testy_syntetyczne`, opis w README tam):
+  - szablon: pełny, przesunięty o 3 mm, w formie, pod grafiką (ukryty), skala 1:10 — znaleziony cały
+    (2 ramki + 3 napisy), po usunięciu projekt = czysty co do piksela; stopka klienta przy „Linia cięcia”
+    zostaje; szablon innego produktu i sama czerwona ramka → „obce ramki”; szablon w pikselach → wykryty;
+  - wymiar i obrazy: 25/25 (spady z TrimBox i bez, 200 %, złe proporcje, tło z krawędzi, odbicie, obrót,
+    /Rotate, UserUnit > 5 m z powrotem przy pobraniu, 1:10, JPG 150 dpi, TIFF 2 strony, PNG z alfą, JPG
+    CMYK, TIFF 16 bit, .ai);
+  - cofanie i kolejność kroków, ten sam krok dwa razy, pobranie innej wersji (409) — w porządku.
+- Poprawka: gruby pas w kolorze wytycznych przy krawędzi (cyjanowy pasek projektu, 80 mm) był brany
+  za „obcą ramkę szablonu” i szedł do „Usuń te ramki”. Teraz obca ramka to ramka dookoła strony albo
+  cienka linia (`frames._edge_frame`).
