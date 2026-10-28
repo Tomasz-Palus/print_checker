@@ -14,3 +14,17 @@ Uruchamiać z tego folderu, przy działającym serwerze (`python app/server.py`)
    JPG 150 dpi, TIFF 2 strony, PNG z alfą, JPG CMYK, TIFF 16 bit, .ai z PDF-em i bez. Wypisuje OK / BŁĄD.
 
 Wynik 28.10 (wersja 0.6.11 + poprawka „cyjanowy pas”): szablony 11/11 jak oczekiwano, wymiar i obrazy 25/25.
+
+## Bardzo duże pliki (28.10)
+
+`gen_duze.py` — strona 1 × 1 m z milionami operatorów; na KOŃCU treści kolor RGB, overprint i nieosadzony
+font (analiza, która nie dojdzie do końca, ich nie zobaczy):
+
+| plik | co | |
+|---|---|---|
+| D1 | symbol (400 operatorów) powtórzony 30 000 razy | 12 mln |
+| D2 | formy zagnieżdżone 100 × 100 × symbol 1000 | 10 mln |
+| D3 | płaska treść bez form (wektor z CAD) | 8 mln, 232 MB treści |
+| D4 | symbol z obrazem powtórzony 20 000 razy | 20 000 miejsc obrazu |
+
+`test_duze.py [folder]` — analiza każdego w osobnym procesie: pełna, błędy z końca wykryte, czas, pamięć.

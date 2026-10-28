@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import threading as _th
 
 import pikepdf
 
@@ -98,6 +99,186 @@ def _extgstates(res, depth):
         pass
 
 
+# Treść strony / formy: lista operatorów z `pikepdf.parse_content_stream` zajmuje ok. 1 GB na milion
+# operatorów (28.10: płaska treść 8 mln operatorów — wektor z CAD, 71 MB — zabrała 11 GB pamięci). Duża
+# treść idzie strumieniowo: kawałki po STREAM_BATCH operatorów, pamięć stała.
+STREAM_RAW = 512_000              # treść większa (spakowana; po rozpakowaniu zwykle 3–10×) — strumieniowo
+STREAM_BATCH = 20_000
+
+
+def _content_streams(container) -> list:
+    obj = container.obj if isinstance(container, pikepdf.Page) else container
+    c = obj.get("/Contents") if isinstance(container, pikepdf.Page) else obj
+    items = list(c) if isinstance(c, pikepdf.Array) else [c]
+    return [x for x in items if isinstance(x, pikepdf.Stream)]
+
+
+def _raw_length(container) -> int:
+    try:
+        return sum(int(x.get("/Length", 0)) for x in _content_streams(container))
+    except Exception:
+        return 0
+
+
+def iter_ops(container):
+    """(operandy, operator jako str) po kolei, jak `parse_content_stream`; obraz w treści (BI … EI) jako
+    ([PdfInlineImage], "INLINE IMAGE"). Mała treść — zwykła lista; duża — strumieniowo (obiekt z `n`)."""
+    if _raw_length(container) <= STREAM_RAW:
+        return [(ins.operands, str(ins.operator)) for ins in pikepdf.parse_content_stream(container)]
+    # Do wątku idzie treść SPAKOWANA i opis filtrów — rozpakowuje dopiero parser w osobnym PDF-ie
+    parts = []
+    for st in _content_streams(container):
+        f, d = st.get("/Filter"), st.get("/DecodeParms")
+        parts.append((st.read_raw_bytes(), f.unparse() if f is not None else None, d.unparse() if d is not None else None))
+    return _StreamOps(parts)
+
+
+class _Stop(Exception):
+    pass
+
+
+_OPERATOR = pikepdf.ObjectType.operator
+_PLAIN = {int, float, bool, __import__("decimal").Decimal}
+
+
+def _own(o):
+    """Kopia operandu niezależna od tymczasowego PDF-a parsera (obiekt pikepdf żyje tylko razem ze swoim
+    plikiem — po jego zamknięciu odczyt kończy się błędem pamięci)."""
+    if not isinstance(o, pikepdf.Object):
+        return o                                 # int, Decimal, bool — już wartości Pythona
+    t = o._type_code
+    if t == pikepdf.ObjectType.name_:
+        return pikepdf.Name(str(o))
+    if t == pikepdf.ObjectType.string:
+        return pikepdf.String(bytes(o))
+    if t == pikepdf.ObjectType.array:
+        return pikepdf.Array([_own(x) for x in o])
+    if t == pikepdf.ObjectType.dictionary:
+        return pikepdf.Dictionary({k: _own(v) for k, v in o.items()})
+    if t == pikepdf.ObjectType.inlineimage:
+        return pikepdf.String(o._inline_image_raw_bytes())
+    if t == pikepdf.ObjectType.boolean:
+        return bool(o)
+    if t == pikepdf.ObjectType.integer:
+        return int(o)
+    if t == pikepdf.ObjectType.real:
+        from decimal import Decimal
+        return Decimal(str(o))
+    return None
+
+
+class _StreamOps:
+    """Operatory dużej treści po kolei; `n` — ile już podano (budżet analizy), `error` — treść urwana
+    błędem (dalsza część nieodczytana)."""
+
+    def __init__(self, parts: list):
+        self.parts, self.n, self.error = parts, 0, None
+
+    def __iter__(self):
+        parts, self.parts = self.parts, None     # treść oddana wątkowi — tu jej nie trzymamy
+        try:
+            for batch in _stream_batches(parts):
+                self.n += len(batch)
+                yield from batch
+        except Exception as e:                   # uszkodzona treść: koniec tu, błąd do sprawdzenia przez `error`
+            self.error = e
+
+
+def _stream_batches(parts: list):
+    """Generator kawałków: osobny wątek parsuje treść (pikepdf.StreamParser) w OSOBNYM, pustym PDF-ie — pikepdf
+    nie jest bezpieczny dla wątków, a główny plik czyta w tym czasie analiza. Kawałki przez kolejkę."""
+    import queue
+    q: queue.Queue = queue.Queue(maxsize=3)
+    stop = _th.Event()
+
+    def put(x):
+        while not stop.is_set():
+            try:
+                q.put(x, timeout=0.2)
+                return
+            except queue.Full:
+                continue
+        raise _Stop
+
+    class P(pikepdf.StreamParser):
+        def __init__(self):
+            super().__init__()
+            self.batch, self.operands, self.bi = [], [], None
+
+        def handle_object(self, obj, offset, length):
+            if obj.__class__ in _PLAIN:          # liczby — najczęstsze, bez kopiowania
+                self.operands.append(obj)
+                return
+            if obj is None:                      # nieczytelny kawałek treści — jak parse_content_stream: None
+                self.operands.append(None)
+                return
+            if obj._type_code == _OPERATOR:
+                o = str(obj)
+                if o == "BI":
+                    self.bi = []
+                elif o == "ID" and self.bi is not None:
+                    self.bi.extend(self.operands)
+                elif o == "EI" and self.bi is not None:
+                    try:
+                        img = pikepdf.PdfInlineImage(image_data=self.operands[-1], image_object=tuple(self.bi))
+                        self.batch.append(([img], "INLINE IMAGE"))
+                    except Exception:
+                        pass
+                    self.bi = None
+                else:
+                    self.batch.append((self.operands, o))
+                self.operands = []
+                if len(self.batch) >= STREAM_BATCH:
+                    put(self.batch)
+                    self.batch = []
+            else:
+                self.operands.append(_own(obj))
+
+        def handle_eof(self):
+            pass
+
+    def run():
+        try:
+            tmp = pikepdf.new()
+            pg = tmp.add_blank_page()
+            streams = []
+            while parts:
+                raw, f, d = parts.pop(0)
+                st = tmp.make_stream(raw)
+                del raw
+                if f is not None:
+                    st["/Filter"] = pikepdf.Object.parse(f)
+                if d is not None:
+                    st["/DecodeParms"] = pikepdf.Object.parse(d)
+                streams.append(st)
+            pg.obj["/Contents"] = streams[0] if len(streams) == 1 else pikepdf.Array(streams)
+            p = P()
+            pg.parse_contents(p)
+            if p.batch:
+                put(p.batch)
+            put(None)
+        except _Stop:
+            pass
+        except Exception as e:                  # błąd parsowania — jak parse_content_stream: wyjątek
+            try:
+                put(e)
+            except _Stop:
+                pass
+
+    t = _th.Thread(target=run, daemon=True)
+    t.start()
+    try:
+        while True:
+            b = q.get()
+            if b is None:
+                return
+            if isinstance(b, Exception):
+                raise b
+            yield b
+    finally:
+        stop.set()
+
+
 def wrap_page(pdf, page, prefix: bytes) -> None:
     """Treść strony w `q <prefix> … Q` — odporne na NIEZRÓWNOWAŻONE q/Q w treści.
 
@@ -107,7 +288,7 @@ def wrap_page(pdf, page, prefix: bytes) -> None:
     stanu początkowego (także gdy treść zostawia niezamknięte `q`)."""
     depth, low = 0, 0
     try:
-        for ins in pikepdf.parse_content_stream(page):
+        for ins in pikepdf.parse_content_stream(page, "q Q"):
             o = str(ins.operator)
             if o == "q":
                 depth += 1

@@ -28,6 +28,8 @@ from collections import Counter, defaultdict
 import pikepdf
 from PIL import Image
 
+import pdfutil
+
 Image.MAX_IMAGE_PIXELS = None
 
 MM_PER_PT = 25.4 / 72.0
@@ -108,6 +110,14 @@ class Analyzer:
         self.truncated = False          # budżet się skończył — analiza niepełna
         self.partial = set()            # powody niepełnej analizy: budget | depth | stream (przegląd 09.10, B13)
         self._ops_cache: dict = {}      # objgen formy/wzoru/glifu → sparsowane operatory (przegląd 09.10, B25)
+        # Powtórka formy (28.10): forma użyta drugi raz w tym samym stanie (overprint, przycięcie, maska…)
+        # daje ten sam wynik — dokładamy go bez przechodzenia treści; obrazy z nowym położeniem. Wcześniej
+        # symbol powtórzony 30 000 razy wyczerpywał budżet i reszta pliku zostawała niesprawdzona.
+        self._form_memo: dict = {}      # klucz stanu → (liczniki, Counter-y, obrazy [(…, macierz względna)], group_rgb)
+        self._journals: list = []       # dzienniki formy w pierwszym przejściu: wywołania _image, liczniki obrazów
+        self._img_depth = 0
+        self._memo_hold: list = []      # zasoby bez numeru użyte w kluczu (żeby id się nie powtórzyło)
+        self._pat_hits = 0              # wzory z obrazami (miejsce zależy od malowanego obszaru — bez powtórki)
         self._in_mask = 0               # > 0: wewnątrz formy maski miękkiej (/SMask /G) — jej kolory się nie drukują
         self._mask_seen = set()         # (maska, macierz) już przejrzane
         self._plog = None               # lista (rekord, umiejscowienie) obrazów z bieżącego wzoru
@@ -314,6 +324,36 @@ class Analyzer:
 
     # --- obrazy
     def _image(self, xobj, ctm, resources, name, inline=False, role=None):
+        if self._img_depth:                          # maska obrazu z wnętrza _image — powtórzy ją sam obraz
+            return self._image_body(xobj, ctm, resources, name, inline, role)
+        for j in self._journals:                     # forma w pierwszym przejściu — do powtórki
+            j["imgs"].append((xobj, ctm, resources, name, inline, role))
+        self._img_depth += 1
+        try:
+            if not self._journals:
+                return self._image_body(xobj, ctm, resources, name, inline, role)
+            # liczniki z pierwszego zobaczenia obrazu (kolor, profil, maska) liczą się raz na obraz —
+            # nie wchodzą do różnicy doliczanej przy powtórce formy
+            before = {k: Counter(getattr(self, k)) for k in self._REPLAY_CNT} if self._is_new_image(xobj, inline) else None
+            self._image_body(xobj, ctm, resources, name, inline, role)
+            if before is not None:
+                for k, c0 in before.items():
+                    d = getattr(self, k) - c0
+                    if d:
+                        for j in self._journals:
+                            j["excl"].setdefault(k, Counter()).update(d)
+        finally:
+            self._img_depth -= 1
+
+    def _is_new_image(self, xobj, inline) -> bool:
+        if inline:
+            return True
+        try:
+            return xobj.objgen not in self._img_by_xref
+        except Exception:
+            return True
+
+    def _image_body(self, xobj, ctm, resources, name, inline=False, role=None):
         try:
             key = xobj.objgen if not inline else ("inline", id(xobj))
         except Exception:
@@ -401,8 +441,9 @@ class Analyzer:
                 key = None
         if key is not None and key in self._ops_cache:
             return self._ops_cache[key]
-        ops = [(operands, str(op)) for operands, op in pikepdf.parse_content_stream(container)]
-        if key is not None:
+        # duża treść (miliony operatorów) — strumieniowo, bez listy w pamięci i bez zapamiętywania
+        ops = pdfutil.iter_ops(container)
+        if key is not None and isinstance(ops, list):
             self._ops_cache[key] = ops
         return ops
 
@@ -421,7 +462,8 @@ class Analyzer:
             self.unknown_ops += 1
             self.partial.add("stream")
             return
-        self._budget -= len(ops)
+        if isinstance(ops, list):
+            self._budget -= len(ops)
         # przestrzeń WZORU (pattern) = domyślna przestrzeń tego strumienia (strony albo formy),
         # a nie macierz w chwili `scn` (przegląd kodu 27.09, A9: ppi obrazu we wzorze zawyżone 10×)
         base_ctm = ctm
@@ -618,6 +660,11 @@ class Analyzer:
                             self._clip_in = self._clip_text_in = False
             except Exception:
                 self.unknown_ops += 1
+        if not isinstance(ops, list):
+            self._budget -= getattr(ops, "n", 0)
+            if getattr(ops, "error", None) is not None:
+                self.unknown_ops += 1
+                self.partial.add("stream")
 
     def _form(self, xo, ctm, parent_res, depth, mask=False):
         try:
@@ -640,11 +687,88 @@ class Analyzer:
         if key in self._active_forms:                # forma rysuje samą siebie (cykl) — koniec
             self.unknown_ops += 1
             return
+        ck = self._memo_key(key, xo, parent_res, mask)
+        rec = self._form_memo.get(ck) if ck is not None else None
+        if rec is not None:
+            self._replay(rec, ctm)
+            return
+        snap = self._snap() if ck is not None else None
+        journal = {"imgs": [], "excl": {}}
+        self._journals.append(journal)
         self._active_forms.add(key)
         try:
             self.walk(xo, res, _mul(m, ctm), depth + 1)
         finally:
             self._active_forms.discard(key)
+            self._journals.pop()
+        if snap is not None:
+            rec = self._delta(snap, journal, ctm)
+            if rec is not None:
+                self._form_memo[ck] = rec
+
+    _REPLAY_INT = ("overprint_uses", "clipped_shading", "clipped_shading_text", "heavy_black", "inline_images",
+                   "unknown_ops")
+    _REPLAY_CNT = ("usage", "spots", "devicen", "icc_profiles", "transparency", "fonts")
+
+    def _memo_key(self, key, xo, parent_res, mask):
+        """Stan, od którego zależy wynik formy — ten sam stan = ten sam wynik (poza miejscem obrazów)."""
+        if not isinstance(key, tuple) or tuple(key) == (0, 0):
+            return None
+        pk = None
+        if xo.get("/Resources") is None:             # forma korzysta z zasobów rodzica
+            try:
+                pk = tuple(parent_res.objgen)
+            except Exception:
+                return None
+            if pk == (0, 0):
+                # zasoby bez numeru (zwykle słownik w stronie): ten sam obiekt Pythona przez całe przejście
+                # strony; trzymany w _memo_hold, więc jego id nie trafi się innemu słownikowi
+                pk = ("id", id(parent_res))
+                self._memo_hold.append(parent_res)
+        try:
+            ov = tuple(sorted(self._ov_in.items()))
+        except Exception:
+            return None
+        return (tuple(key), pk, ov, round(float(self._lw_in), 3), self._clip_in, self._clip_text_in,
+                self._in_mask, mask)
+
+    def _snap(self):
+        return ({k: getattr(self, k) for k in self._REPLAY_INT}, {k: Counter(getattr(self, k)) for k in self._REPLAY_CNT},
+                len(self.white_op), len(self.partial), self.truncated, self._pat_hits, self.group_rgb)
+
+    def _delta(self, snap, journal, ctm):
+        ints0, cnts0, nwhite, npart, trunc, pats, grgb = snap
+        # biel z overprintem i obrazy wzorów mają położenie z malowanego kształtu; niepełne przejście —
+        # nie wiadomo, co pominięto: takiej formy nie powtarzamy
+        if len(self.white_op) != nwhite or len(self.partial) != npart or self.truncated != trunc or self._pat_hits != pats:
+            return None
+        imgs = []
+        if journal["imgs"]:
+            inv = _inv(ctm)
+            if inv is None:
+                return None
+            imgs = [(xobj, _mul(a, inv), res, name, inline, role) for xobj, a, res, name, inline, role in journal["imgs"]]
+        ints = {k: getattr(self, k) - v for k, v in ints0.items() if getattr(self, k) != v}
+        cnts = {}
+        for k, c0 in cnts0.items():
+            d = getattr(self, k) - c0 - journal["excl"].get(k, Counter())
+            if k == "transparency":
+                d.pop("grupa przezroczystości", None)    # liczona raz na formę, nie na użycie
+            if d:
+                cnts[k] = d
+        return ints, cnts, imgs, (self.group_rgb and not grgb)
+
+    def _replay(self, rec, ctm):
+        ints, cnts, imgs, grgb = rec
+        for k, v in ints.items():
+            setattr(self, k, getattr(self, k) + v)
+        for k, d in cnts.items():
+            getattr(self, k).update(d)
+        if grgb:
+            self.group_rgb = True
+        for xobj, rel, res, name, inline, role in imgs:
+            self._image(xobj, _mul(rel, ctm), res, name, inline, role)
+        self._budget -= len(imgs) + 1
 
     def _group_rgb(self, grp, res) -> bool:
         try:
@@ -659,6 +783,7 @@ class Analyzer:
         poprawia umiejscowienie, kolejne dokładają nowe (do 200 na wzór)."""
         if not box or not isinstance(box, list):
             return
+        self._pat_hits += 1
         bx0, by0, bx1, by1 = self.page_box
         for rec, p in entry["items"]:
             q = p if not entry["used"] else dict(p)
@@ -784,6 +909,8 @@ class Analyzer:
                 items = self._plog
             finally:
                 self._plog = outer
+            if items:
+                self._pat_hits += 1
             if outer is not None:
                 outer.extend(items)
             # obrazy wzoru — ich miejsce na stronie ustali dopiero malowanie (_pattern_area)
@@ -902,6 +1029,16 @@ def _mul(m, n):
             e * a2 + f * c2 + e2, e * b2 + f * d2 + f2]
 
 
+def _inv(m):
+    """Odwrotność macierzy PDF; None dla zdegenerowanej (skala 0)."""
+    a, b, c, d, e, f = (float(x) for x in m)
+    det = a * d - b * c
+    if abs(det) < 1e-12:
+        return None
+    ia, ib, ic, id_ = d / det, -b / det, -c / det, a / det
+    return [ia, ib, ic, id_, -(e * ia + f * ic), -(e * ib + f * id_)]
+
+
 # ----------------------------------------------------------------------------
 # PDF
 # ----------------------------------------------------------------------------
@@ -981,6 +1118,8 @@ def flat_image(path: str, page: int | None) -> dict | None:
                 return None
             res = pg.obj.get("/Resources")
             xo = res.get("/XObject") if res is not None else None
+            if pdfutil._raw_length(pg) > 100_000:     # sam obraz to kilka operatorów — duża treść to nie to
+                return None
             ctm, stack, found = [1, 0, 0, 1, 0, 0], [], None
             for operands, op in pikepdf.parse_content_stream(pg):
                 o = str(op)

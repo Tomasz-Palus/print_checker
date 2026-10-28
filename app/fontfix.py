@@ -49,19 +49,61 @@ _WEIGHTS = [  # najdłuższe najpierw — „extrabold" zanim „bold"
 # --------------------------------------------------------------------------------------
 # 1. czy tekst się drukuje
 # --------------------------------------------------------------------------------------
+# Tylko operatory tekstu i form: reszta (ścieżki — w dużych plikach miliony) nie jest nawet budowana
+# jako obiekty Pythona (28.10: płaska treść 8 mln operatorów — 1,5 s zamiast minut i gigabajtów).
+TEXT_OPS = "q Q Tr Tf Tj TJ ' \" Do"
+
+
+def _res_key(container, resources, hold: list):
+    """Klucz pamięci formy / wzoru / glifu: ten sam strumień z tymi samymi zasobami = ten sam wynik.
+    Zasoby bez numeru obiektu (słownik w stronie) — po tożsamości obiektu Pythona; trzymamy go w `hold`,
+    żeby jego id nie dostał inny słownik. None — klucza nie ma."""
+    try:
+        ck = tuple(container.objgen)
+        if ck == (0, 0):
+            return None
+        if container.get("/Resources") is not None or resources is None:
+            return (ck, None)
+        rk = tuple(resources.objgen)
+        if rk == (0, 0):
+            hold.append(resources)
+            rk = ("id", id(resources))
+        return (ck, rk)
+    except Exception:
+        return None
+
+
 def text_usage(path: str, page: int | None = None) -> dict:
     """{nazwa fontu: {"widoczne": n, "niewidoczne": m}} — liczba operatorów pokazujących
     tekst, z podziałem na tryb widoczny i niewidoczny (Tr 3 = niewidoczny, Tr 7 = tylko
-    maska przycięcia — oba nie zostawiają farby). `page` — tylko ta strona (None = wszystkie)."""
-    out: dict = {}
+    maska przycięcia — oba nie zostawiają farby). `page` — tylko ta strona (None = wszystkie).
+    Forma użyta wiele razy jest czytana raz (28.10: symbol 30 000 razy — 67 s), wynik mnożony."""
+    memo: dict = {}
+    hold: list = []
+
+    def add(out, part, k=1):
+        for f, e in part.items():
+            d = out.setdefault(f, {"widoczne": 0, "niewidoczne": 0})
+            d["widoczne"] += e["widoczne"] * k
+            d["niewidoczne"] += e["niewidoczne"] * k
+
+    def sub(x, res, depth, seen):
+        key = _res_key(x, res, hold)
+        if key is not None and key in memo:
+            return memo[key]
+        part = walk(x, res, depth, seen | {x.objgen})
+        if key is not None:
+            memo[key] = part
+        return part
 
     def walk(container, resources, depth, seen):
+        out: dict = {}
         if depth > 10:
-            return
+            return out
         try:
-            ops = pikepdf.parse_content_stream(container)
+            ops = pikepdf.parse_content_stream(container, TEXT_OPS)
         except Exception:
-            return
+            return out
         tr, font, stack = 0, None, []
         fonts = resources.get("/Font") if resources is not None else None
         for operands, op in ops:
@@ -87,19 +129,21 @@ def text_usage(path: str, page: int | None = None) -> dict:
                     x = xo[operands[0]]
                     if str(x.get("/Subtype", "")) != "/Form" or x.objgen in seen:
                         continue
-                    walk(x, x.get("/Resources") or resources, depth + 1, seen | {x.objgen})
+                    add(out, sub(x, x.get("/Resources") or resources, depth + 1, seen))
             except Exception:
                 continue
         # wzory i glify Type3 z zasobów tej treści też rysują tekst (przegląd 09.10, B11)
         for st, res in _sub_streams(resources):
             if st.objgen not in seen:
-                walk(st, res, depth + 1, seen | {st.objgen})
+                add(out, sub(st, res, depth + 1, seen))
+        return out
 
+    total: dict = {}
     with pikepdf.open(path) as pdf:
         for i, pg in enumerate(pdf.pages):
             if page is None or i == page:
-                walk(pg, pg.obj.get("/Resources"), 0, frozenset())
-    return out
+                add(total, walk(pg, pg.obj.get("/Resources"), 0, frozenset()))
+    return total
 
 
 def _base(fd) -> str:
@@ -403,12 +447,20 @@ def _used_codes(pdf, target_objgens: set) -> dict:
     """Kody faktycznie użyte w tekście dla wskazanych fontów — sprawdzamy tylko te litery,
     które stoją w pliku (font nie musi mieć całego alfabetu)."""
     used: dict = {}
+    done: set = set()                    # forma raz — kolejne użycia nie dadzą nowych liter (28.10)
+    hold: list = []
 
     def walk(container, resources, depth, seen):
         if depth > 10:
             return
+        if not isinstance(container, pikepdf.Page):
+            key = _res_key(container, resources, hold)
+            if key is not None:
+                if key in done:
+                    return
+                done.add(key)
         try:
-            ops = pikepdf.parse_content_stream(container)
+            ops = pikepdf.parse_content_stream(container, TEXT_OPS)
         except Exception:
             return
         fonts = resources.get("/Font") if resources is not None else None
