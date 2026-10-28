@@ -1384,3 +1384,73 @@ Numery jak w `18_przeglad_kodu.md`.
 - `narzedzia/test_projektu.py` — test „jak użytkownik” na folderze projektów (API działającego serwera): kroki,
   czasy, niezależne sprawdzenie pliku do druku i porównanie wyglądu z oryginałem. Przebieg na 12 projektach Tomasza
   (27.10): bez wywrotek; każdy plik do druku — 1 strona, sam CMYK, bez overprintu, tekst na krzywych.
+
+## 0.6.12 — testy syntetyczne, szablon, szybsze spłaszczenie, fonty, duże pliki (28.10)
+
+- Testy na własnych plikach z błędami (`narzedzia/testy_syntetyczne`, opis w README tam):
+  - szablon: pełny, przesunięty o 3 mm, w formie, pod grafiką (ukryty), skala 1:10 — znaleziony cały
+    (2 ramki + 3 napisy), po usunięciu projekt = czysty co do piksela; stopka klienta przy „Linia cięcia”
+    zostaje; szablon innego produktu i sama czerwona ramka → „obce ramki”; szablon w pikselach → wykryty;
+  - wymiar i obrazy: 25/25 (spady z TrimBox i bez, 200 %, złe proporcje, tło z krawędzi, odbicie, obrót,
+    /Rotate, UserUnit > 5 m z powrotem przy pobraniu, 1:10, JPG 150 dpi, TIFF 2 strony, PNG z alfą, JPG
+    CMYK, TIFF 16 bit, .ai);
+  - cofanie i kolejność kroków, ten sam krok dwa razy, pobranie innej wersji (409) — w porządku.
+- Poprawka: gruby pas w kolorze wytycznych przy krawędzi (cyjanowy pasek projektu, 80 mm) był brany
+  za „obcą ramkę szablonu” i szedł do „Usuń te ramki”. Teraz obca ramka to ramka dookoła strony albo
+  cienka linia (`frames._edge_frame`).
+- **Szybsze spłaszczenie** (użytkownicy mają przeważnie słabe komputery — mniej pracy, nie więcej
+  rdzeni). Do tej pory spłaszczenie zawsze liczyło stronę 2× większą (nadpróbkowanie) z powodu gradientów
+  obciętych tekstem/krzywą — Ghostscript nie wygładza krawędzi przycięcia. Teraz analiza liczy takie
+  miejsca (`clipped_shading`, `clipped_shading_text`), a nadpróbkowanie 2× zostaje tylko dla gradientu
+  w literach (tam ząbki widać) albo dla małych wydruków (≤ 60 Mpx — szybkie i tak). Reszta: zwykłe
+  wygładzanie Ghostscripta. Czasy (kontener Claude'a):
+
+  | plik | przed | po |
+  |---|---|---|
+  | adWall 400 (21 MB zdjęć z maskami) | ~800 s | 179 s |
+  | SOFT_BAG | 39,5 s | 10 s |
+  | strony | 13–18 s | 5 s |
+  | gradient w literach (2× zostaje) | — | 1 s |
+
+  Wygląd vs oryginał w symulacji druku bez zmian (p99 6–11, w tym zamierzone poprawki).
+- **Fonty wpisane wprost w stronę** (słownik fontu bez osobnego obiektu — rzadkie, ale bywa z generatorów)
+  nie dawały się osadzić. Teraz kopia pliku z takimi fontami jako osobnymi obiektami i osadzanie jak
+  zwykle (`fontfix._indirect_fonts`; także w formach, wzorkach i fontach Type3).
+- Przybliżanie na ciężkich plikach: **bez liczenia w tle** zaraz po wgraniu — na słabym komputerze
+  zajęłoby procesor na minuty, gdy użytkownik robi co innego. Zostaje liczenie na żądanie (kafle).
+- **Analiza bardzo dużych plików — pełna** (ograniczenie z przeglądu 09.10, B13: po 5 mln operatorów
+  reszta pliku zostawała niesprawdzona, z ostrzeżeniem „analiza niepełna”). Pliki testowe
+  `narzedzia/testy_syntetyczne/gen_duze.py` — na końcu treści RGB, overprint i nieosadzony font:
+
+  | plik | przed | po |
+  |---|---|---|
+  | D1 symbol (400 operatorów) × 30 000 | 75 s, **niepełna** | 9 s, pełna |
+  | D2 formy 100 × 100 × symbol 1000 | 61 s, **niepełna** | 6 s, pełna |
+  | D4 symbol z obrazem × 20 000 | 39 s, **niepełna** | 6 s, pełna (20 000 miejsc obrazu) |
+  | D3 płaska treść, 800 000 kształtów (8,8 mln operatorów) | 292 s, **12 GB pamięci** | 121 s, 0,7 GB |
+
+  Co zmienione:
+  - **Powtórka formy** (`analyze._form`): forma użyta drugi raz w tym samym stanie (overprint,
+    przycięcie, maska, zasoby) nie jest przechodzona od nowa — liczniki z pierwszego przejścia dodane
+    jeszcze raz, obrazy z położeniem przeliczonym macierzą. Bez powtórki: forma z bielą z overprintem,
+    wzór z obrazami, przejście niepełne.
+  - **Czytanie dużej treści strumieniowo** (`pdfutil.iter_ops`, treść > 512 KB spakowana): pełna lista
+    operatorów to ok. 1 GB na milion — duża treść jest czytana w osobnym wątku, kawałkami (pamięć stała).
+  - **Wykrywanie szablonu przy wgraniu** (`frames._Walker`, podpowiedzi produktu): też powtórka formy —
+    kształty i napisy przenoszone macierzą (dokładnie przy przesunięciu, skali, odbiciu i obrocie o 90°;
+    inny obrót — przejście od nowa). D1: wgranie stało ok. 5 min na tym kroku, teraz 1,2 s.
+  - Powtórka sprawdzona ze starym kodem na plikach `powtorki` (symbol z napisem, obrazem z SMask, maską
+    miękką, grupą RGB, bielą z overprintem, wzorem z obrazem, raz w overprincie raz bez; obroty 0/30/90/180°,
+    odbicia): kształty, napisy, miejsca obrazów i cała analiza — identyczne.
+  - **Fonty** (`fontfix.text_usage`, `_used_codes`): czytane tylko operatory tekstu (filtr pikepdf),
+    każda forma raz — D1: 67 s → poniżej 1 s.
+  - Sprawdzone na 36 projektach (prawdziwe i syntetyczne): wynik analizy i wykrywania szablonu
+    identyczny jak przed zmianą.
+  - **„Popraw czerń” i usuwanie ukrytych warstw** (przy wgraniu) przepisują treść kawałkami
+    (`pdfutil.Writer`): na D3 stara „Popraw czerń” zajęła 14 GB i system zabił program; teraz strumieniowo.
+    Wynik sprawdzony ze starym kodem (czerń 4 × 100 %, Registration, obrazy w treści, forma, ukryta
+    warstwa — także z wymuszonym czytaniem strumieniowym): treść identyczna co do operatora.
+  - Ghostscript (kolory, krzywe, spłaszczenie) liczy taki plik sam — 2–4 min na D1–D3. Jeden kształt
+    z milionami krzywych (pierwsza wersja D3) przekracza limit 15 min; program zgłasza to czytelnie.
+- Sprawdzone i odrzucone: wykrywanie powiększonych obrazów 1-bitowych (piksele schodkami). Kody QR
+  (moduły po 8–20 px) wyglądają dokładnie tak samo — program fałszywie mówiłby „zła jakość” na każdym QR.

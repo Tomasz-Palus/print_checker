@@ -16,6 +16,8 @@ import os
 
 import pikepdf
 
+import pdfutil
+
 MM = 25.4 / 72.0
 
 # Kolory, którymi Adsystem rysuje wytyczne (100 % cyanu oraz 0/94,7/91,2/0), na ekranie:
@@ -42,6 +44,14 @@ def _apply(m, x, y):
     return m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]
 
 
+def _inv(m):
+    det = m[0] * m[3] - m[1] * m[2]
+    if abs(det) < 1e-12:
+        return None
+    a, b, c, d = m[3] / det, -m[1] / det, -m[2] / det, m[0] / det
+    return [a, b, c, d, -(m[4] * a + m[5] * c), -(m[4] * b + m[5] * d)]
+
+
 def _cmyk_rgb(c, m, y, k):
     return tuple(max(0.0, 1 - min(1.0, v + k)) for v in (c, m, y))
 
@@ -54,7 +64,46 @@ class _Walker:
 
     def __init__(self):
         self.shapes, self.texts = [], []
+        self._tinfo = []        # do każdego napisu: (wielkość bez macierzy, 1. wiersz macierzy) — do powtórki
         self._dec = {}
+        # Powtórka formy (28.10): symbol użyty 30 000 razy był przechodzony 30 000 razy (minuty przy
+        # wgraniu). Kształty i napisy z pierwszego przejścia przenosimy macierzą — dokładnie, gdy przeniesienie
+        # nie obraca o kąt inny niż 90° (prostokąt kształtu zostaje prostokątem); inaczej przejście od nowa.
+        self._memo, self._hold = {}, []
+
+    def _memo_key(self, xo, resources, depth):
+        try:
+            ck = tuple(xo.objgen)
+            if ck == (0, 0):
+                return None
+            if xo.get("/Resources") is not None or resources is None:
+                return (ck, None, depth)
+            rk = tuple(resources.objgen)
+            if rk == (0, 0):
+                self._hold.append(resources)          # id nie trafi się innemu słownikowi
+                rk = ("id", id(resources))
+            return (ck, rk, depth)
+        except Exception:
+            return None
+
+    def _replay(self, rec, c2) -> bool:
+        c1, shapes, texts = rec
+        inv = _inv(c1)
+        if inv is None:
+            return False
+        t = _mul(inv, c2)
+        if not (abs(t[1]) < 1e-9 and abs(t[2]) < 1e-9) and not (abs(t[0]) < 1e-9 and abs(t[3]) < 1e-9):
+            return False
+        for r in shapes:
+            ax, ay = _apply(t, r["x0"], r["y0"])
+            bx, by = _apply(t, r["x1"], r["y1"])
+            self.shapes.append({**r, "x0": min(ax, bx), "y0": min(ay, by), "x1": max(ax, bx), "y1": max(ay, by)})
+        for r, k, (r0, r1) in texts:
+            x, y = _apply(t, r["x"], r["y"])
+            n0, n1 = r0 * t[0] + r1 * t[2], r0 * t[1] + r1 * t[3]
+            self.texts.append({**r, "x": x, "y": y, "size_pt": k * math.hypot(n0, n1)})
+            self._tinfo.append((k, (n0, n1)))
+        return True
 
     def decoder(self, resources, name):
         """Jak zamienić bajty z Tj/TJ na litery w danym foncie. Font Identity-H (np. tekst
@@ -96,7 +145,7 @@ class _Walker:
         if depth > 8:
             return
         try:
-            ops = list(pikepdf.parse_content_stream(container))
+            ops = pdfutil.iter_ops(container)          # duża treść — strumieniowo (28.10)
         except Exception:
             return
         stack, fill, stroke, width = [], (0.0,) * 3, (0.0,) * 3, 1.0
@@ -191,6 +240,7 @@ class _Walker:
                         self.texts.append({"tekst": txt, "x": (t_pos or (0, 0))[0], "y": (t_pos or (0, 0))[1],
                                            "size_pt": t_size * t_scale * math.hypot(ctm[0], ctm[1]),
                                            "owner": owner, "index": t_start, "end": i})
+                        self._tinfo.append((t_size * t_scale, (ctm[0], ctm[1])))
                     t_start, t_txt, t_pos = None, [], None
                 elif o == "Do":
                     xod = resources.get("/XObject") if resources is not None else None
@@ -202,7 +252,15 @@ class _Walker:
                     m = xo.get("/Matrix")
                     c2 = _mul([float(v) for v in m], ctm) if m is not None else ctm
                     oid = list(xo.objgen) if tuple(xo.objgen) != (0, 0) else owner
+                    key = self._memo_key(xo, resources, depth + 1)
+                    rec = self._memo.get(key) if key is not None else None
+                    if rec is not None and self._replay(rec, c2):
+                        continue
+                    ns, nt = len(self.shapes), len(self.texts)
                     self.run(xo, xo.get("/Resources") or resources, c2, depth + 1, owner=oid)
+                    if key is not None and rec is None:
+                        self._memo[key] = (c2, self.shapes[ns:], list(zip(self.texts[nt:], [k for k, _ in self._tinfo[nt:]],
+                                                                       [r for _, r in self._tinfo[nt:]])))
             except Exception:
                 continue
 
@@ -354,8 +412,14 @@ def _text_like(tpl: str, mine: str) -> bool:
 
 
 def _edge_frame(z, W, H) -> bool:
-    """Ramka/pas przy krawędzi: prawie cała szerokość albo wysokość, przy brzegu."""
+    """Ramka/linia przy krawędzi: prawie cała szerokość albo wysokość, przy brzegu — i kształt ramki
+    (obejmuje stronę w obu osiach) albo cienkiej linii. Gruby pas w kolorze wytycznych (cyjanowy pasek
+    projektu, 80 mm u góry) to grafika, nie szablon — dawniej szedł do „Usuń te ramki” (test 28.10)."""
     if not (z["w"] >= W * 0.8 or z["h"] >= H * 0.8):
+        return False
+    frame = z["w"] >= W * 0.5 and z["h"] >= H * 0.5
+    thin = min(z["w"], z["h"]) <= max(6.0, 0.005 * max(W, H))
+    if not (frame or thin):
         return False
     return min(z["x"], z["y"], W - z["x"] - z["w"], H - z["y"] - z["h"]) <= max(60.0, 0.06 * max(W, H))
 

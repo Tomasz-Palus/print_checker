@@ -28,6 +28,8 @@ from collections import Counter, defaultdict
 import pikepdf
 from PIL import Image
 
+import pdfutil
+
 Image.MAX_IMAGE_PIXELS = None
 
 MM_PER_PT = 25.4 / 72.0
@@ -89,6 +91,13 @@ class Analyzer:
         self.overprint_uses = 0
         self.white_op = []              # biały z overprintem — w druku znika: [x0,y0,x1,y1] w pt strony
         self._ov_in = {}                # stan overprintu przekazywany do formy
+        # Gradient przycięty kształtem (litery, krzywe) albo kształt wypełniony wzorem gradientowym —
+        # Ghostscript nie wygładza krawędzi przycięcia nawet z AlphaBits; spłaszczenie liczy wtedy z
+        # nadpróbkowaniem (steps.step_flatten, 28.10). Kontrakt `clipped_shading`.
+        self.clipped_shading = 0
+        self.clipped_shading_text = 0   # …w tym gradient w LITERACH (przycięcie tekstem, tekst wypełniony wzorem)
+        self._clip_in = False
+        self._clip_text_in = False
         self.heavy_black = 0            # jednolite czernie ponad limit farby (CMYK / Registration) — da się poprawić
         self._lw_in = 1.0               # grubość linii przekazywana do formy
         self.transparency = Counter()   # rodzaj -> liczba
@@ -101,6 +110,14 @@ class Analyzer:
         self.truncated = False          # budżet się skończył — analiza niepełna
         self.partial = set()            # powody niepełnej analizy: budget | depth | stream (przegląd 09.10, B13)
         self._ops_cache: dict = {}      # objgen formy/wzoru/glifu → sparsowane operatory (przegląd 09.10, B25)
+        # Powtórka formy (28.10): forma użyta drugi raz w tym samym stanie (overprint, przycięcie, maska…)
+        # daje ten sam wynik — dokładamy go bez przechodzenia treści; obrazy z nowym położeniem. Wcześniej
+        # symbol powtórzony 30 000 razy wyczerpywał budżet i reszta pliku zostawała niesprawdzona.
+        self._form_memo: dict = {}      # klucz stanu → (liczniki, Counter-y, obrazy [(…, macierz względna)], group_rgb)
+        self._journals: list = []       # dzienniki formy w pierwszym przejściu: wywołania _image, liczniki obrazów
+        self._img_depth = 0
+        self._memo_hold: list = []      # zasoby bez numeru użyte w kluczu (żeby id się nie powtórzyło)
+        self._pat_hits = 0              # wzory z obrazami (miejsce zależy od malowanego obszaru — bez powtórki)
         self._in_mask = 0               # > 0: wewnątrz formy maski miękkiej (/SMask /G) — jej kolory się nie drukują
         self._mask_seen = set()         # (maska, macierz) już przejrzane
         self._plog = None               # lista (rekord, umiejscowienie) obrazów z bieżącego wzoru
@@ -307,6 +324,36 @@ class Analyzer:
 
     # --- obrazy
     def _image(self, xobj, ctm, resources, name, inline=False, role=None):
+        if self._img_depth:                          # maska obrazu z wnętrza _image — powtórzy ją sam obraz
+            return self._image_body(xobj, ctm, resources, name, inline, role)
+        for j in self._journals:                     # forma w pierwszym przejściu — do powtórki
+            j["imgs"].append((xobj, ctm, resources, name, inline, role))
+        self._img_depth += 1
+        try:
+            if not self._journals:
+                return self._image_body(xobj, ctm, resources, name, inline, role)
+            # liczniki z pierwszego zobaczenia obrazu (kolor, profil, maska) liczą się raz na obraz —
+            # nie wchodzą do różnicy doliczanej przy powtórce formy
+            before = {k: Counter(getattr(self, k)) for k in self._REPLAY_CNT} if self._is_new_image(xobj, inline) else None
+            self._image_body(xobj, ctm, resources, name, inline, role)
+            if before is not None:
+                for k, c0 in before.items():
+                    d = getattr(self, k) - c0
+                    if d:
+                        for j in self._journals:
+                            j["excl"].setdefault(k, Counter()).update(d)
+        finally:
+            self._img_depth -= 1
+
+    def _is_new_image(self, xobj, inline) -> bool:
+        if inline:
+            return True
+        try:
+            return xobj.objgen not in self._img_by_xref
+        except Exception:
+            return True
+
+    def _image_body(self, xobj, ctm, resources, name, inline=False, role=None):
         try:
             key = xobj.objgen if not inline else ("inline", id(xobj))
         except Exception:
@@ -394,8 +441,9 @@ class Analyzer:
                 key = None
         if key is not None and key in self._ops_cache:
             return self._ops_cache[key]
-        ops = [(operands, str(op)) for operands, op in pikepdf.parse_content_stream(container)]
-        if key is not None:
+        # duża treść (miliony operatorów) — strumieniowo, bez listy w pamięci i bez zapamiętywania
+        ops = pdfutil.iter_ops(container)
+        if key is not None and isinstance(ops, list):
             self._ops_cache[key] = ops
         return ops
 
@@ -414,7 +462,8 @@ class Analyzer:
             self.unknown_ops += 1
             self.partial.add("stream")
             return
-        self._budget -= len(ops)
+        if isinstance(ops, list):
+            self._budget -= len(ops)
         # przestrzeń WZORU (pattern) = domyślna przestrzeń tego strumienia (strony albo formy),
         # a nie macierz w chwili `scn` (przegląd kodu 27.09, A9: ppi obrazu we wzorze zawyżone 10×)
         base_ctm = ctm
@@ -434,8 +483,13 @@ class Analyzer:
         pat_fill = pat_stroke = None
         t3 = None                              # bieżący font Type3 (Tf)
         in_mask = self._in_mask
+        clip_shaped = self._clip_in            # przycięcie nieprostokątne (krzywe, ukos, litery)
+        clip_text = self._clip_text_in         # …z liter
+        path_shaped = text_clip = pat_shading = False
         for operands, o in ops:
             try:
+                if o in ("c", "v", "y", "l"):
+                    path_shaped = True
                 if o in ("m", "l", "c", "v", "y", "re"):
                     # obrys ścieżki potrzebny tylko dla bieli z overprintem i obszaru wzoru —
                     # poza tym wystarczy wiedzieć, że ścieżka jest (przegląd 09.10, B25)
@@ -455,7 +509,16 @@ class Analyzer:
                 if o == "w":
                     lw = float(operands[0])
                     continue
+                if o in ("W", "W*"):
+                    if path_shaped:
+                        clip_shaped = True
+                    continue
                 if o in ("f", "F", "f*", "B", "B*", "b", "b*", "S", "s", "n"):
+                    if pat_shading and o not in ("S", "s", "n"):
+                        self.clipped_shading += 1
+                        if clip_text:
+                            self.clipped_shading_text += 1
+                    path_shaped = False
                     if pbox is not None and o != "n":
                         fills, strokes = o not in ("S", "s"), o not in ("f", "F", "f*")
                         if fills and fill_dirty:
@@ -476,6 +539,11 @@ class Analyzer:
                                     self._white_hit(pbox)
                     pbox = None
                     continue
+                if o in ("Tj", "TJ", "'", '"') and tr >= 4:
+                    text_clip = True                     # tekst jako przycięcie — działa od ET
+                if o in ("Tj", "TJ", "'", '"') and pat_shading and tr in (0, 2, 4, 6):
+                    self.clipped_shading += 1
+                    self.clipped_shading_text += 1
                 if o in ("Tj", "TJ", "'", '"') and tr not in (3, 7):
                     fills = tr in (0, 2, 4, 6)
                     if fills and fill_dirty:
@@ -498,6 +566,8 @@ class Analyzer:
                     tr = int(operands[0])
                 elif o == "BT":
                     tm = [1, 0, 0, 1, 0, 0]
+                elif o == "ET" and text_clip:
+                    clip_shaped, clip_text, text_clip = True, True, False
                 elif o == "Tm":
                     tm = [float(x) for x in operands]
                 elif o in ("Td", "TD"):
@@ -505,27 +575,33 @@ class Analyzer:
                           tm[5] + float(operands[0]) * tm[1] + float(operands[1]) * tm[3]]
                 if o == "q":
                     stack.append((ctm, fill_cs, stroke_cs, dict(ov), fill_v, stroke_v, lw,
-                                  fill_dirty, stroke_dirty, pat_fill, pat_stroke))
+                                  fill_dirty, stroke_dirty, pat_fill, pat_stroke, clip_shaped, pat_shading, clip_text))
                 elif o == "Q":
                     if stack:
                         (ctm, fill_cs, stroke_cs, ov, fill_v, stroke_v, lw,
-                         fill_dirty, stroke_dirty, pat_fill, pat_stroke) = stack.pop()
+                         fill_dirty, stroke_dirty, pat_fill, pat_stroke, clip_shaped, pat_shading, clip_text) = stack.pop()
                 elif o == "cm":
                     m = [float(x) for x in operands]
                     ctm = _mul(m, ctm)
                 elif o in ("g", "rg", "k"):
                     fill_cs = {"family": {"g": "Gray", "rg": "RGB", "k": "CMYK"}[o]}; self._record(fill_cs, "fill")
-                    fill_v = _nums(operands); fill_dirty = False; pat_fill = None
+                    fill_v = _nums(operands); fill_dirty = False; pat_fill = None; pat_shading = False
                 elif o in ("G", "RG", "K"):
                     stroke_cs = {"family": {"G": "Gray", "RG": "RGB", "K": "CMYK"}[o]}; self._record(stroke_cs, "stroke")
                     stroke_v = _nums(operands); stroke_dirty = False; pat_stroke = None
                 elif o == "cs":
                     fill_cs = self.classify(operands[0], resources); fill_v = [0.0]; fill_dirty = True; pat_fill = None
+                    pat_shading = False
                 elif o == "CS":
                     stroke_cs = self.classify(operands[0], resources); stroke_v = [0.0]; stroke_dirty = True; pat_stroke = None
                 elif o in ("sc", "scn"):
                     fill_v = _nums(operands); fill_dirty = False
                     if fill_cs.get("family") == "Pattern":
+                        try:                             # wzór gradientowy (PatternType 2) — wypełniony kształt
+                            pd = resources.get("/Pattern") if resources is not None else None
+                            pat_shading = bool(pd is not None and operands and int(pd[operands[-1]].get("/PatternType", 1)) == 2)
+                        except Exception:
+                            pat_shading = False
                         if fill_cs.get("base"):          # wzór bezbarwny (PaintType 2): kolor z bazy
                             self._record(fill_cs["base"], "fill")
                         pat_fill = self._pattern(operands, resources, base_ctm, "fill", depth)
@@ -540,6 +616,10 @@ class Analyzer:
                     else:
                         self._record(stroke_cs, "stroke")
                 elif o == "sh":
+                    if clip_shaped:
+                        self.clipped_shading += 1
+                        if clip_text:
+                            self.clipped_shading_text += 1
                     shd = resources.get("/Shading") if resources is not None else None
                     if shd is not None and operands[0] in shd:
                         self._record(self.classify(shd[operands[0]].get("/ColorSpace"), resources), "shading")
@@ -571,13 +651,20 @@ class Analyzer:
                     elif st == "/Form":
                         self._ov_in = dict(ov)          # forma dziedziczy stan overprintu i grubość linii
                         self._lw_in = lw
+                        self._clip_in, self._clip_text_in = clip_shaped, clip_text     # …i przycięcie
                         try:
                             self._form(xo, ctm, resources, depth)
                         finally:
                             self._ov_in = {}
                             self._lw_in = 1.0
+                            self._clip_in = self._clip_text_in = False
             except Exception:
                 self.unknown_ops += 1
+        if not isinstance(ops, list):
+            self._budget -= getattr(ops, "n", 0)
+            if getattr(ops, "error", None) is not None:
+                self.unknown_ops += 1
+                self.partial.add("stream")
 
     def _form(self, xo, ctm, parent_res, depth, mask=False):
         try:
@@ -600,11 +687,88 @@ class Analyzer:
         if key in self._active_forms:                # forma rysuje samą siebie (cykl) — koniec
             self.unknown_ops += 1
             return
+        ck = self._memo_key(key, xo, parent_res, mask)
+        rec = self._form_memo.get(ck) if ck is not None else None
+        if rec is not None:
+            self._replay(rec, ctm)
+            return
+        snap = self._snap() if ck is not None else None
+        journal = {"imgs": [], "excl": {}}
+        self._journals.append(journal)
         self._active_forms.add(key)
         try:
             self.walk(xo, res, _mul(m, ctm), depth + 1)
         finally:
             self._active_forms.discard(key)
+            self._journals.pop()
+        if snap is not None:
+            rec = self._delta(snap, journal, ctm)
+            if rec is not None:
+                self._form_memo[ck] = rec
+
+    _REPLAY_INT = ("overprint_uses", "clipped_shading", "clipped_shading_text", "heavy_black", "inline_images",
+                   "unknown_ops")
+    _REPLAY_CNT = ("usage", "spots", "devicen", "icc_profiles", "transparency", "fonts")
+
+    def _memo_key(self, key, xo, parent_res, mask):
+        """Stan, od którego zależy wynik formy — ten sam stan = ten sam wynik (poza miejscem obrazów)."""
+        if not isinstance(key, tuple) or tuple(key) == (0, 0):
+            return None
+        pk = None
+        if xo.get("/Resources") is None:             # forma korzysta z zasobów rodzica
+            try:
+                pk = tuple(parent_res.objgen)
+            except Exception:
+                return None
+            if pk == (0, 0):
+                # zasoby bez numeru (zwykle słownik w stronie): ten sam obiekt Pythona przez całe przejście
+                # strony; trzymany w _memo_hold, więc jego id nie trafi się innemu słownikowi
+                pk = ("id", id(parent_res))
+                self._memo_hold.append(parent_res)
+        try:
+            ov = tuple(sorted(self._ov_in.items()))
+        except Exception:
+            return None
+        return (tuple(key), pk, ov, round(float(self._lw_in), 3), self._clip_in, self._clip_text_in,
+                self._in_mask, mask)
+
+    def _snap(self):
+        return ({k: getattr(self, k) for k in self._REPLAY_INT}, {k: Counter(getattr(self, k)) for k in self._REPLAY_CNT},
+                len(self.white_op), len(self.partial), self.truncated, self._pat_hits, self.group_rgb)
+
+    def _delta(self, snap, journal, ctm):
+        ints0, cnts0, nwhite, npart, trunc, pats, grgb = snap
+        # biel z overprintem i obrazy wzorów mają położenie z malowanego kształtu; niepełne przejście —
+        # nie wiadomo, co pominięto: takiej formy nie powtarzamy
+        if len(self.white_op) != nwhite or len(self.partial) != npart or self.truncated != trunc or self._pat_hits != pats:
+            return None
+        imgs = []
+        if journal["imgs"]:
+            inv = _inv(ctm)
+            if inv is None:
+                return None
+            imgs = [(xobj, _mul(a, inv), res, name, inline, role) for xobj, a, res, name, inline, role in journal["imgs"]]
+        ints = {k: getattr(self, k) - v for k, v in ints0.items() if getattr(self, k) != v}
+        cnts = {}
+        for k, c0 in cnts0.items():
+            d = getattr(self, k) - c0 - journal["excl"].get(k, Counter())
+            if k == "transparency":
+                d.pop("grupa przezroczystości", None)    # liczona raz na formę, nie na użycie
+            if d:
+                cnts[k] = d
+        return ints, cnts, imgs, (self.group_rgb and not grgb)
+
+    def _replay(self, rec, ctm):
+        ints, cnts, imgs, grgb = rec
+        for k, v in ints.items():
+            setattr(self, k, getattr(self, k) + v)
+        for k, d in cnts.items():
+            getattr(self, k).update(d)
+        if grgb:
+            self.group_rgb = True
+        for xobj, rel, res, name, inline, role in imgs:
+            self._image(xobj, _mul(rel, ctm), res, name, inline, role)
+        self._budget -= len(imgs) + 1
 
     def _group_rgb(self, grp, res) -> bool:
         try:
@@ -619,6 +783,7 @@ class Analyzer:
         poprawia umiejscowienie, kolejne dokładają nowe (do 200 na wzór)."""
         if not box or not isinstance(box, list):
             return
+        self._pat_hits += 1
         bx0, by0, bx1, by1 = self.page_box
         for rec, p in entry["items"]:
             q = p if not entry["used"] else dict(p)
@@ -744,6 +909,8 @@ class Analyzer:
                 items = self._plog
             finally:
                 self._plog = outer
+            if items:
+                self._pat_hits += 1
             if outer is not None:
                 outer.extend(items)
             # obrazy wzoru — ich miejsce na stronie ustali dopiero malowanie (_pattern_area)
@@ -862,6 +1029,16 @@ def _mul(m, n):
             e * a2 + f * c2 + e2, e * b2 + f * d2 + f2]
 
 
+def _inv(m):
+    """Odwrotność macierzy PDF; None dla zdegenerowanej (skala 0)."""
+    a, b, c, d, e, f = (float(x) for x in m)
+    det = a * d - b * c
+    if abs(det) < 1e-12:
+        return None
+    ia, ib, ic, id_ = d / det, -b / det, -c / det, a / det
+    return [ia, ib, ic, id_, -(e * ia + f * ic), -(e * ib + f * id_)]
+
+
 # ----------------------------------------------------------------------------
 # PDF
 # ----------------------------------------------------------------------------
@@ -941,6 +1118,8 @@ def flat_image(path: str, page: int | None) -> dict | None:
                 return None
             res = pg.obj.get("/Resources")
             xo = res.get("/XObject") if res is not None else None
+            if pdfutil._raw_length(pg) > 100_000:     # sam obraz to kilka operatorów — duża treść to nie to
+                return None
             ctm, stack, found = [1, 0, 0, 1, 0, 0], [], None
             for operands, op in pikepdf.parse_content_stream(pg):
                 o = str(op)
@@ -1122,6 +1301,8 @@ def _summarize_pdf(an: Analyzer, pages, intents, meta, coverage=None, page_sizes
             "page_sizes_mm": page_sizes or [],
         },
         "overprint_uses": an.overprint_uses,
+        "clipped_shading": an.clipped_shading,
+        "clipped_shading_text": an.clipped_shading_text,
         "white_overprint": getattr(an, "white_boxes", []),
         "heavy_black": an.heavy_black,
         "transparency": dict(an.transparency),
