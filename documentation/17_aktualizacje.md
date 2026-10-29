@@ -1385,7 +1385,7 @@ Numery jak w `18_przeglad_kodu.md`.
   czasy, niezależne sprawdzenie pliku do druku i porównanie wyglądu z oryginałem. Przebieg na 12 projektach Tomasza
   (27.10): bez wywrotek; każdy plik do druku — 1 strona, sam CMYK, bez overprintu, tekst na krzywych.
 
-## 0.6.13 (w przygotowaniu) — domknięte stare punkty, … (29.10)
+## 0.7.0 — domknięte stare punkty, szybsze wgrywanie ogromnych plików, dokładny wymiar JPG (29.10)
 
 - Przegląd otwartych punktów z przeglądów kodu (doc 19, koniec): pięć było już zrobionych, dwa
   poprawione teraz:

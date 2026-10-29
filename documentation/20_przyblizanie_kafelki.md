@@ -109,7 +109,7 @@ Inne:
 Zostało (krok 3–4): kafle między wersjami dla spłaszczenia / usunięcia szablonu / spadów, liczenie
 piramidy zaraz po wgraniu.
 
-## Krok 3 — widok poprzedniej wersji (29.10, 0.6.13)
+## Krok 3 — widok poprzedniej wersji (29.10, 0.7.0)
 
 | poprawka | widok | dlaczego |
 |---|---|---|
