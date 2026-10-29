@@ -1385,6 +1385,32 @@ Numery jak w `18_przeglad_kodu.md`.
   czasy, niezależne sprawdzenie pliku do druku i porównanie wyglądu z oryginałem. Przebieg na 12 projektach Tomasza
   (27.10): bez wywrotek; każdy plik do druku — 1 strona, sam CMYK, bez overprintu, tekst na krzywych.
 
+## 0.7.0 — domknięte stare punkty, szybsze wgrywanie ogromnych plików, dokładny wymiar JPG (29.10)
+
+- Przegląd otwartych punktów z przeglądów kodu (doc 19, koniec): pięć było już zrobionych, dwa
+  poprawione teraz:
+  - **cofnięcie poprawki** usuwa też pobrane pliki tej wersji i jej wyniki oceny jakości (zostawały
+    na dysku i w pamięci do końca pracy z plikiem);
+  - **tryb przeglądarki** (bez okna programu) nie wyłącza się po uśpieniu laptopa — po przebudzeniu
+    karta ma czas, żeby dać znać, że żyje.
+- Spłaszczanie bez limitu megapikseli — zostaje tak (Tomasz 29.10: „nie dawajmy limitu”).
+- Przybliżanie: po „Wyłącz overprint” podgląd bez symulacji overprintu bierze gotowe kafelki poprzedniej
+  wersji (piksele identyczne) — nic nie liczy się od nowa. Pozostałe poprawki: dlaczego nie — doc 20, krok 3.
+- **Wgrywanie ogromnych plików wektorowych**: podpowiedź produktu szukała ramek szablonu w całej treści
+  i wgranie na nią czekało (800 000 kształtów: 229 s). Teraz (`server.content_hints`,
+  `frames.shapes(only_template, budget_s)`): punkty kształtów przeliczane tylko dla kolorów wytycznych
+  (kolor z chwili malowania — pliki ustawiają go czasem po zbudowaniu ścieżki, Test_edge_1strona),
+  najwyżej 15 s (`HINTS_BUDGET_S`) — co znajdzie, to podpowie. Wgranie D3: 229 s → 22 s. Podpowiedzi na
+  38 plikach identyczne jak przed zmianą. Pełne wykrywanie szablonu (rozdział „Szablon”) bez limitu.
+- **JPG bez DPI — dokładny wymiar** (ograniczenie z 0.6.8: JFIF zapisuje DPI jako liczbę całkowitą, wydruk
+  wychodził 0,3–1,5 % mniejszy; Tomasz 29.10: „popraw to”). Przy pobraniu obok JFIF (najlepsza liczba
+  całkowita) dokładna wartość w **EXIF** (ułamek) i w zasobie rozdzielczości **Photoshopa** (APP13, 16.16 —
+  czytają go programy Adobe i wiele RIP-ów; ImageMagick czyta EXIF). Piksele nietknięte
+  (`pdfutil.jpeg_dpi`). Program sam też czyta dokładną wartość (`pdfutil.raster_dpi` — gdy zgadza się
+  z JFIF co do zaokrąglenia; sprzeczne nagłówki, np. EXIF 72 z aparatu: JFIF jak dotąd) — przy ponownym
+  wgraniu, zamianie na CMYK i obrocie wymiar zostaje dokładny. Przykład: 600 × 1200 px na 2014 mm —
+  dawniej 2000 mm, teraz 2014,00. Testy `test_wymiar.py` 28/28 (nowe R6).
+
 ## 0.6.12 — testy syntetyczne, szablon, szybsze spłaszczenie, fonty, duże pliki (28.10)
 
 - Testy na własnych plikach z błędami (`narzedzia/testy_syntetyczne`, opis w README tam):

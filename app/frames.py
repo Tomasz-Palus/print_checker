@@ -13,6 +13,7 @@ import io
 from decimal import Decimal
 import math
 import os
+import time
 
 import pikepdf
 
@@ -62,8 +63,13 @@ class _Walker:
     a tam siedzi szablon wstawiony jako osadzona strona. Zapamiętuje adres każdego kształtu
     (strumień + numery operatorów), żeby dało się go usunąć."""
 
-    def __init__(self):
+    def __init__(self, only_template: bool = False, budget_s: float | None = None):
         self.shapes, self.texts = [], []
+        # tylko kształty w kolorach wytycznych (podpowiedzi produktu przy wgraniu): punkty innych nie są
+        # przeliczane (29.10). `budget_s` — limit czasu: podpowiedź to wygoda, a wgranie na nią czeka
+        self.only_template = only_template
+        self.deadline = time.monotonic() + budget_s if budget_s else None
+        self.timed_out = False
         self._tinfo = []        # do każdego napisu: (wielkość bez macierzy, 1. wiersz macierzy) — do powtórki
         self._dec = {}
         # Powtórka formy (28.10): symbol użyty 30 000 razy był przechodzony 30 000 razy (minuty przy
@@ -144,6 +150,9 @@ class _Walker:
     def run(self, container, resources, ctm, depth=0, owner=None):
         if depth > 8:
             return
+        if self.deadline and time.monotonic() > self.deadline:
+            self.timed_out = True
+            return
         try:
             ops = pdfutil.iter_ops(container)          # duża treść — strumieniowo (28.10)
         except Exception:
@@ -162,7 +171,22 @@ class _Walker:
             return (tuple(nums[:3]) if len(nums) == 3 else _cmyk_rgb(*nums[:4]) if len(nums) == 4
                     else (1 - nums[0],) * 3 if len(nums) == 1 else None)
 
+        # tylko kolory wytycznych: punkty ścieżki odkładamy bez liczenia, przeliczamy przy malowaniu, gdy
+        # kolor pasuje. Kolor bierzemy z chwili MALOWANIA — pliki ustawiają go czasem dopiero po zbudowaniu
+        # ścieżki (wbrew PDF, Test_edge_1strona: `re h 1 0 0 rg f`)
+        only, wanted, raw = self.only_template, {}, []
+
+        def template_color(f, st):
+            k = (f, st)
+            w = wanted.get(k)
+            if w is None:
+                w = wanted[k] = any(_same_color(c, t) for c in k if c for t in TEMPLATE_COLORS)
+            return w
+
         for i, (operands, op) in enumerate(ops):
+            if self.deadline and not i & 0x3FFF and time.monotonic() > self.deadline:
+                self.timed_out = True                  # limit czasu (podpowiedzi przy wgraniu) — co jest, to jest
+                break
             o = str(op)
             try:
                 if o == "q":
@@ -189,6 +213,9 @@ class _Walker:
                             fill = v
                         else:
                             stroke = v
+                elif only and o in ("re", "m", "l", "c", "v", "y"):
+                    raw.append((i, o, operands, ctm))
+                    continue
                 elif o == "re":
                     first = i if first is None else first
                     x, y, w, h = [float(v) for v in operands]
@@ -206,6 +233,24 @@ class _Walker:
                         add(vals[j], vals[j + 1])
                     nseg += 1
                 elif o in ("f", "F", "f*", "B", "B*", "b", "b*", "S", "s", "n"):
+                    if raw:
+                        filled_, stroked_ = o not in ("S", "s", "n"), o in ("S", "s", "B", "B*", "b", "b*")
+                        if o != "n" and template_color(fill if filled_ else None, stroke if stroked_ else None):
+                            keep = ctm
+                            for j, o2, ops2, ctm in raw:          # jak zwykłe przejście, z macierzą z budowania
+                                first = j if first is None else first
+                                vals = [float(v) for v in ops2]
+                                if o2 == "re":
+                                    x, y, w, h = vals
+                                    for cx, cy in ((x, y), (x + w, y), (x + w, y + h), (x, y + h)):
+                                        add(cx, cy)
+                                    nseg += 4
+                                else:
+                                    for j2 in range(0, len(vals) - 1, 2):
+                                        add(vals[j2], vals[j2 + 1])
+                                    nseg += 1
+                            ctm = keep
+                        raw = []
                     if box is not None and o != "n":
                         filled = o not in ("S", "s")
                         stroked = o in ("S", "s", "B", "B*", "b", "b*")
@@ -282,14 +327,17 @@ def _text(x, out, dec=None):
         pass
 
 
-def shapes(path: str, page_index: int, page_mm: tuple | None = None) -> tuple[list, list]:
+def shapes(path: str, page_index: int, page_mm: tuple | None = None, only_template: bool = False,
+           budget_s: float | None = None) -> tuple[list, list]:
     """Kształty i napisy strony w mm WYDRUKU (od lewego górnego rogu). `page_mm` mówi, ile
-    mm wydruku przypada na stronę (skala 1:10 przelicza się sama); bez niego — mm pliku."""
+    mm wydruku przypada na stronę (skala 1:10 przelicza się sama); bez niego — mm pliku.
+    `only_template` — tylko kształty w kolorach wytycznych (szybciej; napisy wszystkie); `budget_s` —
+    po tylu sekundach koniec, wynik z tego, co przejrzane."""
     with pikepdf.open(path) as pdf:
         page = pdf.pages[page_index]
         mb = [float(v) for v in (page.obj.get("/MediaBox") or [0, 0, 595, 842])]
         w_pt, h_pt = abs(mb[2] - mb[0]), abs(mb[3] - mb[1])
-        wk = _Walker()
+        wk = _Walker(only_template, budget_s)
         wk.run(page, page.obj.get("/Resources"), [1, 0, 0, 1, -min(mb[0], mb[2]), -min(mb[1], mb[3])])
     sx = page_mm[0] / w_pt if page_mm else MM
     sy = page_mm[1] / h_pt if page_mm else MM

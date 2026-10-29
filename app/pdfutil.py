@@ -402,6 +402,65 @@ def page_sizes_mm(path: str) -> list[list[float]]:
         d.close()
 
 
+def jpeg_dpi(data: bytes, dpi: float) -> bytes:
+    """Rozdzielczość w nagłówkach JPG — piksele nietknięte.
+
+    JFIF (APP0) zapisuje tylko liczby całkowite: 150,4 dpi → 150 i wydruk o 0,3 % mniejszy, przy ~15 dpi
+    nawet 1,5 % (Tomasz 29.10: „popraw to”). Dlatego obok JFIF (najlepsza liczba całkowita — dla programów,
+    które czytają tylko jego) dokładna wartość tam, gdzie wolno ułamek:
+    - EXIF (APP1): XResolution / YResolution jako ułamek (dpi × 10000 / 10000), ResolutionUnit = cale;
+    - Photoshop (APP13, zasób 0x03ED ResolutionInfo): liczba stałoprzecinkowa 16.16 — czytają ją programy
+      Adobe i wiele RIP-ów; ma pierwszeństwo przed EXIF i JFIF.
+    Istniejących EXIF / APP13 nie ruszamy (obraz bez DPI zwykle ich nie ma) — wtedy zostaje sam JFIF."""
+    import struct
+    per_cm = dpi / 2.54
+    unit, val = (1, round(dpi)) if abs(round(dpi) - dpi) / dpi <= abs(round(per_cm) - per_cm) / per_cm or round(per_cm) < 1 \
+        else (2, round(per_cm))
+    val = max(1, min(65535, val))
+    dens = struct.pack(">BHH", unit, val, val)
+    if data[2:4] == b"\xff\xe0" and data[6:11] == b"JFIF\x00":
+        data = data[:13] + dens + data[18:]
+    else:
+        app0 = b"\xff\xe0" + struct.pack(">H", 16) + b"JFIF\x00\x01\x01" + dens + b"\x00\x00"
+        data = data[:2] + app0 + data[2:]
+    # znaczniki przed obrazem: jest już EXIF albo blok Photoshopa?
+    pos, has_exif, has_ps, after_app0 = 2, False, False, None
+    while pos + 4 <= len(data) and data[pos] == 0xFF:
+        mk = data[pos + 1]
+        if mk == 0xDA or mk == 0xD9:                    # początek danych obrazu — dalej nie szukamy
+            break
+        ln = struct.unpack(">H", data[pos + 2:pos + 4])[0]
+        body = data[pos + 4:pos + 2 + ln]
+        if mk == 0xE0 and after_app0 is None:
+            after_app0 = pos + 2 + ln
+        elif mk == 0xE1 and body.startswith(b"Exif\x00\x00"):
+            has_exif = True
+        elif mk == 0xED and body.startswith(b"Photoshop 3.0\x00"):
+            has_ps = True
+        pos += 2 + ln
+    ins = b""
+    if not has_exif:
+        num, den = max(1, round(dpi * 10000)), 10000
+        # TIFF (big-endian): IFD0 z 3 wpisami, potem dwie liczby wymierne
+        ifd = struct.pack(">H", 3)
+        ifd += struct.pack(">HHII", 0x011A, 5, 1, 8 + 2 + 3 * 12 + 4)          # XResolution → 1. ułamek
+        ifd += struct.pack(">HHII", 0x011B, 5, 1, 8 + 2 + 3 * 12 + 4 + 8)      # YResolution → 2. ułamek
+        ifd += struct.pack(">HHIHH", 0x0128, 3, 1, 2, 0)                       # ResolutionUnit = 2 (cale)
+        tiff = b"MM\x00\x2a" + struct.pack(">I", 8) + ifd + struct.pack(">I", 0) + struct.pack(">IIII", num, den, num, den)
+        exif = b"Exif\x00\x00" + tiff
+        ins += b"\xff\xe1" + struct.pack(">H", len(exif) + 2) + exif
+    if not has_ps:
+        fx = max(1, min(0x7FFFFFFF, round(dpi * 65536)))
+        info = struct.pack(">IHHIHH", fx, 1, 1, fx, 1, 1)                   # dpi, jednostka: cale; wymiar w calach
+        res = b"8BIM" + struct.pack(">H", 0x03ED) + b"\x00\x00" + struct.pack(">I", len(info)) + info
+        ps = b"Photoshop 3.0\x00" + res
+        ins += b"\xff\xed" + struct.pack(">H", len(ps) + 2) + ps
+    if ins:
+        at = after_app0 or 2
+        data = data[:at] + ins + data[at:]
+    return data
+
+
 def raster_dpi(im):
     """DPI obrazu z Pillow albo None. TIFF bez znacznika XResolution: Pillow podaje umowne (1, 1) —
     to brak DPI, nie 1 dpi (przegląd 09.10, A1/B18)."""
@@ -409,9 +468,31 @@ def raster_dpi(im):
     if (im.format or "") == "TIFF" and 282 not in getattr(im, "tag_v2", {}):
         return None
     try:
-        return (float(d[0]), float(d[1])) if d and d[0] and d[1] else None
+        d = (float(d[0]), float(d[1])) if d and d[0] and d[1] else None
     except (TypeError, ValueError, IndexError):
         return None
+    if d and (im.format or "") == "JPEG":
+        # JFIF to liczby całkowite (150,4 → 150); dokładna wartość z zasobu Photoshopa albo EXIF — tylko gdy
+        # zgadza się z JFIF co do zaokrąglenia (sprzeczne nagłówki: zostaje JFIF, jak dotąd; 29.10)
+        ex = _jpeg_exact_dpi(im)
+        if ex and all(abs(e - j) <= 1.3 for e, j in zip(ex, d)):
+            return ex
+    return d
+
+
+def _jpeg_exact_dpi(im):
+    try:
+        ps = (im.info.get("photoshop") or {}).get(0x03ED)
+        if isinstance(ps, dict) and ps.get("XResolution") and ps.get("YResolution"):
+            return float(ps["XResolution"]), float(ps["YResolution"])     # zawsze w pikselach na cal
+        ex = im.getexif()
+        x, y, unit = ex.get(282), ex.get(283), ex.get(296, 2)
+        if x and y and unit in (2, 3):
+            k = 2.54 if unit == 3 else 1.0
+            return float(x) * k, float(y) * k
+    except Exception:
+        pass
+    return None
 
 
 # PyMuPDF nie jest bezpieczny dla wielu wątków naraz (ocena jakości w tle + trasy serwera) —

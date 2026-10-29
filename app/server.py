@@ -278,6 +278,9 @@ def api_suggest(jid):
     return jsonify(job_json_for_page(job, page, sugs, ramki))
 
 
+HINTS_BUDGET_S = 15.0       # s — ramki szablonu w treści przy wgraniu (800 000 kształtów: 111 s bez limitu)
+
+
 @render._pdfutil.mupdf_locked
 def content_hints(path: str, page: int = 0) -> dict:
     """Podpowiedzi do sugestii produktu z TREŚCI pliku: napisy i ramki w kolorach wytycznych.
@@ -291,7 +294,9 @@ def content_hints(path: str, page: int = 0) -> dict:
             out["tekst"] = d[page].get_text()[:200000]
         finally:
             d.close()
-        shapes, texts = frames.shapes(path, page)
+        # tylko ramki w kolorach wytycznych, najwyżej HINTS_BUDGET_S — wgranie czeka na podpowiedzi; pełne
+        # wykrywanie szablonu (rozdział „Szablon”) przegląda całość
+        shapes, texts = frames.shapes(path, page, only_template=True, budget_s=HINTS_BUDGET_S)
         out["tekst"] += " " + " ".join(t["tekst"] for t in texts)[:200000]
         out["ramki"] = [[round(z["w"], 1), round(z["h"], 1)] for z in shapes
                         if frames.color_class(z) is not None and z["w"] >= 50 and z["h"] >= 50][:20]
@@ -647,7 +652,7 @@ def _with_dpi(job, path: str, print_mm: tuple) -> str:
         with open(path, "rb") as f:
             data = f.read()
         if fmt == "JPEG":
-            data = _jpeg_density(data, dpi)
+            data = render._pdfutil.jpeg_dpi(data, dpi)
             with open(tmp, "wb") as f:
                 f.write(data)
         elif fmt == "PNG":
@@ -667,21 +672,6 @@ def _with_dpi(job, path: str, print_mm: tuple) -> str:
             return path                                  # GIF/BMP/WEBP — bez zmian
         os.replace(tmp, out)
     return out
-
-
-def _jpeg_density(data: bytes, dpi: float) -> bytes:
-    """Gęstość w nagłówku JFIF (APP0): istniejący poprawiony, brakujący dopisany za SOI.
-    JFIF zapisuje liczby całkowite — jednostka (cale / cm) dająca mniejszy błąd."""
-    import struct
-    per_cm = dpi / 2.54
-    unit, val = (1, round(dpi)) if abs(round(dpi) - dpi) / dpi <= abs(round(per_cm) - per_cm) / per_cm or round(per_cm) < 1 \
-        else (2, round(per_cm))
-    val = max(1, min(65535, val))
-    dens = struct.pack(">BHH", unit, val, val)
-    if data[2:4] == b"\xff\xe0" and data[6:11] == b"JFIF\x00":
-        return data[:13] + dens + data[18:]
-    app0 = b"\xff\xe0" + struct.pack(">H", 16) + b"JFIF\x00\x01\x01" + dens + b"\x00\x00"
-    return data[:2] + app0 + data[2:]
 
 
 def _png_phys(data: bytes, dpi: float) -> bytes:
@@ -762,8 +752,10 @@ def api_view(jid):
     mm = (pos_float(request.args.get("w_mm"), "szerokość"), pos_float(request.args.get("h_mm"), "wysokość"))
     op, pr = request.args.get("op") == "1", request.args.get("pr") == "1"
     # „Krzywe” nie zmieniają wyglądu (podgląd i tak rysuje tekst z krzywych — render.text_as_curves):
-    # widok poprzedniej wersji, bez liczenia od nowa (doc 20, krok 3)
-    while v.step == "outline":
+    # widok poprzedniej wersji, bez liczenia od nowa (doc 20, krok 3). „Wyłącz overprint” — też, gdy
+    # podgląd nie symuluje overprintu (Ghostscript z /disable i MuPDF overprint pomijają: piksele
+    # identyczne, sprawdzone 29.10); z symulacją widać właśnie tę zmianę, więc liczy się od nowa.
+    while v.step == "outline" or (v.step == "overprint" and not op):
         i = job.versions.index(v)
         if i == 0:
             break
