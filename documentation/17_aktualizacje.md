@@ -1396,6 +1396,12 @@ Numery jak w `18_przeglad_kodu.md`.
 - Spłaszczanie bez limitu megapikseli — zostaje tak (Tomasz 29.10: „nie dawajmy limitu”).
 - Przybliżanie: po „Wyłącz overprint” podgląd bez symulacji overprintu bierze gotowe kafelki poprzedniej
   wersji (piksele identyczne) — nic nie liczy się od nowa. Pozostałe poprawki: dlaczego nie — doc 20, krok 3.
+- **Wgrywanie ogromnych plików wektorowych**: podpowiedź produktu szukała ramek szablonu w całej treści
+  i wgranie na nią czekało (800 000 kształtów: 229 s). Teraz (`server.content_hints`,
+  `frames.shapes(only_template, budget_s)`): punkty kształtów przeliczane tylko dla kolorów wytycznych
+  (kolor z chwili malowania — pliki ustawiają go czasem po zbudowaniu ścieżki, Test_edge_1strona),
+  najwyżej 15 s (`HINTS_BUDGET_S`) — co znajdzie, to podpowie. Wgranie D3: 229 s → 22 s. Podpowiedzi na
+  38 plikach identyczne jak przed zmianą. Pełne wykrywanie szablonu (rozdział „Szablon”) bez limitu.
 
 ## 0.6.12 — testy syntetyczne, szablon, szybsze spłaszczenie, fonty, duże pliki (28.10)
 

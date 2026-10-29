@@ -278,6 +278,9 @@ def api_suggest(jid):
     return jsonify(job_json_for_page(job, page, sugs, ramki))
 
 
+HINTS_BUDGET_S = 15.0       # s — ramki szablonu w treści przy wgraniu (800 000 kształtów: 111 s bez limitu)
+
+
 @render._pdfutil.mupdf_locked
 def content_hints(path: str, page: int = 0) -> dict:
     """Podpowiedzi do sugestii produktu z TREŚCI pliku: napisy i ramki w kolorach wytycznych.
@@ -291,7 +294,9 @@ def content_hints(path: str, page: int = 0) -> dict:
             out["tekst"] = d[page].get_text()[:200000]
         finally:
             d.close()
-        shapes, texts = frames.shapes(path, page)
+        # tylko ramki w kolorach wytycznych, najwyżej HINTS_BUDGET_S — wgranie czeka na podpowiedzi; pełne
+        # wykrywanie szablonu (rozdział „Szablon”) przegląda całość
+        shapes, texts = frames.shapes(path, page, only_template=True, budget_s=HINTS_BUDGET_S)
         out["tekst"] += " " + " ".join(t["tekst"] for t in texts)[:200000]
         out["ramki"] = [[round(z["w"], 1), round(z["h"], 1)] for z in shapes
                         if frames.color_class(z) is not None and z["w"] >= 50 and z["h"] >= 50][:20]
