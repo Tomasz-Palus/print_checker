@@ -1385,6 +1385,16 @@ Numery jak w `18_przeglad_kodu.md`.
   czasy, niezależne sprawdzenie pliku do druku i porównanie wyglądu z oryginałem. Przebieg na 12 projektach Tomasza
   (27.10): bez wywrotek; każdy plik do druku — 1 strona, sam CMYK, bez overprintu, tekst na krzywych.
 
+## 0.6.13 (w przygotowaniu) — domknięte stare punkty, … (29.10)
+
+- Przegląd otwartych punktów z przeglądów kodu (doc 19, koniec): pięć było już zrobionych, dwa
+  poprawione teraz:
+  - **cofnięcie poprawki** usuwa też pobrane pliki tej wersji i jej wyniki oceny jakości (zostawały
+    na dysku i w pamięci do końca pracy z plikiem);
+  - **tryb przeglądarki** (bez okna programu) nie wyłącza się po uśpieniu laptopa — po przebudzeniu
+    karta ma czas, żeby dać znać, że żyje.
+- Spłaszczanie bez limitu megapikseli — zostaje tak (Tomasz 29.10: „nie dawajmy limitu”).
+
 ## 0.6.12 — testy syntetyczne, szablon, szybsze spłaszczenie, fonty, duże pliki (28.10)
 
 - Testy na własnych plikach z błędami (`narzedzia/testy_syntetyczne`, opis w README tam):

@@ -19,6 +19,7 @@ import threading
 import time
 import uuid
 
+import detailmap
 import pdfutil
 import render
 import views
@@ -211,7 +212,11 @@ class Job:
                 self.images.pop(v.id, None)
                 for k in [k for k in self.ink if k[0] == v.id]:
                     self.ink.pop(k, None)
-                for p in [v.path, *glob.glob(os.path.splitext(v.path)[0] + "_p*_krzywe.pdf")]:
+                # wyniki jakości tej wersji i jej pobrane pliki (przegląd kodu, doc 18 D) — zajmowały pamięć
+                # i dysk do końca pracy z plikiem
+                detailmap.forget(f"{self.id}#{v.id}")
+                for p in [v.path, *glob.glob(os.path.splitext(v.path)[0] + "_p*_krzywe.pdf"),
+                          *glob.glob(os.path.join(self.dir, f"pobierz_{v.id}_p*"))]:
                     try:
                         os.remove(p)
                     except OSError:
