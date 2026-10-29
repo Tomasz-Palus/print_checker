@@ -652,7 +652,7 @@ def _with_dpi(job, path: str, print_mm: tuple) -> str:
         with open(path, "rb") as f:
             data = f.read()
         if fmt == "JPEG":
-            data = _jpeg_density(data, dpi)
+            data = render._pdfutil.jpeg_dpi(data, dpi)
             with open(tmp, "wb") as f:
                 f.write(data)
         elif fmt == "PNG":
@@ -672,21 +672,6 @@ def _with_dpi(job, path: str, print_mm: tuple) -> str:
             return path                                  # GIF/BMP/WEBP — bez zmian
         os.replace(tmp, out)
     return out
-
-
-def _jpeg_density(data: bytes, dpi: float) -> bytes:
-    """Gęstość w nagłówku JFIF (APP0): istniejący poprawiony, brakujący dopisany za SOI.
-    JFIF zapisuje liczby całkowite — jednostka (cale / cm) dająca mniejszy błąd."""
-    import struct
-    per_cm = dpi / 2.54
-    unit, val = (1, round(dpi)) if abs(round(dpi) - dpi) / dpi <= abs(round(per_cm) - per_cm) / per_cm or round(per_cm) < 1 \
-        else (2, round(per_cm))
-    val = max(1, min(65535, val))
-    dens = struct.pack(">BHH", unit, val, val)
-    if data[2:4] == b"\xff\xe0" and data[6:11] == b"JFIF\x00":
-        return data[:13] + dens + data[18:]
-    app0 = b"\xff\xe0" + struct.pack(">H", 16) + b"JFIF\x00\x01\x01" + dens + b"\x00\x00"
-    return data[:2] + app0 + data[2:]
 
 
 def _png_phys(data: bytes, dpi: float) -> bytes:

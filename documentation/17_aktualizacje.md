@@ -1402,6 +1402,14 @@ Numery jak w `18_przeglad_kodu.md`.
   (kolor z chwili malowania — pliki ustawiają go czasem po zbudowaniu ścieżki, Test_edge_1strona),
   najwyżej 15 s (`HINTS_BUDGET_S`) — co znajdzie, to podpowie. Wgranie D3: 229 s → 22 s. Podpowiedzi na
   38 plikach identyczne jak przed zmianą. Pełne wykrywanie szablonu (rozdział „Szablon”) bez limitu.
+- **JPG bez DPI — dokładny wymiar** (ograniczenie z 0.6.8: JFIF zapisuje DPI jako liczbę całkowitą, wydruk
+  wychodził 0,3–1,5 % mniejszy; Tomasz 29.10: „popraw to”). Przy pobraniu obok JFIF (najlepsza liczba
+  całkowita) dokładna wartość w **EXIF** (ułamek) i w zasobie rozdzielczości **Photoshopa** (APP13, 16.16 —
+  czytają go programy Adobe i wiele RIP-ów; ImageMagick czyta EXIF). Piksele nietknięte
+  (`pdfutil.jpeg_dpi`). Program sam też czyta dokładną wartość (`pdfutil.raster_dpi` — gdy zgadza się
+  z JFIF co do zaokrąglenia; sprzeczne nagłówki, np. EXIF 72 z aparatu: JFIF jak dotąd) — przy ponownym
+  wgraniu, zamianie na CMYK i obrocie wymiar zostaje dokładny. Przykład: 600 × 1200 px na 2014 mm —
+  dawniej 2000 mm, teraz 2014,00. Testy `test_wymiar.py` 28/28 (nowe R6).
 
 ## 0.6.12 — testy syntetyczne, szablon, szybsze spłaszczenie, fonty, duże pliki (28.10)
 

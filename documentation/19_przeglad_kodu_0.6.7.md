@@ -307,3 +307,4 @@ Sprawdzone w kodzie punkty „D” z doc 18, oznaczone wyżej jako otwarte:
 | cofnięcie nie usuwa „pobierz_…” ani wyników jakości | **zrobione 29.10** — `jobs.undo`: `pobierz_<wersja>_p*` i `detailmap.forget` |
 | tryb przeglądarki kończy się po uśpieniu laptopa | **zrobione 29.10** — `desktop.py`: skok zegara > 60 s = komputer spał, odliczanie od nowa |
 | sufit 400 Mpx przy spłaszczaniu (D tutaj) | nie ma go od 27.10 (Tomasz: „zawsze minimum 120 ppi”), potwierdzone 29.10: „nie dawajmy limitu” |
+| JPG bez DPI: wymiar 0,3–1,5 % mniejszy (JFIF — liczby całkowite) | **zrobione 29.10** — dokładne DPI także w EXIF i zasobie Photoshopa (`pdfutil.jpeg_dpi`) |

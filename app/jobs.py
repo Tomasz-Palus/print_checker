@@ -250,12 +250,17 @@ def _rotated_file(base: str, total: int, jdir: str) -> str:
         kw = {}
         if info.get("icc_profile"):
             kw["icc_profile"] = info["icc_profile"]
-        d = info.get("dpi")
+        d = pdfutil.raster_dpi(im) if (im.format or "") == "JPEG" else info.get("dpi")   # JPG: dokładne
         if d:
             kw["dpi"] = (d[1], d[0]) if total in (90, 270) else d
         fmt = im.format or ("JPEG" if ext in (".jpg", ".jpeg") else "PNG")
         if fmt == "JPEG":
             r.save(out, "JPEG", quality=95, subsampling=0, **kw)
+            if d and abs(d[0] - d[1]) < 1e-6:          # JFIF ma tylko liczby całkowite — dokładne do EXIF / Photoshopa
+                with open(out, "rb") as fh:
+                    data = fh.read()
+                with open(out, "wb") as fh:
+                    fh.write(pdfutil.jpeg_dpi(data, d[0]))
         elif fmt == "TIFF":
             r.save(out, "TIFF", compression="tiff_lzw", **kw)
         else:
