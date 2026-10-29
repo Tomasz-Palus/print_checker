@@ -762,8 +762,10 @@ def api_view(jid):
     mm = (pos_float(request.args.get("w_mm"), "szerokość"), pos_float(request.args.get("h_mm"), "wysokość"))
     op, pr = request.args.get("op") == "1", request.args.get("pr") == "1"
     # „Krzywe” nie zmieniają wyglądu (podgląd i tak rysuje tekst z krzywych — render.text_as_curves):
-    # widok poprzedniej wersji, bez liczenia od nowa (doc 20, krok 3)
-    while v.step == "outline":
+    # widok poprzedniej wersji, bez liczenia od nowa (doc 20, krok 3). „Wyłącz overprint” — też, gdy
+    # podgląd nie symuluje overprintu (Ghostscript z /disable i MuPDF overprint pomijają: piksele
+    # identyczne, sprawdzone 29.10); z symulacją widać właśnie tę zmianę, więc liczy się od nowa.
+    while v.step == "outline" or (v.step == "overprint" and not op):
         i = job.versions.index(v)
         if i == 0:
             break

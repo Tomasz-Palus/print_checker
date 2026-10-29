@@ -1394,6 +1394,8 @@ Numery jak w `18_przeglad_kodu.md`.
   - **tryb przeglądarki** (bez okna programu) nie wyłącza się po uśpieniu laptopa — po przebudzeniu
     karta ma czas, żeby dać znać, że żyje.
 - Spłaszczanie bez limitu megapikseli — zostaje tak (Tomasz 29.10: „nie dawajmy limitu”).
+- Przybliżanie: po „Wyłącz overprint” podgląd bez symulacji overprintu bierze gotowe kafelki poprzedniej
+  wersji (piksele identyczne) — nic nie liczy się od nowa. Pozostałe poprawki: dlaczego nie — doc 20, krok 3.
 
 ## 0.6.12 — testy syntetyczne, szablon, szybsze spłaszczenie, fonty, duże pliki (28.10)
 
