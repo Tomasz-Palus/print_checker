@@ -1454,3 +1454,31 @@ Numery jak w `18_przeglad_kodu.md`.
     z milionami krzywych (pierwsza wersja D3) przekracza limit 15 min; program zgłasza to czytelnie.
 - Sprawdzone i odrzucone: wykrywanie powiększonych obrazów 1-bitowych (piksele schodkami). Kody QR
   (moduły po 8–20 px) wyglądają dokładnie tak samo — program fałszywie mówiłby „zła jakość” na każdym QR.
+
+## 0.6.13 — start na Macu: okno od razu, przeglądarka awaryjnie, certyfikaty HTTPS (Tomasz 09.11)
+
+- Tomasz: na Macu ikona adCheckera skacze w Docku bez końca i żadne okno się nie pojawia. Dziennika
+  z Maca nie było (Tomasz nie ma jak testować), więc poprawki zabezpieczają wszystkie podejrzane miejsca
+  startu naraz.
+- **Okno od razu** (`desktop.main`): wcześniej przed otwarciem okna program importował biblioteki PDF,
+  czyścił `work/`, pobierał listę produktów z sieci (do 15 s) i czekał na serwer. Teraz robi to w tle
+  (`_start_backend`), a okno pokazuje się z ekranem „Uruchamiam adChecker…” (`LOADING_HTML`).
+  Gdy serwer wstanie, okno przechodzi na program (`window.load_url`). Lista produktów pobiera się już po
+  starcie — do tego czasu działa lista zapasowa z paczki.
+- **Strażnik okna:** jeśli okno nie pokaże się w 20 s (`WINDOW_WATCHDOG_S`; zawieszony WebKit/WebView2
+  albo import pywebview), program otwiera się w zwykłej przeglądarce (`_browser_mode`, jak przy braku
+  okna). Ikona w Docku może wtedy dalej skakać, ale program działa.
+- **Serwer nie wstał w 120 s** (`SERVER_WAIT_S`) albo start się wywrócił — w oknie zamiast kręciołka
+  komunikat, że program nie wystartował, z odesłaniem do dziennika.
+- **Certyfikaty HTTPS na Macu** (`_mac_certs`): paczka PyInstallera nie widzi systemowych certyfikatów.
+  Dotąd certifi miało tylko sprawdzanie aktualizacji; lista produktów, wytyczne i fonty łączyły się bez
+  niego i na Macu kończyły się błędem SSL. Teraz `SSL_CERT_FILE` = certifi ustawiane na samym początku
+  — działa dla wszystkich połączeń programu. Windows bez zmian (magazyn systemu).
+- **Etapy startu w dzienniku** z godziną (`[start 12:44:17] import modułów`, `serwer`, `okno programu`,
+  `okno widoczne`, `produkty: …`). Gdy program znowu stanie, ostatnia linia w `adchecker.log` mówi, na czym.
+- Instrukcja instalacji (`packaging/INSTRUKCJA.md`): dopisane, co zrobić, gdy na Macu ikona skacze —
+  zamknięcie zawieszonego programu i zdjęcie kwarantanny (`xattr -dr com.apple.quarantine`).
+- Sprawdzone w sandboksie (Linux): self-test OK (gs, analiza, CMYK, jakość); start z oknem (atrapa
+  pywebview) — okno → program; okno, które się nie pokazuje — po czasie strażnika przeglądarka i koniec
+  po zamknięciu karty. **Na prawdziwym Macu niesprawdzone** — sprawdzi self-test na GitHubie (bez okna)
+  i pierwsze uruchomienie u użytkownika.

@@ -136,3 +136,13 @@ Windowsa i Maca sprawdzają self-test na GitHubie i Tomasz.
     6 godzin.
 - **Nazwa repozytorium:** zostało `print_checker`. `version.REPO` wskazuje
   `Tomasz-Palus/print_checker`. Po ewentualnej zmianie nazwy GitHub przekierowuje stary adres.
+
+## Start na Macu (0.6.13, 09.11)
+
+- Zgłoszenie: na Macu ikona skacze w Docku, okno się nie pojawia.
+- Start przebudowany: okno z ekranem „Uruchamiam…” od razu, reszta (biblioteki, serwer, lista produktów)
+  w tle; po 20 s bez okna — zwykła przeglądarka; certyfikaty HTTPS z certifi dla całego programu.
+  Szczegóły w `17_aktualizacje.md` (0.6.13).
+- Gdy dalej skacze — w Terminalu `pkill -f adChecker`, potem
+  `xattr -dr com.apple.quarantine /Applications/adChecker.app`; dziennik do schowka:
+  `tail -n 60 ~/Library/Application\ Support/adChecker/adchecker.log | pbcopy`.

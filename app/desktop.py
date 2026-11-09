@@ -1,4 +1,4 @@
-"""adChecker — zainstalowany program (wersja 0.3). To jest plik startowy instalatora.
+"""adChecker — zainstalowany program (wersja 0.3, start przebudowany w 0.6.13). To jest plik startowy instalatora.
 
 - Serwer produkcyjny (waitress) w tle, na stałym porcie — pamięć okna (kalibracja monitora,
   ustawienia, samouczek) jest przypisana do adresu, więc port nie może się zmieniać.
@@ -145,11 +145,89 @@ class Api:
         return {"ok": True, "path": dst}
 
 
+def _mac_certs() -> None:
+    """Mac: paczka PyInstallera nie widzi systemowych certyfikatów HTTPS — każde pobranie
+    (lista produktów, wytyczne, fonty, aktualizacje) kończyło się błędem SSL. SSL_CERT_FILE
+    ustawione przed pierwszym połączeniem działa dla całego programu (0.6.13)."""
+    if sys.platform != "darwin" or os.environ.get("SSL_CERT_FILE"):
+        return
+    try:
+        import certifi
+        os.environ["SSL_CERT_FILE"] = certifi.where()
+    except Exception as e:
+        print(f"certifi niedostępne: {type(e).__name__}: {e}")
+
+
+def _stage(msg: str) -> None:
+    """Etapy startu w dzienniku z czasem — gdy program stanie, widać, na czym (0.6.13)."""
+    print(f"[start {time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+LOADING_HTML = """<!doctype html><html lang="pl"><head><meta charset="utf-8"><style>
+body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
+font:15px -apple-system,'Segoe UI',sans-serif;background:#f4f4f2;color:#333}
+@media (prefers-color-scheme:dark){body{background:#1e1e1e;color:#ddd}}
+.s{width:22px;height:22px;border:3px solid #bbb;border-top-color:#2a8;border-radius:50%;
+animation:r 1s linear infinite;margin:0 auto 14px}@keyframes r{to{transform:rotate(360deg)}}
+p{text-align:center;max-width:460px;line-height:1.5}</style></head>
+<body><div><div class="s"></div><p id="t">Uruchamiam adChecker…</p></div></body></html>"""
+
+WINDOW_WATCHDOG_S = 20     # okno programu nie pokazało się w tym czasie → przeglądarka
+SERVER_WAIT_S = 120        # serwer nie wstał w tym czasie → komunikat w oknie
+
+
+def _start_backend(port: int, url: str, ready: threading.Event, failed: dict) -> None:
+    """Wszystko, co może potrwać albo stanąć (import bibliotek PDF, sprzątanie work/, lista
+    produktów z sieci, serwer) — w tle, żeby okno pokazało się od razu (0.6.13; dawniej okno
+    czekało na to wszystko i na Macu ikona skakała w Docku bez końca)."""
+    try:
+        import paths
+        _stage("import modułów")
+        import jobs
+        import products
+        import server
+        from version import VERSION
+        import instance
+        instance.save_port(port)
+        _stage("sprzątanie plików roboczych")
+        jobs.clean_work_dir()
+        shutil.rmtree(os.path.join(paths.USER_DIR, "update"), ignore_errors=True)   # instalator po aktualizacji
+        _stage("serwer")
+        threading.Thread(target=_serve, args=(server.app, port), daemon=True).start()
+        for _ in range(100):
+            if _running(url):
+                break
+            time.sleep(0.1)
+        _stage(f"adChecker {VERSION} gotowy: {url}")
+        ready.set()
+        # lista produktów (sieć, do 15 s) już po starcie — program ma zapasową listę z paczki
+        st = products.load_products()
+        _stage(f"produkty: {st['count']} ({st['source']}){' — ' + st['error'] if st.get('error') else ''}")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        failed["error"] = f"{type(e).__name__}: {e}"
+        ready.set()
+
+
+def _browser_mode(url: str) -> None:
+    """Okna programu nie ma — zwykła przeglądarka; koniec kilka minut po zamknięciu karty."""
+    import server
+    server.last_seen["t"] = time.time()
+    webbrowser.open(url)
+    while time.time() - server.last_seen["t"] < IDLE_EXIT_S:
+        time.sleep(5)
+    print("nikt nie używa programu — koniec")
+    _shutdown()
+    os._exit(0)
+
+
 def main() -> None:
     multiprocessing.freeze_support()          # MUSI być pierwsze: procesy liczące jakość (detailmap)
     import paths
     _log_to_file(paths)
-    print(f"--- adChecker start {time.strftime('%Y-%m-%d %H:%M:%S')} ---")
+    print(f"--- adChecker start {time.strftime('%Y-%m-%d %H:%M:%S')} ({sys.platform}) ---", flush=True)
+    _mac_certs()
 
     port = PORT
     url = f"http://{HOST}:{port}/"
@@ -167,43 +245,72 @@ def main() -> None:
             port = s.getsockname()[1]
         url = f"http://{HOST}:{port}/"
 
-    import jobs
-    import products
-    import server
-    from version import VERSION
-    instance.save_port(port)
-    jobs.clean_work_dir()
-    shutil.rmtree(os.path.join(paths.USER_DIR, "update"), ignore_errors=True)   # instalator po aktualizacji
-    st = products.load_products()
-    print(f"[adChecker {VERSION}] produkty: {st['count']} ({st['source']}); {url}")
-    threading.Thread(target=_serve, args=(server.app, port), daemon=True).start()
-    for _ in range(100):
-        if _running(url):
-            break
-        time.sleep(0.1)
+    ready, failed = threading.Event(), {}
+    threading.Thread(target=_start_backend, args=(port, url, ready, failed), daemon=True).start()
+
     if os.environ.get("ADCHECK_SELFTEST"):
-        code = _selftest(url)
+        ready.wait(SERVER_WAIT_S)
+        code = 1 if failed or not _running(url) else _selftest(url)
         sys.stdout.flush()
         os._exit(code)
 
+    shown = threading.Event()
+
+    def watchdog() -> None:
+        # okno nie pokazało się (WebKit/WebView2 stanął, import pywebview wisi) → przeglądarka,
+        # zamiast ikony skaczącej w Docku bez końca (0.6.13)
+        if shown.wait(WINDOW_WATCHDOG_S):
+            return
+        print(f"okno programu nie pokazało się w {WINDOW_WATCHDOG_S} s — otwieram przeglądarkę", flush=True)
+        ready.wait(SERVER_WAIT_S)
+        _browser_mode(url)
+
+    threading.Thread(target=watchdog, daemon=True).start()
+
+    def load_app(window) -> None:
+        # wołane przez pywebview w osobnym wątku, gdy okno już działa
+        if not ready.wait(SERVER_WAIT_S) or failed or not _running(url):
+            why = failed.get("error", "serwer programu nie odpowiada")
+            _stage(f"start nieudany: {why}")
+            msg = ("adChecker nie wystartował (" + why + "). Zamknij okno i uruchom program jeszcze raz. "
+                   "Szczegóły: dziennik adchecker.log w folderze programu.")
+            try:
+                window.evaluate_js("document.getElementById('t').textContent=" + json_str(msg))
+            except Exception:
+                pass
+            return
+        window.load_url(url)
+
     try:
+        _stage("okno programu")
         import webview
         webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = True
         webview.settings["ALLOW_DOWNLOADS"] = True
-        webview.create_window("adChecker", url, width=1440, height=900, min_size=(1000, 640),
-                              js_api=Api(), text_select=True)
+        window = webview.create_window("adChecker", html=LOADING_HTML, width=1440, height=900,
+                                       min_size=(1000, 640), js_api=Api(), text_select=True)
+
+        def on_shown(*_):
+            if not shown.is_set():
+                shown.set()
+                _stage("okno widoczne")
+
+        window.events.shown += on_shown
+        window.events.loaded += on_shown
         gui = "edgechromium" if sys.platform == "win32" else None   # nigdy stary silnik IE
-        webview.start(gui=gui, private_mode=False, storage_path=paths.WEBVIEW)
+        webview.start(load_app, window, gui=gui, private_mode=False, storage_path=paths.WEBVIEW)
         print("okno zamknięte — koniec")
     except Exception as e:                    # brak WebView2 / WebKit — zwykła przeglądarka
         print(f"okno programu niedostępne ({type(e).__name__}: {e}) — otwieram przeglądarkę")
-        server.last_seen["t"] = time.time()
-        webbrowser.open(url)
-        while time.time() - server.last_seen["t"] < IDLE_EXIT_S:
-            time.sleep(5)
-        print("nikt nie używa programu — koniec")
+        shown.set()                           # strażnik nie otwiera drugiej karty
+        ready.wait(SERVER_WAIT_S)
+        _browser_mode(url)
     _shutdown()
     os._exit(0)                               # wątek serwera i procesy liczące kończą się razem z nami
+
+
+def json_str(s: str) -> str:
+    import json
+    return json.dumps(s)
 
 
 def _shutdown() -> None:

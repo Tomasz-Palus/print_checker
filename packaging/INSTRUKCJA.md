@@ -21,6 +21,21 @@ Nie są potrzebne uprawnienia administratora.
 
 Od tej chwili program otwiera się normalnie.
 
+**Ikona adChecker skacze w Docku, a okno się nie pojawia?** Otwórz **Terminal** (Cmd+Spacja,
+wpisz „Terminal”) i wklej po kolei:
+
+```
+pkill -f adChecker
+xattr -dr com.apple.quarantine /Applications/adChecker.app
+```
+
+Potem uruchom adChecker jeszcze raz. Jeśli nadal nie działa, ta komenda skopiuje dziennik programu
+do schowka — wklej go osobie, która zajmuje się programem:
+
+```
+tail -n 60 ~/Library/Application\ Support/adChecker/adchecker.log | pbcopy
+```
+
 ### Nowa wersja
 
 Gdy wyjdzie nowa wersja, w nagłówku programu pojawi się zielony napis **„Jest nowa wersja…”**.
