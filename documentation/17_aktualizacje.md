@@ -1482,3 +1482,6 @@ Numery jak w `18_przeglad_kodu.md`.
   pywebview) — okno → program; okno, które się nie pokazuje — po czasie strażnika przeglądarka i koniec
   po zamknięciu karty. **Na prawdziwym Macu niesprawdzone** — sprawdzi self-test na GitHubie (bez okna)
   i pierwsze uruchomienie u użytkownika.
+- **Budowanie na Macu:** GitHub wycofał maszyny `macos-14` („The configuration 'macos-14-arm64-us-default'
+  is not supported”, zadanie przerwane po 1 s). `build.yml`: `runs-on: macos-15`. Ghostscript dalej
+  budowany dla macOS 11+ (`MACOSX_DEPLOYMENT_TARGET`), program wymaga macOS 14+ (pikepdf) — bez zmian.

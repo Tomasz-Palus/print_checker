@@ -23,3 +23,5 @@ __pycache__/
 /app/adchecker.lock
 /app/adchecker.port
 /app/adchecker.log*
+# kontekst dla Claude (prywatny e-mail, sposób pracy) — tylko w projekcie Claude, nie w publicznym repo
+/documentation/20_kontekst_dla_claude.md
