@@ -13,7 +13,7 @@ Uruchamiać z tego folderu, przy działającym serwerze (`python app/server.py`)
    (200 %, złe proporcje, tło z krawędzi, odbicie), obrót, /Rotate w stronie, UserUnit (> 5 m), 1:10,
    JPG 150 dpi, TIFF 2 strony, PNG z alfą, JPG CMYK, TIFF 16 bit, .ai z PDF-em i bez. Wypisuje OK / BŁĄD.
 
-Wynik 28.10 (wersja 0.6.11 + poprawka „cyjanowy pas”): szablony 11/11 jak oczekiwano, wymiar i obrazy 25/25.
+Wynik 28.10 (wersja 0.6.11 + poprawka „cyjanowy pas”): szablony 11/11 jak oczekiwano, wymiar i obrazy 25/25. 29.10: 28/28 (R6 — JPG bez DPI, dokładny wymiar w EXIF i Photoshopie).
 
 ## Bardzo duże pliki (28.10)
 

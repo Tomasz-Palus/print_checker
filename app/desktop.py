@@ -215,8 +215,13 @@ def _browser_mode(url: str) -> None:
     import server
     server.last_seen["t"] = time.time()
     webbrowser.open(url)
+    tick = time.time()
     while time.time() - server.last_seen["t"] < IDLE_EXIT_S:
         time.sleep(5)
+        now = time.time()
+        if now - tick > 60:          # komputer spał (zegar skoczył) — karta dostaje czas, żeby się odezwać
+            server.last_seen["t"] = now
+        tick = now
     print("nikt nie używa programu — koniec")
     _shutdown()
     os._exit(0)

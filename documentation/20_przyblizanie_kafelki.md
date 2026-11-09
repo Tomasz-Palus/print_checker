@@ -108,3 +108,17 @@ Inne:
 
 Zostało (krok 3–4): kafle między wersjami dla spłaszczenia / usunięcia szablonu / spadów, liczenie
 piramidy zaraz po wgraniu.
+
+## Krok 3 — widok poprzedniej wersji (29.10, 0.7.0)
+
+| poprawka | widok | dlaczego |
+|---|---|---|
+| Krzywe | poprzedniej wersji (od 0.6.10) | podgląd i tak rysuje tekst z krzywych |
+| **Wyłącz overprint**, podgląd bez symulacji overprintu | **poprzedniej wersji** (nowe) | Ghostscript (`-dOverprint=/disable`) i MuPDF overprint pomijają — piksele identyczne (sprawdzone: CMYK i RGB, Ghostscript i MuPDF) |
+| Wyłącz overprint, z symulacją | liczony od nowa | widać właśnie tę zmianę |
+| Spłaszczenie | liczony od nowa | użytkownik ogląda z bliska WYNIK spłaszczenia (ząbki na krawędziach, Tomasz 29.09) — stary obraz by je ukrył; spłaszczona strona to jeden obraz CMYK, kafle MuPDF na żądanie |
+| Usunięcie szablonu | liczony od nowa | zmienia się tylko pod liniami, ale Ghostscript liczy wycinek ze stroną w całości (czas rośnie z polem strony) — ponowne liczenie kafli wzdłuż ramki dookoła strony kosztuje prawie tyle co cała piramida |
+| Spady | liczony od nowa | przycięcie przesuwa siatkę kafli o ułamek piksela — kafle trzeba by przeskalować (rozmycie) |
+
+Liczenie w tle zaraz po wgraniu (krok 4) — **nie** (Tomasz 28.10: użytkownicy mają przeważnie słabe
+komputery); kafle tylko na żądanie.

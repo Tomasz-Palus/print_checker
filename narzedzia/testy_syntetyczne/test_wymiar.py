@@ -88,4 +88,16 @@ check("R5 16-bit szary → CMYK: gradient zachowany", im.mode == "CMYK" and k[0]
 # AI
 j = T.upload(f"{D}/AI_zgodny_z_pdf.ai"); check("AI z PDF-em w środku: przyjęty", "_status" not in j, j.get("error", ""))
 j = T.upload(f"{D}/AI_bez_pdf.ai"); check("AI bez PDF-u: czytelna odmowa", j.get("_status") in (400, 415, 422) and "PDF" in (j.get("error") or ""), f"{j.get('_status')} {j.get('error')}")
+# R6: JPG bez DPI → pobranie: wymiar dokładny (JFIF ma tylko liczby całkowite — DPI też w EXIF i Photoshopie)
+import io, numpy as np, pdfutil
+Image.fromarray(np.random.default_rng(6).integers(0, 255, (1200, 600, 3), dtype=np.uint8)).save(f"{D}/R6_bez_dpi.jpg", quality=90)
+j = up("R6_bez_dpi.jpg"); jid = j["job_id"]
+data = T.req(f"/api/jobs/{jid}/download?page=0&w_mm=1015&h_mm=2014", raw=True); im = Image.open(io.BytesIO(data))
+d = pdfutil.raster_dpi(im); h = 1200 / d[1] * 25.4
+check("R6 JPG bez DPI: pobrany ma wymiar dokładny (2014 mm, nie 2000)", abs(h - 2014) < 0.5, f"{h:.2f} mm, JFIF {im.info.get('dpi')}, dokładne {d[1]:.4f}")
+open(f"{D}/R6_pobrany.jpg", "wb").write(data)
+j = up("R6_pobrany.jpg"); p = j["file"]["pages"][0]
+check("R6 ponowne wgranie pobranego: ten sam wymiar", near(p["height_mm"], 2014.0), f"{p['width_mm']} × {p['height_mm']}")
+r = step(j["job_id"], "cmyk"); f = vfile(j["job_id"], r); d2 = pdfutil.raster_dpi(Image.open(f))
+check("R6 → CMYK: wymiar zostaje dokładny", abs(1200 / d2[1] * 25.4 - 2014) < 0.5, f"{1200 / d2[1] * 25.4:.2f} mm")
 print(f"\n{sum(o for _, o in res)}/{len(res)} OK")

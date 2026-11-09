@@ -256,12 +256,8 @@ def inspect(path: str, original_name: str) -> dict:
             with Image.open(path) as im:
                 for i in range(getattr(im, "n_frames", 1)):
                     im.seek(i)
-                    d = im.info.get("dpi")
-                    # TIFF bez znacznika XResolution: Pillow podaje umowne (1, 1) — to brak DPI
-                    if im.format == "TIFF" and 282 not in getattr(im, "tag_v2", {}):
-                        d = None
-                    dpi = (float(d[0]), float(d[1])) if d and d[0] and d[1] else None
-                    frames.append((im.width, im.height, dpi))
+                    # TIFF bez XResolution — brak DPI; JPG — dokładne z EXIF / Photoshopa (pdfutil.raster_dpi)
+                    frames.append((im.width, im.height, _pdfutil.raster_dpi(im)))
         except Exception:
             pass
     doc = open_doc(path)

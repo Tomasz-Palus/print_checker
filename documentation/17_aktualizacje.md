@@ -1457,6 +1457,8 @@ Numery jak w `18_przeglad_kodu.md`.
 
 ## 0.6.13 — start na Macu: okno od razu, przeglądarka awaryjnie, certyfikaty HTTPS (Tomasz 09.11)
 
+Nie wyszła jako osobne wydanie — weszła do 0.7.0 (scalenie niżej).
+
 - Tomasz: na Macu ikona adCheckera skacze w Docku bez końca i żadne okno się nie pojawia. Dziennika
   z Maca nie było (Tomasz nie ma jak testować), więc poprawki zabezpieczają wszystkie podejrzane miejsca
   startu naraz.
@@ -1485,3 +1487,33 @@ Numery jak w `18_przeglad_kodu.md`.
 - **Budowanie na Macu:** GitHub wycofał maszyny `macos-14` („The configuration 'macos-14-arm64-us-default'
   is not supported”, zadanie przerwane po 1 s). `build.yml`: `runs-on: macos-15`. Ghostscript dalej
   budowany dla macOS 11+ (`MACOSX_DEPLOYMENT_TARGET`), program wymaga macOS 14+ (pikepdf) — bez zmian.
+
+## 0.7.0 — domknięte stare punkty, szybsze wgrywanie ogromnych plików, dokładny wymiar JPG (29.10)
+
+- Przegląd otwartych punktów z przeglądów kodu (doc 19, koniec): pięć było już zrobionych, dwa
+  poprawione teraz:
+  - **cofnięcie poprawki** usuwa też pobrane pliki tej wersji i jej wyniki oceny jakości (zostawały
+    na dysku i w pamięci do końca pracy z plikiem);
+  - **tryb przeglądarki** (bez okna programu) nie wyłącza się po uśpieniu laptopa — po przebudzeniu
+    karta ma czas, żeby dać znać, że żyje.
+- Spłaszczanie bez limitu megapikseli — zostaje tak (Tomasz 29.10: „nie dawajmy limitu”).
+- Przybliżanie: po „Wyłącz overprint” podgląd bez symulacji overprintu bierze gotowe kafelki poprzedniej
+  wersji (piksele identyczne) — nic nie liczy się od nowa. Pozostałe poprawki: dlaczego nie — doc 20, krok 3.
+- **Wgrywanie ogromnych plików wektorowych**: podpowiedź produktu szukała ramek szablonu w całej treści
+  i wgranie na nią czekało (800 000 kształtów: 229 s). Teraz (`server.content_hints`,
+  `frames.shapes(only_template, budget_s)`): punkty kształtów przeliczane tylko dla kolorów wytycznych
+  (kolor z chwili malowania — pliki ustawiają go czasem po zbudowaniu ścieżki, Test_edge_1strona),
+  najwyżej 15 s (`HINTS_BUDGET_S`) — co znajdzie, to podpowie. Wgranie D3: 229 s → 22 s. Podpowiedzi na
+  38 plikach identyczne jak przed zmianą. Pełne wykrywanie szablonu (rozdział „Szablon”) bez limitu.
+- **JPG bez DPI — dokładny wymiar** (ograniczenie z 0.6.8: JFIF zapisuje DPI jako liczbę całkowitą, wydruk
+  wychodził 0,3–1,5 % mniejszy; Tomasz 29.10: „popraw to”). Przy pobraniu obok JFIF (najlepsza liczba
+  całkowita) dokładna wartość w **EXIF** (ułamek) i w zasobie rozdzielczości **Photoshopa** (APP13, 16.16 —
+  czytają go programy Adobe i wiele RIP-ów; ImageMagick czyta EXIF). Piksele nietknięte
+  (`pdfutil.jpeg_dpi`). Program sam też czyta dokładną wartość (`pdfutil.raster_dpi` — gdy zgadza się
+  z JFIF co do zaokrąglenia; sprzeczne nagłówki, np. EXIF 72 z aparatu: JFIF jak dotąd) — przy ponownym
+  wgraniu, zamianie na CMYK i obrocie wymiar zostaje dokładny. Przykład: 600 × 1200 px na 2014 mm —
+  dawniej 2000 mm, teraz 2014,00. Testy `test_wymiar.py` 28/28 (nowe R6).
+- **Scalenie z 0.6.13 (Tomasz 09.11):** gałąź 0.7.0 (`claude/elegant-hawking-m1tn6i`, PR #5) powstała przed
+  0.6.13 i czekała niescalona. Wydanie 0.7.0 = zmiany z PR #5 + start na Macu (0.6.13) + `macos-15`.
+  Jedyny konflikt: `desktop.py` — poprawka „tryb przeglądarki po uśpieniu” (skok zegara > 60 s) przeniesiona
+  do nowej funkcji `_browser_mode`, z której korzysta i brak okna, i strażnik okna.

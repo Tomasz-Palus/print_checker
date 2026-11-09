@@ -872,7 +872,8 @@ def _raster_cmyk(src: str, dst: str, profile: str) -> dict:
     im.seek(0)
     info = dict(im.info)
     import pdfutil
-    info["_nodpi"] = pdfutil.raster_dpi(im) is None     # TIFF bez DPI: nie wpisywać umownego 1 dpi
+    info["_dpi"] = pdfutil.raster_dpi(im)                # dokładne (JPG: także z EXIF / Photoshopa)
+    info["_nodpi"] = info["_dpi"] is None                # TIFF bez DPI: nie wpisywać umownego 1 dpi
     if im.mode == "CMYK":
         raise ValueError("Obraz jest już w CMYK-u.")
     im = _gray8(im)
@@ -897,12 +898,20 @@ def _raster_cmyk(src: str, dst: str, profile: str) -> dict:
                                      renderingIntent=ImageCms.Intent.RELATIVE_COLORIMETRIC,
                                      flags=ImageCms.Flags.BLACKPOINTCOMPENSATION)
     kw = {"icc_profile": fog} if profile != PROFILE_NONE else {}
-    if info.get("dpi") and not info.get("_nodpi"):
-        kw["dpi"] = info["dpi"]
+    exact = None if info.get("_nodpi") else info.get("_dpi")
+    if exact:
+        kw["dpi"] = exact
     ext = os.path.splitext(src)[1].lower()
     if ext in (".jpg", ".jpeg"):
         out = os.path.splitext(dst)[0] + ".jpg"
         cmyk.save(out, "JPEG", quality=95, subsampling=0, **kw)
+        if exact and abs(exact[0] - exact[1]) < 1e-6:
+            # Pillow zapisuje DPI tylko w JFIF (liczba całkowita) — dokładna wartość do EXIF i Photoshopa,
+            # żeby 150,4 dpi nie wyszło po zamianie na CMYK o 0,3 % mniejsze (29.10)
+            with open(out, "rb") as fh:
+                data = fh.read()
+            with open(out, "wb") as fh:
+                fh.write(pdfutil.jpeg_dpi(data, exact[0]))
     else:
         out = os.path.splitext(dst)[0] + ".tif"
         cmyk.save(out, "TIFF", compression="tiff_lzw", **kw)

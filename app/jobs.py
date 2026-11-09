@@ -19,6 +19,7 @@ import threading
 import time
 import uuid
 
+import detailmap
 import pdfutil
 import render
 import views
@@ -211,7 +212,11 @@ class Job:
                 self.images.pop(v.id, None)
                 for k in [k for k in self.ink if k[0] == v.id]:
                     self.ink.pop(k, None)
-                for p in [v.path, *glob.glob(os.path.splitext(v.path)[0] + "_p*_krzywe.pdf")]:
+                # wyniki jakości tej wersji i jej pobrane pliki (przegląd kodu, doc 18 D) — zajmowały pamięć
+                # i dysk do końca pracy z plikiem
+                detailmap.forget(f"{self.id}#{v.id}")
+                for p in [v.path, *glob.glob(os.path.splitext(v.path)[0] + "_p*_krzywe.pdf"),
+                          *glob.glob(os.path.join(self.dir, f"pobierz_{v.id}_p*"))]:
                     try:
                         os.remove(p)
                     except OSError:
@@ -245,12 +250,17 @@ def _rotated_file(base: str, total: int, jdir: str) -> str:
         kw = {}
         if info.get("icc_profile"):
             kw["icc_profile"] = info["icc_profile"]
-        d = info.get("dpi")
+        d = pdfutil.raster_dpi(im) if (im.format or "") == "JPEG" else info.get("dpi")   # JPG: dokładne
         if d:
             kw["dpi"] = (d[1], d[0]) if total in (90, 270) else d
         fmt = im.format or ("JPEG" if ext in (".jpg", ".jpeg") else "PNG")
         if fmt == "JPEG":
             r.save(out, "JPEG", quality=95, subsampling=0, **kw)
+            if d and abs(d[0] - d[1]) < 1e-6:          # JFIF ma tylko liczby całkowite — dokładne do EXIF / Photoshopa
+                with open(out, "rb") as fh:
+                    data = fh.read()
+                with open(out, "wb") as fh:
+                    fh.write(pdfutil.jpeg_dpi(data, d[0]))
         elif fmt == "TIFF":
             r.save(out, "TIFF", compression="tiff_lzw", **kw)
         else:

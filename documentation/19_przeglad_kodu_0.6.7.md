@@ -292,3 +292,19 @@ i TIFF str. 2). Czas pełnego przepływu bez zmian (−2,6 % łącznie).
    tylko `main` → sekret `ADCHECKER_SIGN_KEY` = klucz prywatny.
 3. Usuń stary sekret `ADCHECKER_SIGN_KEY` z poziomu repozytorium, jeśli jest.
 4. Podbij wersję i wypchnij. Ochrona działa od aktualizacji PO wersji z kluczem.
+
+## Stan otwartych punktów — 29.10.2026 (po 0.6.12)
+
+Sprawdzone w kodzie punkty „D” z doc 18, oznaczone wyżej jako otwarte:
+
+| punkt | stan |
+|---|---|
+| propozycje produktu dla złej strony | zrobione wcześniej — serwer podaje `page`, `product.refreshSuggestions` odrzuca spóźnioną odpowiedź |
+| „Zapisano: …” na inny plik | zrobione wcześniej — `quality.js`, tylko ten sam plik, wersja i strona |
+| skrypt podmiany na Macu | zrobione wcześniej — `shlex.quote` (`updater.py`) |
+| przycisk aktualizacji pokazuje nowszą wersję niż instaluje | zrobione wcześniej — w trakcie pobierania / gotowa pokazuje `ver` pobieranej |
+| dziennik błędów w `work/` | zrobione wcześniej — `paths.LOG` w katalogu użytkownika |
+| cofnięcie nie usuwa „pobierz_…” ani wyników jakości | **zrobione 29.10** — `jobs.undo`: `pobierz_<wersja>_p*` i `detailmap.forget` |
+| tryb przeglądarki kończy się po uśpieniu laptopa | **zrobione 29.10** — `desktop.py`: skok zegara > 60 s = komputer spał, odliczanie od nowa |
+| sufit 400 Mpx przy spłaszczaniu (D tutaj) | nie ma go od 27.10 (Tomasz: „zawsze minimum 120 ppi”), potwierdzone 29.10: „nie dawajmy limitu” |
+| JPG bez DPI: wymiar 0,3–1,5 % mniejszy (JFIF — liczby całkowite) | **zrobione 29.10** — dokładne DPI także w EXIF i zasobie Photoshopa (`pdfutil.jpeg_dpi`) |

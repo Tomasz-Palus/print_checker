@@ -137,7 +137,7 @@ Windowsa i Maca sprawdzają self-test na GitHubie i Tomasz.
 - **Nazwa repozytorium:** zostało `print_checker`. `version.REPO` wskazuje
   `Tomasz-Palus/print_checker`. Po ewentualnej zmianie nazwy GitHub przekierowuje stary adres.
 
-## Start na Macu (0.6.13, 09.11)
+## Start na Macu (0.6.13, wydane w 0.7.0, 09.11)
 
 - Zgłoszenie: na Macu ikona skacze w Docku, okno się nie pojawia.
 - Start przebudowany: okno z ekranem „Uruchamiam…” od razu, reszta (biblioteki, serwer, lista produktów)
