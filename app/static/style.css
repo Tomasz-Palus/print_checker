@@ -20,6 +20,7 @@ a { color: var(--accent); }
 .brand { font-weight: 650; }
 .brand small { color: var(--muted); font-weight: 400; margin-left: 6px; }
 .ver { color: var(--muted); font-size: 11px; border: 1px solid var(--line, #ddd); border-radius: 9px; padding: 1px 7px; }
+.author { color: var(--muted); font-size: 11px; white-space: nowrap; }   /* podpis autora (0.7.1) */
 .top .spacer { flex: 1; }
 .upd { font-size: 12px; font-weight: 600; color: #fff; background: var(--ok); border-radius: 9px; padding: 2px 9px; text-decoration: none; }
 .upd.wait { background: #eef3ff; color: var(--accent-2); cursor: default; }

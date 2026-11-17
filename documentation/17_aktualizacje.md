@@ -1517,3 +1517,9 @@ Nie wyszła jako osobne wydanie — weszła do 0.7.0 (scalenie niżej).
   0.6.13 i czekała niescalona. Wydanie 0.7.0 = zmiany z PR #5 + start na Macu (0.6.13) + `macos-15`.
   Jedyny konflikt: `desktop.py` — poprawka „tryb przeglądarki po uśpieniu” (skok zegara > 60 s) przeniesiona
   do nowej funkcji `_browser_mode`, z której korzysta i brak okna, i strażnik okna.
+
+## 0.7.1 — podpis autora w nagłówku (Tomasz 17.11)
+
+- Tomasz: „chciałbym dodać swój podpis created by Tomasz Palus”. W nagłówku programu, za znaczkiem wersji,
+  małym szarym tekstem: **created by Tomasz Palus** (`index.html`, klasa `.author` w `style.css`).
+- Nowy numer (0.7.1), żeby podpis trafił do instalatorów — 0.7.0 była już wydana.
